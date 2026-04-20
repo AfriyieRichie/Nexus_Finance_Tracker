@@ -1,7 +1,6 @@
 import { Request, Response } from 'express';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { sendSuccess, sendCreated } from '../../utils/response';
-import { ValidationError } from '../../utils/errors';
 import {
   registerSchema,
   loginSchema,
@@ -9,7 +8,6 @@ import {
   changePasswordSchema,
 } from './auth.schemas';
 import * as authService from './auth.service';
-import type { AuthenticatedRequest } from '../../middleware/auth.middleware';
 
 export const register = asyncHandler(async (req: Request, res: Response) => {
   const input = registerSchema.parse(req.body);
@@ -40,20 +38,17 @@ export const logout = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const logoutAll = asyncHandler(async (req: Request, res: Response) => {
-  const user = (req as AuthenticatedRequest).user;
-  await authService.logoutAll(user.sub);
+  await authService.logoutAll(req.user!.sub);
   return sendSuccess(res, null, 'All sessions terminated');
 });
 
 export const getMe = asyncHandler(async (req: Request, res: Response) => {
-  const user = (req as AuthenticatedRequest).user;
-  const profile = await authService.getMe(user.sub);
+  const profile = await authService.getMe(req.user!.sub);
   return sendSuccess(res, profile);
 });
 
 export const changePassword = asyncHandler(async (req: Request, res: Response) => {
-  const user = (req as AuthenticatedRequest).user;
   const input = changePasswordSchema.parse(req.body);
-  await authService.changePassword(user.sub, input);
+  await authService.changePassword(req.user!.sub, input);
   return sendSuccess(res, null, 'Password changed successfully. Please log in again.');
 });

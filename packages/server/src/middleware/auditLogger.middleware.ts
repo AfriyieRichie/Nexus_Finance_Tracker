@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../config/database';
-import { AuthenticatedRequest } from './auth.middleware';
 import { logger } from '../utils/logger';
 
 type MutatingMethod = 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -22,7 +22,7 @@ export function auditLogger(req: Request, res: Response, next: NextFunction): vo
 
   res.json = function (body: unknown) {
     if (res.statusCode >= 200 && res.statusCode < 300) {
-      const user = (req as Partial<AuthenticatedRequest>).user;
+      const user = req.user;
       const organisationId =
         req.params.organisationId ?? (req.body as Record<string, unknown>)?.organisationId as string | undefined;
 
@@ -34,7 +34,7 @@ export function auditLogger(req: Request, res: Response, next: NextFunction): vo
             action: `${req.method}:${req.path}`,
             entityType: extractEntityType(req.path),
             entityId: extractEntityId(req, body),
-            newValue: sanitiseForAudit(body),
+            newValue: sanitiseForAudit(body) as Prisma.InputJsonValue,
             ipAddress: req.ip ?? null,
             userAgent: req.headers['user-agent'] ?? null,
           },

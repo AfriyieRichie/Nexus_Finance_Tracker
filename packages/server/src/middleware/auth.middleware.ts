@@ -11,9 +11,17 @@ export interface JwtPayload {
   exp: number;
 }
 
-export interface AuthenticatedRequest extends Request {
-  user: JwtPayload;
+// Augment Express globally so controllers typed as RequestHandler can access req.user
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace Express {
+    interface Request {
+      user?: JwtPayload;
+    }
+  }
 }
+
+export type AuthenticatedRequest = Request;
 
 export function requireAuth(req: Request, _res: Response, next: NextFunction): void {
   const authHeader = req.headers.authorization;

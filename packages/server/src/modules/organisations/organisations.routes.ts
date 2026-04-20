@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { UserRole } from '@prisma/client';
 import { requireAuth } from '../../middleware/auth.middleware';
-import { requireRole, requireSuperAdmin } from '../../middleware/rbac.middleware';
+import { requireRole } from '../../middleware/rbac.middleware';
 import * as orgController from './organisations.controller';
 
 export const organisationsRouter = Router();

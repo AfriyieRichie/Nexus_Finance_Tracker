@@ -8,7 +8,8 @@ import {
   UnauthorizedError,
   NotFoundError,
 } from '../../utils/errors';
-import type { RegisterInput, LoginInput, ChangePasswordInput, TokenPair } from './auth.types';
+import type { RegisterInput, LoginInput, ChangePasswordInput } from './auth.schemas';
+import type { TokenPair } from './auth.types';
 import type { JwtPayload } from '../../middleware/auth.middleware';
 
 const BCRYPT_ROUNDS = 12;
@@ -32,7 +33,7 @@ async function generateTokenPair(
   };
 
   const accessToken = jwt.sign(payload, config.JWT_ACCESS_SECRET, {
-    expiresIn: config.JWT_ACCESS_EXPIRES_IN,
+    expiresIn: ACCESS_TOKEN_TTL_SECONDS,
   });
 
   const rawRefreshToken = crypto.randomBytes(64).toString('hex');

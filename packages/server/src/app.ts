@@ -11,6 +11,8 @@ import { auditLogger } from './middleware/auditLogger.middleware';
 // Route imports — added as each module is built
 import { authRouter } from './modules/auth/auth.routes';
 import { organisationsRouter } from './modules/organisations/organisations.routes';
+import { coaRouter } from './modules/chart-of-accounts/coa.routes';
+import { periodsRouter } from './modules/accounting-periods/periods.routes';
 
 const app = express();
 
@@ -63,6 +65,8 @@ app.get('/health', (_req, res) => {
 // ─── API Routes ───────────────────────────────────────────────────────────
 app.use('/api/v1/auth', authRouter);
 app.use('/api/v1/organisations', organisationsRouter);
+app.use('/api/v1/organisations/:organisationId/accounts', coaRouter);
+app.use('/api/v1/organisations/:organisationId/periods', periodsRouter);
 
 // ─── 404 & Error Handling ─────────────────────────────────────────────────
 app.use(notFoundMiddleware);

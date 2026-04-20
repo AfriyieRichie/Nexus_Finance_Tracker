@@ -1,0 +1,145 @@
+import { AccountClass, AccountType } from '@prisma/client';
+import type { CoaTemplate } from '../coa.types';
+
+export const servicesTemplate: CoaTemplate = {
+  name: 'Professional Services Chart of Accounts',
+  description: 'Standard IFRS-compliant chart of accounts for professional & consulting services firms',
+  industry: 'services',
+  accounts: [
+    // ── ASSETS ──────────────────────────────────────────────────────────────
+    { code: '100000', name: 'ASSETS', class: AccountClass.ASSET, type: AccountType.OTHER, parentCode: null, level: 1, isControlAccount: true },
+
+    { code: '110000', name: 'Current Assets', class: AccountClass.ASSET, type: AccountType.OTHER, parentCode: '100000', level: 2, isControlAccount: true },
+    { code: '111000', name: 'Cash and Cash Equivalents', class: AccountClass.ASSET, type: AccountType.OTHER, parentCode: '110000', level: 3, isControlAccount: true },
+    { code: '111100', name: 'Petty Cash', class: AccountClass.ASSET, type: AccountType.CASH, parentCode: '111000', level: 4 },
+    { code: '111200', name: 'Operating Bank Account', class: AccountClass.ASSET, type: AccountType.BANK, parentCode: '111000', level: 4, isBankAccount: true },
+    { code: '111300', name: 'Client Escrow Account', class: AccountClass.ASSET, type: AccountType.BANK, parentCode: '111000', level: 4, isBankAccount: true },
+    { code: '112000', name: 'Trade Receivables', class: AccountClass.ASSET, type: AccountType.RECEIVABLE, parentCode: '110000', level: 3, isControlAccount: true },
+    { code: '112100', name: 'Accounts Receivable', class: AccountClass.ASSET, type: AccountType.RECEIVABLE, parentCode: '112000', level: 4 },
+    { code: '112200', name: 'Allowance for Doubtful Debts', class: AccountClass.ASSET, type: AccountType.RECEIVABLE, parentCode: '112000', level: 4, description: 'IFRS 9 ECL provision' },
+    { code: '112300', name: 'Unbilled Revenue (WIP)', class: AccountClass.ASSET, type: AccountType.RECEIVABLE, parentCode: '112000', level: 4, description: 'IFRS 15 contract asset — work performed but not yet invoiced' },
+    { code: '113000', name: 'Prepayments & Other Current Assets', class: AccountClass.ASSET, type: AccountType.OTHER, parentCode: '110000', level: 3 },
+    { code: '113100', name: 'Prepaid Expenses', class: AccountClass.ASSET, type: AccountType.OTHER, parentCode: '113000', level: 4 },
+    { code: '113200', name: 'Input VAT Recoverable', class: AccountClass.ASSET, type: AccountType.TAX_RECEIVABLE, parentCode: '113000', level: 4 },
+    { code: '113300', name: 'Employee Advances', class: AccountClass.ASSET, type: AccountType.OTHER, parentCode: '113000', level: 4 },
+
+    { code: '120000', name: 'Non-Current Assets', class: AccountClass.ASSET, type: AccountType.OTHER, parentCode: '100000', level: 2, isControlAccount: true },
+    { code: '121000', name: 'Property, Plant & Equipment', class: AccountClass.ASSET, type: AccountType.FIXED_ASSET, parentCode: '120000', level: 3, isControlAccount: true },
+    { code: '121100', name: 'Office Furniture — Cost', class: AccountClass.ASSET, type: AccountType.FIXED_ASSET, parentCode: '121000', level: 4 },
+    { code: '121110', name: 'Office Furniture — Accum. Depreciation', class: AccountClass.ASSET, type: AccountType.FIXED_ASSET, parentCode: '121100', level: 5 },
+    { code: '121200', name: 'Computer Equipment — Cost', class: AccountClass.ASSET, type: AccountType.FIXED_ASSET, parentCode: '121000', level: 4 },
+    { code: '121210', name: 'Computer Equipment — Accum. Depreciation', class: AccountClass.ASSET, type: AccountType.FIXED_ASSET, parentCode: '121200', level: 5 },
+    { code: '121300', name: 'Motor Vehicles — Cost', class: AccountClass.ASSET, type: AccountType.FIXED_ASSET, parentCode: '121000', level: 4 },
+    { code: '121310', name: 'Motor Vehicles — Accum. Depreciation', class: AccountClass.ASSET, type: AccountType.FIXED_ASSET, parentCode: '121300', level: 5 },
+    { code: '122000', name: 'Right-of-Use Assets (IFRS 16)', class: AccountClass.ASSET, type: AccountType.RIGHT_OF_USE_ASSET, parentCode: '120000', level: 3 },
+    { code: '122100', name: 'ROU Asset — Office Leases', class: AccountClass.ASSET, type: AccountType.RIGHT_OF_USE_ASSET, parentCode: '122000', level: 4 },
+    { code: '123000', name: 'Intangible Assets', class: AccountClass.ASSET, type: AccountType.INTANGIBLE, parentCode: '120000', level: 3 },
+    { code: '123100', name: 'Software Licences — Cost', class: AccountClass.ASSET, type: AccountType.INTANGIBLE, parentCode: '123000', level: 4 },
+    { code: '123110', name: 'Software Licences — Accum. Amortisation', class: AccountClass.ASSET, type: AccountType.INTANGIBLE, parentCode: '123100', level: 5 },
+    { code: '123200', name: 'Goodwill', class: AccountClass.ASSET, type: AccountType.INTANGIBLE, parentCode: '123000', level: 4, description: 'IFRS 3 — tested for impairment annually' },
+
+    // ── LIABILITIES ──────────────────────────────────────────────────────────
+    { code: '200000', name: 'LIABILITIES', class: AccountClass.LIABILITY, type: AccountType.OTHER, parentCode: null, level: 1, isControlAccount: true },
+
+    { code: '210000', name: 'Current Liabilities', class: AccountClass.LIABILITY, type: AccountType.OTHER, parentCode: '200000', level: 2, isControlAccount: true },
+    { code: '211000', name: 'Trade Payables', class: AccountClass.LIABILITY, type: AccountType.PAYABLE, parentCode: '210000', level: 3, isControlAccount: true },
+    { code: '211100', name: 'Accounts Payable — Suppliers', class: AccountClass.LIABILITY, type: AccountType.PAYABLE, parentCode: '211000', level: 4 },
+    { code: '212000', name: 'Accrued Liabilities', class: AccountClass.LIABILITY, type: AccountType.OTHER, parentCode: '210000', level: 3 },
+    { code: '212100', name: 'Accrued Salaries & Bonuses', class: AccountClass.LIABILITY, type: AccountType.OTHER, parentCode: '212000', level: 4 },
+    { code: '212200', name: 'Accrued Professional Fees', class: AccountClass.LIABILITY, type: AccountType.OTHER, parentCode: '212000', level: 4 },
+    { code: '212300', name: 'Deferred Revenue (Contract Liabilities)', class: AccountClass.LIABILITY, type: AccountType.OTHER, parentCode: '212000', level: 4, description: 'IFRS 15 — cash received before performance obligation satisfied' },
+    { code: '213000', name: 'Tax Liabilities', class: AccountClass.LIABILITY, type: AccountType.TAX_PAYABLE, parentCode: '210000', level: 3 },
+    { code: '213100', name: 'VAT Payable', class: AccountClass.LIABILITY, type: AccountType.TAX_PAYABLE, parentCode: '213000', level: 4 },
+    { code: '213200', name: 'Corporate Tax Payable', class: AccountClass.LIABILITY, type: AccountType.TAX_PAYABLE, parentCode: '213000', level: 4 },
+    { code: '213300', name: 'PAYE Payable', class: AccountClass.LIABILITY, type: AccountType.TAX_PAYABLE, parentCode: '213000', level: 4 },
+    { code: '213400', name: 'Pension Contributions Payable', class: AccountClass.LIABILITY, type: AccountType.TAX_PAYABLE, parentCode: '213000', level: 4 },
+    { code: '214000', name: 'Lease Liabilities — Current (IFRS 16)', class: AccountClass.LIABILITY, type: AccountType.OTHER, parentCode: '210000', level: 3 },
+
+    { code: '220000', name: 'Non-Current Liabilities', class: AccountClass.LIABILITY, type: AccountType.OTHER, parentCode: '200000', level: 2, isControlAccount: true },
+    { code: '221000', name: 'Long-Term Borrowings', class: AccountClass.LIABILITY, type: AccountType.OTHER, parentCode: '220000', level: 3 },
+    { code: '221100', name: 'Bank Loan', class: AccountClass.LIABILITY, type: AccountType.OTHER, parentCode: '221000', level: 4 },
+    { code: '222000', name: 'Lease Liabilities — Non-Current (IFRS 16)', class: AccountClass.LIABILITY, type: AccountType.OTHER, parentCode: '220000', level: 3 },
+    { code: '223000', name: 'Deferred Tax Liability', class: AccountClass.LIABILITY, type: AccountType.TAX_PAYABLE, parentCode: '220000', level: 3 },
+    { code: '224000', name: 'Employee Benefit Obligations (IAS 19)', class: AccountClass.LIABILITY, type: AccountType.OTHER, parentCode: '220000', level: 3 },
+
+    // ── EQUITY ───────────────────────────────────────────────────────────────
+    { code: '300000', name: 'EQUITY', class: AccountClass.EQUITY, type: AccountType.EQUITY_ACCOUNT, parentCode: null, level: 1, isControlAccount: true },
+    { code: '310000', name: 'Share Capital', class: AccountClass.EQUITY, type: AccountType.EQUITY_ACCOUNT, parentCode: '300000', level: 2 },
+    { code: '310100', name: 'Ordinary Share Capital', class: AccountClass.EQUITY, type: AccountType.EQUITY_ACCOUNT, parentCode: '310000', level: 3 },
+    { code: '310200', name: 'Share Premium', class: AccountClass.EQUITY, type: AccountType.EQUITY_ACCOUNT, parentCode: '310000', level: 3 },
+    { code: '320000', name: 'Retained Earnings', class: AccountClass.EQUITY, type: AccountType.EQUITY_ACCOUNT, parentCode: '300000', level: 2 },
+    { code: '320100', name: 'Retained Earnings — Prior Years', class: AccountClass.EQUITY, type: AccountType.EQUITY_ACCOUNT, parentCode: '320000', level: 3 },
+    { code: '320200', name: 'Profit / Loss — Current Year', class: AccountClass.EQUITY, type: AccountType.EQUITY_ACCOUNT, parentCode: '320000', level: 3 },
+    { code: '330000', name: 'Other Reserves', class: AccountClass.EQUITY, type: AccountType.EQUITY_ACCOUNT, parentCode: '300000', level: 2 },
+    { code: '330100', name: 'Foreign Currency Translation Reserve', class: AccountClass.EQUITY, type: AccountType.EQUITY_ACCOUNT, parentCode: '330000', level: 3 },
+
+    // ── REVENUE ──────────────────────────────────────────────────────────────
+    { code: '400000', name: 'REVENUE', class: AccountClass.REVENUE, type: AccountType.REVENUE_ACCOUNT, parentCode: null, level: 1, isControlAccount: true },
+    { code: '410000', name: 'Service Revenue', class: AccountClass.REVENUE, type: AccountType.REVENUE_ACCOUNT, parentCode: '400000', level: 2 },
+    { code: '410100', name: 'Consulting Fees', class: AccountClass.REVENUE, type: AccountType.REVENUE_ACCOUNT, parentCode: '410000', level: 3 },
+    { code: '410200', name: 'Professional Services Fees', class: AccountClass.REVENUE, type: AccountType.REVENUE_ACCOUNT, parentCode: '410000', level: 3 },
+    { code: '410300', name: 'Project Management Fees', class: AccountClass.REVENUE, type: AccountType.REVENUE_ACCOUNT, parentCode: '410000', level: 3 },
+    { code: '410400', name: 'Training & Workshop Fees', class: AccountClass.REVENUE, type: AccountType.REVENUE_ACCOUNT, parentCode: '410000', level: 3 },
+    { code: '410500', name: 'Retainer Fees', class: AccountClass.REVENUE, type: AccountType.REVENUE_ACCOUNT, parentCode: '410000', level: 3 },
+    { code: '420000', name: 'Other Income', class: AccountClass.REVENUE, type: AccountType.REVENUE_ACCOUNT, parentCode: '400000', level: 2 },
+    { code: '420100', name: 'Interest Income', class: AccountClass.REVENUE, type: AccountType.REVENUE_ACCOUNT, parentCode: '420000', level: 3 },
+    { code: '420200', name: 'Gain on Disposal of Assets', class: AccountClass.REVENUE, type: AccountType.REVENUE_ACCOUNT, parentCode: '420000', level: 3 },
+    { code: '420300', name: 'Reimbursable Expenses Recovered', class: AccountClass.REVENUE, type: AccountType.REVENUE_ACCOUNT, parentCode: '420000', level: 3 },
+
+    // ── COST OF SALES (Direct Project Costs) ─────────────────────────────────
+    { code: '500000', name: 'DIRECT COSTS', class: AccountClass.EXPENSE, type: AccountType.COST_OF_SALES, parentCode: null, level: 1, isControlAccount: true },
+    { code: '510000', name: 'Direct Labour', class: AccountClass.EXPENSE, type: AccountType.COST_OF_SALES, parentCode: '500000', level: 2 },
+    { code: '510100', name: 'Billable Staff Costs', class: AccountClass.EXPENSE, type: AccountType.COST_OF_SALES, parentCode: '510000', level: 3 },
+    { code: '510200', name: 'Sub-Contractor Fees', class: AccountClass.EXPENSE, type: AccountType.COST_OF_SALES, parentCode: '510000', level: 3 },
+    { code: '520000', name: 'Direct Project Expenses', class: AccountClass.EXPENSE, type: AccountType.COST_OF_SALES, parentCode: '500000', level: 2 },
+    { code: '520100', name: 'Travel & Accommodation (Billable)', class: AccountClass.EXPENSE, type: AccountType.COST_OF_SALES, parentCode: '520000', level: 3 },
+    { code: '520200', name: 'Project Materials & Supplies', class: AccountClass.EXPENSE, type: AccountType.COST_OF_SALES, parentCode: '520000', level: 3 },
+    { code: '520300', name: 'Software & Tools (Project Specific)', class: AccountClass.EXPENSE, type: AccountType.COST_OF_SALES, parentCode: '520000', level: 3 },
+
+    // ── OPERATING EXPENSES ───────────────────────────────────────────────────
+    { code: '600000', name: 'OPERATING EXPENSES', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: null, level: 1, isControlAccount: true },
+
+    { code: '610000', name: 'Personnel Costs', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '600000', level: 2 },
+    { code: '610100', name: 'Salaries — Management', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '610000', level: 3 },
+    { code: '610200', name: 'Salaries — Support Staff', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '610000', level: 3 },
+    { code: '610300', name: 'Bonuses & Incentives', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '610000', level: 3 },
+    { code: '610400', name: 'Employer Pension Contributions (IAS 19)', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '610000', level: 3 },
+    { code: '610500', name: 'Recruitment Costs', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '610000', level: 3 },
+    { code: '610600', name: 'Staff Training', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '610000', level: 3 },
+
+    { code: '620000', name: 'Occupancy & Facilities', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '600000', level: 2 },
+    { code: '620100', name: 'Office Rent', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '620000', level: 3 },
+    { code: '620200', name: 'Utilities', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '620000', level: 3 },
+    { code: '620300', name: 'Cleaning & Maintenance', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '620000', level: 3 },
+
+    { code: '630000', name: 'Business Development', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '600000', level: 2 },
+    { code: '630100', name: 'Marketing & Advertising', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '630000', level: 3 },
+    { code: '630200', name: 'Client Entertainment', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '630000', level: 3 },
+    { code: '630300', name: 'Conference & Events', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '630000', level: 3 },
+
+    { code: '640000', name: 'General & Administrative', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '600000', level: 2 },
+    { code: '640100', name: 'Office Supplies & Stationery', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '640000', level: 3 },
+    { code: '640200', name: 'Telephone & Internet', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '640000', level: 3 },
+    { code: '640300', name: 'Audit & Accounting Fees', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '640000', level: 3 },
+    { code: '640400', name: 'Legal Fees', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '640000', level: 3 },
+    { code: '640500', name: 'Insurance', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '640000', level: 3 },
+    { code: '640600', name: 'Bank Charges', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '640000', level: 3 },
+    { code: '640700', name: 'Software Subscriptions (Non-Billable)', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '640000', level: 3 },
+    { code: '640800', name: 'Travel & Subsistence (Non-Billable)', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '640000', level: 3 },
+
+    { code: '650000', name: 'Depreciation & Amortisation', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '600000', level: 2 },
+    { code: '650100', name: 'Depreciation — Equipment', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '650000', level: 3 },
+    { code: '650200', name: 'Depreciation — Motor Vehicles', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '650000', level: 3 },
+    { code: '650300', name: 'Amortisation — ROU Assets (IFRS 16)', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '650000', level: 3 },
+    { code: '650400', name: 'Amortisation — Intangibles', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '650000', level: 3 },
+
+    { code: '660000', name: 'Finance Costs', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '600000', level: 2 },
+    { code: '660100', name: 'Loan Interest Expense', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '660000', level: 3 },
+    { code: '660200', name: 'Lease Interest — IFRS 16', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '660000', level: 3 },
+    { code: '660300', name: 'Foreign Exchange Loss', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '660000', level: 3 },
+
+    { code: '670000', name: 'Income Tax Expense', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '600000', level: 2 },
+    { code: '670100', name: 'Current Tax Expense', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '670000', level: 3 },
+    { code: '670200', name: 'Deferred Tax Expense', class: AccountClass.EXPENSE, type: AccountType.EXPENSE_ACCOUNT, parentCode: '670000', level: 3 },
+  ],
+};

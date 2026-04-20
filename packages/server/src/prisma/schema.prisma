@@ -355,7 +355,6 @@ model JournalEntry {
   approvalWorkflow ApprovalWorkflow? @relation(fields: [approvalWorkflowId], references: [id])
   lines            JournalLine[]
   ledgerEntries    LedgerEntry[]
-  attachments      Attachment[]
   approvalRequests ApprovalRequest[]
   reversalOf       JournalEntry?     @relation("JournalReversal")
   reversedBy       JournalEntry?     @relation("JournalReversal", fields: [reversedByEntryId], references: [id])
@@ -596,7 +595,6 @@ model Invoice {
   organisation Organisation @relation(fields: [organisationId], references: [id])
   customer     Customer     @relation(fields: [customerId], references: [id])
   lines        InvoiceLine[]
-  attachments  Attachment[]
 
   @@unique([organisationId, invoiceNumber])
   @@index([organisationId, status])
@@ -674,7 +672,6 @@ model SupplierInvoice {
   organisation Organisation     @relation(fields: [organisationId], references: [id])
   supplier     Supplier         @relation(fields: [supplierId], references: [id])
   lines        SupplierInvoiceLine[]
-  attachments  Attachment[]
 
   @@unique([organisationId, invoiceNumber])
   @@index([organisationId, status])
@@ -948,6 +945,8 @@ model ExchangeRate {
 // ATTACHMENTS
 // ============================================================
 
+// Polymorphic attachment — entityType discriminates the target (e.g. "JOURNAL_ENTRY", "INVOICE")
+// No FK constraint because one entityId cannot reference multiple tables simultaneously.
 model Attachment {
   id          String   @id @default(uuid())
   entityType  String
@@ -958,10 +957,6 @@ model Attachment {
   storagePath String
   uploadedBy  String
   uploadedAt  DateTime @default(now())
-
-  journalEntry    JournalEntry?    @relation(fields: [entityId], references: [id])
-  invoice         Invoice?         @relation(fields: [entityId], references: [id])
-  supplierInvoice SupplierInvoice? @relation(fields: [entityId], references: [id])
 
   @@index([entityType, entityId])
   @@map("attachments")

@@ -95,7 +95,7 @@ export async function listOrganisationUsers(
 export async function inviteUser(
   organisationId: string,
   input: InviteUserInput,
-  invitedById: string,
+  _invitedById: string,
 ) {
   // Check if user already exists in the system
   let user = await prisma.user.findUnique({ where: { email: input.email } });
