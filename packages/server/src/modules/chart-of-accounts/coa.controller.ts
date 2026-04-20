@@ -1,5 +1,5 @@
-import { Response } from 'express';
-import { AuthenticatedRequest } from '../../middleware/auth.middleware';
+import { Request, Response } from 'express';
+import { asyncHandler } from '../../utils/asyncHandler';
 import {
   sendSuccess,
   sendCreated,
@@ -15,59 +15,59 @@ import {
 } from './coa.schemas';
 import * as coaService from './coa.service';
 
-export const createAccount = async (req: AuthenticatedRequest, res: Response) => {
+export const createAccount = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId } = req.params;
   const input = createAccountSchema.parse(req.body);
   const account = await coaService.createAccount(organisationId, input);
-  sendCreated(res, account, 'Account created');
-};
+  return sendCreated(res, account, 'Account created');
+});
 
-export const updateAccount = async (req: AuthenticatedRequest, res: Response) => {
+export const updateAccount = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId, accountId } = req.params;
   const input = updateAccountSchema.parse(req.body);
   const account = await coaService.updateAccount(organisationId, accountId, input);
-  sendSuccess(res, account, 'Account updated');
-};
+  return sendSuccess(res, account, 'Account updated');
+});
 
-export const deleteAccount = async (req: AuthenticatedRequest, res: Response) => {
+export const deleteAccount = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId, accountId } = req.params;
   await coaService.softDeleteAccount(organisationId, accountId);
-  sendNoContent(res);
-};
+  return sendNoContent(res);
+});
 
-export const getAccount = async (req: AuthenticatedRequest, res: Response) => {
+export const getAccount = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId, accountId } = req.params;
   const account = await coaService.getAccount(organisationId, accountId);
-  sendSuccess(res, account);
-};
+  return sendSuccess(res, account);
+});
 
-export const listAccounts = async (req: AuthenticatedRequest, res: Response) => {
+export const listAccounts = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId } = req.params;
   const query = listAccountsSchema.parse(req.query);
   const { accounts, total, page, pageSize } = await coaService.listAccounts(organisationId, query);
-  sendPaginated(res, accounts, buildPagination(total, page, pageSize));
-};
+  return sendPaginated(res, accounts, buildPagination(page, pageSize, total));
+});
 
-export const getAccountHierarchy = async (req: AuthenticatedRequest, res: Response) => {
+export const getAccountHierarchy = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId } = req.params;
   const tree = await coaService.getAccountHierarchy(organisationId);
-  sendSuccess(res, tree);
-};
+  return sendSuccess(res, tree);
+});
 
-export const importTemplate = async (req: AuthenticatedRequest, res: Response) => {
+export const importTemplate = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId } = req.params;
   const input = importTemplateSchema.parse(req.body);
   const result = await coaService.importTemplate(organisationId, input);
-  sendCreated(res, result, `Imported ${result.imported} accounts from template`);
-};
+  return sendCreated(res, result, `Imported ${result.imported} accounts from template`);
+});
 
-export const getAccountBalance = async (req: AuthenticatedRequest, res: Response) => {
+export const getAccountBalance = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId, accountId } = req.params;
   const asOfDate = req.query.asOfDate ? new Date(req.query.asOfDate as string) : undefined;
   const balance = await coaService.getAccountBalance(organisationId, accountId, asOfDate);
-  sendSuccess(res, {
+  return sendSuccess(res, {
     debit: balance.debit.toFixed(4),
     credit: balance.credit.toFixed(4),
     balance: balance.balance.toFixed(4),
   });
-};
+});

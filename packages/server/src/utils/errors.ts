@@ -46,34 +46,26 @@ export class ConflictError extends AppError {
 }
 
 export class UnbalancedEntryError extends AppError {
-  constructor() {
-    super(
-      'Journal entry is unbalanced: total debits must equal total credits',
-      400,
-      'UNBALANCED_ENTRY',
-    );
+  constructor(message = 'Journal entry is unbalanced: total debits must equal total credits') {
+    super(message, 400, 'UNBALANCED_ENTRY');
   }
 }
 
 export class PeriodClosedError extends AppError {
-  constructor() {
-    super('Cannot post to a closed or locked accounting period', 400, 'PERIOD_CLOSED');
+  constructor(message = 'Cannot post to a closed or locked accounting period') {
+    super(message, 400, 'PERIOD_CLOSED');
   }
 }
 
 export class AccountLockedError extends AppError {
-  constructor(accountCode: string) {
-    super(`Account ${accountCode} is locked and cannot receive new entries`, 400, 'ACCOUNT_LOCKED');
+  constructor(message = 'Account is locked and cannot receive new entries') {
+    super(message, 400, 'ACCOUNT_LOCKED');
   }
 }
 
 export class ImmutableEntryError extends AppError {
-  constructor() {
-    super(
-      'Posted journal entries cannot be edited. Create a reversing entry instead.',
-      400,
-      'IMMUTABLE_ENTRY',
-    );
+  constructor(message = 'Posted journal entries cannot be edited. Create a reversing entry instead.') {
+    super(message, 400, 'IMMUTABLE_ENTRY');
   }
 }
 

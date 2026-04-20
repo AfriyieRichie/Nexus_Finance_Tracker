@@ -13,6 +13,8 @@ import { authRouter } from './modules/auth/auth.routes';
 import { organisationsRouter } from './modules/organisations/organisations.routes';
 import { coaRouter } from './modules/chart-of-accounts/coa.routes';
 import { periodsRouter } from './modules/accounting-periods/periods.routes';
+import { journalRouter } from './modules/journals/journal.routes';
+import { ledgerRouter, accountLedgerRouter } from './modules/ledger/ledger.routes';
 
 const app = express();
 
@@ -67,6 +69,9 @@ app.use('/api/v1/auth', authRouter);
 app.use('/api/v1/organisations', organisationsRouter);
 app.use('/api/v1/organisations/:organisationId/accounts', coaRouter);
 app.use('/api/v1/organisations/:organisationId/periods', periodsRouter);
+app.use('/api/v1/organisations/:organisationId/journals', journalRouter);
+app.use('/api/v1/organisations/:organisationId/ledger', ledgerRouter);
+app.use('/api/v1/organisations/:organisationId/accounts/:accountId/ledger', accountLedgerRouter);
 
 // ─── 404 & Error Handling ─────────────────────────────────────────────────
 app.use(notFoundMiddleware);
