@@ -17,6 +17,7 @@ import type {
   ApproveRejectInput,
   ReverseJournalInput,
 } from './journal.schemas';
+import { createJournalApprovalRequest } from '../approvals/approval.service';
 
 // ─── Journal Number Generator ─────────────────────────────────────────────────
 
@@ -342,7 +343,7 @@ export async function listJournalEntries(organisationId: string, query: ListJour
 export async function submitForApproval(
   organisationId: string,
   journalId: string,
-  _submittedBy: string,
+  submittedBy: string,
 ) {
   const entry = await findJournal(organisationId, journalId);
   assertEditable(entry.status);
@@ -362,10 +363,19 @@ export async function submitForApproval(
     org!.baseCurrency,
   );
 
-  return prisma.journalEntry.update({
+  await prisma.journalEntry.update({
     where: { id: journalId },
     data: { status: EntryStatus.PENDING_APPROVAL },
   });
+
+  // Wire into approval workflow if one is configured for this org
+  const { requestId, hasWorkflow } = await createJournalApprovalRequest(
+    organisationId,
+    journalId,
+    submittedBy,
+  );
+
+  return { journalId, status: EntryStatus.PENDING_APPROVAL, approvalRequestId: hasWorkflow ? requestId : null };
 }
 
 export async function approveJournalEntry(
