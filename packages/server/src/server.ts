@@ -6,7 +6,12 @@ import { app } from './app';
 
 async function bootstrap(): Promise<void> {
   await connectDatabase();
-  await connectRedis();
+  try {
+    await connectRedis();
+  } catch (err) {
+    if (config.isProduction) throw err;
+    logger.warn('Redis unavailable — continuing without it (dev mode)', { err });
+  }
 
   const server = app.listen(config.PORT, () => {
     logger.info(`Nexus Accounting Server started`, {
