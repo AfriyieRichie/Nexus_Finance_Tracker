@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle, XCircle, Clock, GitBranch } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, GitBranch, Plus } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
-import { listRequests, getRequest, decide, listWorkflows } from '@/services/approvals.service';
+import { listRequests, getRequest, decide, listWorkflows, createWorkflow } from '@/services/approvals.service';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -10,7 +10,69 @@ import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogClose } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
+
+const ENTITY_TYPES = [
+  'JOURNAL_ENTRY',
+  'PAYMENT',
+  'PURCHASE_ORDER',
+  'SALES_INVOICE',
+  'EXPENSE_CLAIM',
+  'BUDGET',
+  'PAYROLL',
+  'BANK_TRANSFER',
+];
+
+function NewWorkflowDialog({ organisationId, onClose }: { organisationId: string; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [entityType, setEntityType] = useState('');
+
+  const mutation = useMutation({
+    mutationFn: () => createWorkflow(organisationId, { name: name.trim(), description: description.trim() || undefined, entityType }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['approval-workflows'] });
+      onClose();
+    },
+  });
+
+  const canSubmit = name.trim().length > 0 && entityType.length > 0;
+
+  return (
+    <DialogContent className="max-w-md" title="New Workflow" description="Configure a new approval workflow.">
+      <div className="space-y-4">
+        <div className="space-y-1">
+          <label className="text-xs font-medium">Workflow Name *</label>
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Journal Entry Approval" className="h-8 text-xs" />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium">Applies To *</label>
+          <Select value={entityType} onValueChange={setEntityType}>
+            <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select entity type…" /></SelectTrigger>
+            <SelectContent>
+              {ENTITY_TYPES.map((t) => (
+                <SelectItem key={t} value={t} className="text-xs">{t.replace(/_/g, ' ')}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium">Description</label>
+          <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Optional description…" className="h-8 text-xs" />
+        </div>
+        <div className="flex justify-end gap-2 pt-2 border-t">
+          <DialogClose asChild><Button variant="outline" size="sm" onClick={onClose}>Cancel</Button></DialogClose>
+          <Button size="sm" disabled={!canSubmit || mutation.isPending} onClick={() => mutation.mutate()}>
+            {mutation.isPending ? 'Creating…' : 'Create Workflow'}
+          </Button>
+        </div>
+        {mutation.isError && <p className="text-xs text-destructive">{(mutation.error as Error).message}</p>}
+      </div>
+    </DialogContent>
+  );
+}
 
 const STATUS_VARIANT: Record<string, 'success' | 'warning' | 'destructive' | 'secondary' | 'info'> = {
   APPROVED: 'success',
@@ -101,6 +163,7 @@ export function ApprovalsPage() {
   const [tab, setTab] = useState<'requests' | 'workflows'>('requests');
   const [statusFilter, setStatusFilter] = useState('PENDING');
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
+  const [showNewWorkflow, setShowNewWorkflow] = useState(false);
 
   const { data: requestData, isLoading } = useQuery({
     queryKey: ['approvals', activeOrganisationId, statusFilter],
@@ -130,14 +193,21 @@ export function ApprovalsPage() {
         <p className="text-sm text-muted-foreground mt-0.5">Review and act on pending approval requests</p>
       </div>
 
-      <div className="flex gap-1">
-        {tabs.map(({ id, label, icon: Icon }) => (
-          <button key={id} onClick={() => setTab(id)}
-            className={cn('flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-md transition-colors',
-              tab === id ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent')}>
-            <Icon size={14} /> {label}
-          </button>
-        ))}
+      <div className="flex items-center justify-between">
+        <div className="flex gap-1">
+          {tabs.map(({ id, label, icon: Icon }) => (
+            <button key={id} onClick={() => setTab(id)}
+              className={cn('flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-md transition-colors',
+                tab === id ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent')}>
+              <Icon size={14} /> {label}
+            </button>
+          ))}
+        </div>
+        {tab === 'workflows' && (
+          <Button size="sm" onClick={() => setShowNewWorkflow(true)}>
+            <Plus size={14} /> New Workflow
+          </Button>
+        )}
       </div>
 
       {tab === 'requests' && (
@@ -201,9 +271,12 @@ export function ApprovalsPage() {
             {workflowsLoading ? (
               <div className="p-6 space-y-2">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}</div>
             ) : (workflows ?? []).length === 0 ? (
-              <div className="py-16 text-center space-y-2">
-                <p className="text-sm text-muted-foreground">No approval workflows configured.</p>
-                <p className="text-xs text-muted-foreground">Workflows are created via the Admin panel.</p>
+              <div className="py-16 text-center space-y-3">
+                <GitBranch size={28} className="mx-auto text-muted-foreground/40" />
+                <p className="text-sm text-muted-foreground">No approval workflows yet.</p>
+                <Button size="sm" variant="outline" onClick={() => setShowNewWorkflow(true)}>
+                  <Plus size={14} /> Create your first workflow
+                </Button>
               </div>
             ) : (
               <Table>
@@ -237,6 +310,15 @@ export function ApprovalsPage() {
             organisationId={activeOrganisationId}
             requestId={selectedRequestId}
             onClose={() => setSelectedRequestId(null)}
+          />
+        </Dialog>
+      )}
+
+      {showNewWorkflow && activeOrganisationId && (
+        <Dialog open onOpenChange={(open) => { if (!open) setShowNewWorkflow(false); }}>
+          <NewWorkflowDialog
+            organisationId={activeOrganisationId}
+            onClose={() => setShowNewWorkflow(false)}
           />
         </Dialog>
       )}
