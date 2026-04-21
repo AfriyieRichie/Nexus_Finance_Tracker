@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Archive, Plus, TrendingDown, TrendingUp, BarChart3 } from 'lucide-react';
+import { Archive, Plus, BarChart3 } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { listItems, createItem, receiveStock, issueStock, getValuationReport } from '@/services/inventory.service';
 import { listAccounts } from '@/services/accounts.service';

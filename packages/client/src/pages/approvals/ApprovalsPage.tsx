@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle, XCircle, Clock, GitBranch, Plus } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { listRequests, getRequest, decide, listWorkflows, createWorkflow } from '@/services/approvals.service';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
