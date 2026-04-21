@@ -6,7 +6,7 @@ import { listPeriods } from '@/services/periods.service';
 import { getChangesInEquity } from '@/services/reports.service';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
@@ -182,18 +182,11 @@ export function ChangesInEquityPage() {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {/* Period selector */}
-          <Select value={selectedPeriodId} onValueChange={setSelectedPeriodId}>
-            <SelectTrigger className="w-48 h-8 text-sm">
-              <SelectValue placeholder="All periods" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">All periods</SelectItem>
-              {(periods ?? []).map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
+          <Select value={selectedPeriodId} onChange={(e) => setSelectedPeriodId(e.target.value)} className="w-48 h-8 text-sm">
+            <option value="">All periods</option>
+            {(periods ?? []).map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
           </Select>
 
           <Button variant="outline" size="sm" onClick={exportCsv} disabled={!data}>

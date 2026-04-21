@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogClose } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 
 const ENTITY_TYPES = [
@@ -49,13 +49,11 @@ function NewWorkflowDialog({ organisationId, onClose }: { organisationId: string
         </div>
         <div className="space-y-1">
           <label className="text-xs font-medium">Applies To *</label>
-          <Select value={entityType} onValueChange={setEntityType}>
-            <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select entity type…" /></SelectTrigger>
-            <SelectContent>
-              {ENTITY_TYPES.map((t) => (
-                <SelectItem key={t} value={t} className="text-xs">{t.replace(/_/g, ' ')}</SelectItem>
-              ))}
-            </SelectContent>
+          <Select value={entityType} onChange={(e) => setEntityType(e.target.value)} className="h-8 text-xs">
+            <option value="">Select entity type…</option>
+            {ENTITY_TYPES.map((t) => (
+              <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>
+            ))}
           </Select>
         </div>
         <div className="space-y-1">
