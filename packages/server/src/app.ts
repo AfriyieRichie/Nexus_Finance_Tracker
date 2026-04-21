@@ -21,6 +21,10 @@ import { arRouter } from './modules/accounts-receivable/ar.routes';
 import { apRouter } from './modules/accounts-payable/ap.routes';
 import { assetsRouter } from './modules/fixed-assets/assets.routes';
 import { bankRouter } from './modules/bank-reconciliation/bank.routes';
+import { budgetsRouter } from './modules/budgets/budgets.routes';
+import { taxRouter } from './modules/tax/tax.routes';
+import { payrollRouter } from './modules/payroll/payroll.routes';
+import { inventoryRouter } from './modules/inventory/inventory.routes';
 
 const app = express();
 
@@ -84,6 +88,10 @@ app.use('/api/v1/organisations/:organisationId/ar', arRouter);
 app.use('/api/v1/organisations/:organisationId/ap', apRouter);
 app.use('/api/v1/organisations/:organisationId/assets', assetsRouter);
 app.use('/api/v1/organisations/:organisationId/bank', bankRouter);
+app.use('/api/v1/organisations/:organisationId/inventory', inventoryRouter);
+app.use('/api/v1/organisations/:organisationId/budgets', budgetsRouter);
+app.use('/api/v1/organisations/:organisationId/tax', taxRouter);
+app.use('/api/v1/organisations/:organisationId/payroll', payrollRouter);
 
 // ─── 404 & Error Handling ─────────────────────────────────────────────────
 app.use(notFoundMiddleware);

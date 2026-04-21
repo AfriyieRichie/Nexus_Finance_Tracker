@@ -14,6 +14,11 @@ import {
   Users,
   ShoppingCart,
   Package,
+  Landmark,
+  Archive,
+  PiggyBank,
+  Receipt,
+  CheckCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth.store';
@@ -55,6 +60,22 @@ const navGroups: NavGroup[] = [
       { label: 'Accounts Receivable', to: '/ar', icon: <Users size={16} /> },
       { label: 'Accounts Payable', to: '/ap', icon: <ShoppingCart size={16} /> },
       { label: 'Fixed Assets', to: '/assets', icon: <Package size={16} /> },
+      { label: 'Bank Reconciliation', to: '/bank', icon: <Landmark size={16} /> },
+      { label: 'Inventory', to: '/inventory', icon: <Archive size={16} /> },
+    ],
+  },
+  {
+    heading: 'Planning',
+    items: [
+      { label: 'Budgets & Cost Centres', to: '/budgets', icon: <PiggyBank size={16} /> },
+      { label: 'Tax & Currency', to: '/tax', icon: <Receipt size={16} /> },
+      { label: 'Payroll', to: '/payroll', icon: <Users size={16} /> },
+    ],
+  },
+  {
+    heading: 'Workflow',
+    items: [
+      { label: 'Approvals', to: '/approvals', icon: <CheckCircle size={16} /> },
     ],
   },
   {
