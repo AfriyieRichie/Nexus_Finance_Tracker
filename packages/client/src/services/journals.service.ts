@@ -50,3 +50,31 @@ export async function getJournal(organisationId: string, journalId: string) {
   const res = await api.get(`/organisations/${organisationId}/journals/${journalId}`);
   return res.data.data as JournalEntry;
 }
+
+export interface CreateJournalInput {
+  type: string;
+  description: string;
+  entryDate: string;
+  periodId: string;
+  currency: string;
+  exchangeRate: number;
+  reference?: string;
+  lines: Array<{
+    accountId: string;
+    description?: string;
+    debitAmount: number;
+    creditAmount: number;
+    currency?: string;
+    exchangeRate?: number;
+  }>;
+}
+
+export async function createJournal(organisationId: string, data: CreateJournalInput) {
+  const res = await api.post(`/organisations/${organisationId}/journals`, data);
+  return res.data.data as JournalEntry;
+}
+
+export async function submitJournal(organisationId: string, journalId: string) {
+  const res = await api.post(`/organisations/${organisationId}/journals/${journalId}/submit`);
+  return res.data.data;
+}

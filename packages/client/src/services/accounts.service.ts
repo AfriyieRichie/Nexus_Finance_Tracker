@@ -39,3 +39,15 @@ export async function importTemplate(organisationId: string, template: string) {
   });
   return res.data.data;
 }
+
+export async function createAccount(organisationId: string, data: {
+  code: string;
+  name: string;
+  class: string;
+  type: string;
+  parentId?: string;
+  description?: string;
+}) {
+  const res = await api.post(`/organisations/${organisationId}/accounts`, data);
+  return res.data.data;
+}

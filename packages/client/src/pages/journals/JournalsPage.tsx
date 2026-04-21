@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { FileText } from 'lucide-react';
+import { FileText, Plus } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useAuthStore } from '@/stores/auth.store';
 import { listJournals } from '@/services/journals.service';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
@@ -60,6 +62,9 @@ export function JournalsPage() {
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">{data?.total ?? 0} entries</p>
         </div>
+        <Link to="/journals/new">
+          <Button size="sm"><Plus size={14} /> New Entry</Button>
+        </Link>
       </div>
 
       <Card>

@@ -1,12 +1,15 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Search, BookOpen } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Search, BookOpen, Download, CheckCircle } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
-import { listAccounts } from '@/services/accounts.service';
+import { listAccounts, importTemplate } from '@/services/accounts.service';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Select } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogTrigger, DialogClose } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
 
@@ -17,6 +20,80 @@ const CLASS_VARIANT: Record<string, 'info' | 'success' | 'warning' | 'secondary'
   REVENUE: 'success',
   EXPENSE: 'secondary',
 };
+
+const TEMPLATES = [
+  { value: 'technology', label: 'Technology / SaaS' },
+  { value: 'services', label: 'Professional Services' },
+  { value: 'retail', label: 'Retail' },
+  { value: 'agriculture', label: 'Agriculture' },
+  { value: 'manufacturing', label: 'Manufacturing' },
+];
+
+function ImportTemplateDialog({ organisationId }: { organisationId: string }) {
+  const queryClient = useQueryClient();
+  const [template, setTemplate] = useState('technology');
+  const [open, setOpen] = useState(false);
+
+  const mutation = useMutation({
+    mutationFn: () => importTemplate(organisationId, template),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['accounts', organisationId] });
+      setOpen(false);
+    },
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm">
+          <Download size={14} /> Import Template
+        </Button>
+      </DialogTrigger>
+      <DialogContent
+        className="max-w-sm"
+        title="Import Chart of Accounts"
+        description="Load a pre-built IFRS-compliant account structure for your industry."
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="text-sm font-medium mb-1.5 block">Industry Template</label>
+            <Select value={template} onChange={(e) => setTemplate(e.target.value)}>
+              {TEMPLATES.map((t) => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
+            </Select>
+          </div>
+
+          {mutation.isError && (
+            <p className="text-sm text-destructive">
+              {(mutation.error as { response?: { data?: { error?: { message?: string } } } })
+                ?.response?.data?.error?.message ?? 'Import failed'}
+            </p>
+          )}
+
+          {mutation.isSuccess && (
+            <div className="flex items-center gap-2 text-sm text-green-600">
+              <CheckCircle size={14} /> Template imported successfully
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-2">
+            <DialogClose asChild>
+              <Button variant="outline" size="sm">Cancel</Button>
+            </DialogClose>
+            <Button
+              size="sm"
+              onClick={() => mutation.mutate()}
+              disabled={mutation.isPending}
+            >
+              {mutation.isPending ? 'Importing…' : 'Import'}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 export function AccountsPage() {
   const activeOrganisationId = useAuthStore((s) => s.activeOrganisationId);
@@ -45,15 +122,15 @@ export function AccountsPage() {
           <h1 className="text-xl font-semibold flex items-center gap-2">
             <BookOpen size={18} /> Chart of Accounts
           </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {data?.total ?? 0} accounts
-          </p>
+          <p className="text-sm text-muted-foreground mt-0.5">{data?.total ?? 0} accounts</p>
         </div>
+        {activeOrganisationId && (
+          <ImportTemplateDialog organisationId={activeOrganisationId} />
+        )}
       </div>
 
       <Card>
         <CardHeader className="pb-3">
-          {/* Filters */}
           <div className="flex flex-col sm:flex-row gap-3">
             <div className="relative flex-1 max-w-sm">
               <Search size={14} className="absolute left-2.5 top-2.5 text-muted-foreground" />
@@ -89,8 +166,13 @@ export function AccountsPage() {
               {[...Array(8)].map((_, i) => <Skeleton key={i} className="h-9 w-full" />)}
             </div>
           ) : accounts.length === 0 ? (
-            <div className="py-16 text-center text-sm text-muted-foreground">
-              No accounts found.
+            <div className="py-16 text-center space-y-3">
+              <p className="text-sm text-muted-foreground">No accounts yet.</p>
+              {activeOrganisationId && (
+                <p className="text-xs text-muted-foreground">
+                  Click <strong>Import Template</strong> above to load a pre-built chart of accounts.
+                </p>
+              )}
             </div>
           ) : (
             <Table>
