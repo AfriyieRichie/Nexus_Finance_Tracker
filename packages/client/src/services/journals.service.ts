@@ -28,11 +28,14 @@ export interface JournalEntry {
 }
 
 export interface JournalsResponse {
-  data: {
-    entries: JournalEntry[];
+  data: JournalEntry[];
+  pagination: {
     total: number;
     page: number;
     pageSize: number;
+    totalPages: number;
+    hasNext: boolean;
+    hasPrev: boolean;
   };
 }
 
@@ -43,7 +46,12 @@ export async function listJournals(
   const res = await api.get<JournalsResponse>(`/organisations/${organisationId}/journals`, {
     params: { pageSize: 20, ...params },
   });
-  return res.data.data;
+  return {
+    entries: res.data.data,
+    total: res.data.pagination.total,
+    page: res.data.pagination.page,
+    pageSize: res.data.pagination.pageSize,
+  };
 }
 
 export async function getJournal(organisationId: string, journalId: string) {

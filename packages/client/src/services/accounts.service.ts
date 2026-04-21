@@ -15,11 +15,14 @@ export interface Account {
 }
 
 export interface AccountsResponse {
-  data: {
-    accounts: Account[];
+  data: Account[];
+  pagination: {
     total: number;
     page: number;
     pageSize: number;
+    totalPages: number;
+    hasNext: boolean;
+    hasPrev: boolean;
   };
 }
 
@@ -28,9 +31,14 @@ export async function listAccounts(
   params?: { search?: string; class?: string; page?: number; pageSize?: number },
 ) {
   const res = await api.get<AccountsResponse>(`/organisations/${organisationId}/accounts`, {
-    params: { pageSize: 100, ...params },
+    params: { pageSize: 200, ...params },
   });
-  return res.data.data;
+  return {
+    accounts: res.data.data,
+    total: res.data.pagination.total,
+    page: res.data.pagination.page,
+    pageSize: res.data.pagination.pageSize,
+  };
 }
 
 export async function importTemplate(organisationId: string, templateName: string) {

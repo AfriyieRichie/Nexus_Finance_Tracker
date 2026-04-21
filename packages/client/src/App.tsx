@@ -13,6 +13,9 @@ import { BalanceSheetPage } from './pages/reports/BalanceSheetPage';
 import { IncomeStatementPage } from './pages/reports/IncomeStatementPage';
 import { CashFlowPage } from './pages/reports/CashFlowPage';
 import { PeriodsPage } from './pages/periods/PeriodsPage';
+import { ARPage } from './pages/ar/ARPage';
+import { APPage } from './pages/ap/APPage';
+import { AssetsPage } from './pages/assets/AssetsPage';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)();
@@ -68,6 +71,9 @@ export default function App() {
           <Route path="/journals" element={<JournalsPage />} />
           <Route path="/journals/new" element={<JournalCreatePage />} />
           <Route path="/periods" element={<PeriodsPage />} />
+          <Route path="/ar" element={<ARPage />} />
+          <Route path="/ap" element={<APPage />} />
+          <Route path="/assets" element={<AssetsPage />} />
           <Route path="/ledger/trial-balance" element={<TrialBalancePage />} />
           <Route path="/reports/balance-sheet" element={<BalanceSheetPage />} />
           <Route path="/reports/income-statement" element={<IncomeStatementPage />} />

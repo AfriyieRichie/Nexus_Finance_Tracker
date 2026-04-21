@@ -11,6 +11,9 @@ import {
   Settings,
   Scale,
   Banknote,
+  Users,
+  ShoppingCart,
+  Package,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth.store';
@@ -44,6 +47,14 @@ const navGroups: NavGroup[] = [
     heading: 'Ledger',
     items: [
       { label: 'Trial Balance', to: '/ledger/trial-balance', icon: <Scale size={16} /> },
+    ],
+  },
+  {
+    heading: 'Sub-Ledgers',
+    items: [
+      { label: 'Accounts Receivable', to: '/ar', icon: <Users size={16} /> },
+      { label: 'Accounts Payable', to: '/ap', icon: <ShoppingCart size={16} /> },
+      { label: 'Fixed Assets', to: '/assets', icon: <Package size={16} /> },
     ],
   },
   {
