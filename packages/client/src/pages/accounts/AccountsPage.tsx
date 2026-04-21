@@ -37,8 +37,8 @@ function ImportTemplateDialog({ organisationId }: { organisationId: string }) {
   const mutation = useMutation({
     mutationFn: () => importTemplate(organisationId, template),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['accounts', organisationId] });
-      setOpen(false);
+      void queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      setTimeout(() => setOpen(false), 1200);
     },
   });
 
