@@ -33,9 +33,9 @@ export async function listAccounts(
   return res.data.data;
 }
 
-export async function importTemplate(organisationId: string, template: string) {
+export async function importTemplate(organisationId: string, templateName: string) {
   const res = await api.post(`/organisations/${organisationId}/accounts/import-template`, {
-    template,
+    templateName,
   });
   return res.data.data;
 }
