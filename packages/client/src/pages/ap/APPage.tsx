@@ -337,11 +337,12 @@ function NewSupplierInvoiceDialog({ organisationId }: { organisationId: string }
 
 // ─── Post Supplier Invoice Button ─────────────────────────────────────────────
 
-function PostSupplierInvoiceButton({ organisationId, invoiceId }: { organisationId: string; invoiceId: string }) {
+function PostSupplierInvoiceButton({ organisationId, invoiceId, status }: { organisationId: string; invoiceId: string; status: string }) {
   const qc = useQueryClient();
   const { data: periodsData } = useQuery({
     queryKey: ['periods', organisationId],
     queryFn: () => listPeriods(organisationId),
+    enabled: status === 'DRAFT',
   });
   const openPeriods = (periodsData ?? []).filter((p) => p.status === 'OPEN');
 
@@ -349,6 +350,17 @@ function PostSupplierInvoiceButton({ organisationId, invoiceId }: { organisation
     mutationFn: (periodId: string) => postSupplierInvoice(organisationId, invoiceId, periodId),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['ap-invoices'] }),
   });
+
+  if (status !== 'DRAFT') {
+    return (
+      <span
+        title="Invoice already posted"
+        className="text-xs text-muted-foreground cursor-default select-none"
+      >
+        Posted
+      </span>
+    );
+  }
 
   if (openPeriods.length === 0) return null;
 
@@ -480,8 +492,8 @@ export function APPage() {
                       <TableCell className="text-right text-xs">{(Number(inv.totalAmount) - Number(inv.amountPaid)).toLocaleString(undefined, { minimumFractionDigits: 2 })}</TableCell>
                       <TableCell><Badge variant={STATUS_VARIANT[inv.status] ?? 'secondary'}>{inv.status.replace(/_/g, ' ')}</Badge></TableCell>
                       <TableCell>
-                        {inv.status === 'DRAFT' && activeOrganisationId && (
-                          <PostSupplierInvoiceButton organisationId={activeOrganisationId} invoiceId={inv.id} />
+                        {activeOrganisationId && (
+                          <PostSupplierInvoiceButton organisationId={activeOrganisationId} invoiceId={inv.id} status={inv.status} />
                         )}
                       </TableCell>
                     </TableRow>

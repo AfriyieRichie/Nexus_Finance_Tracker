@@ -340,11 +340,12 @@ function NewInvoiceDialog({ organisationId }: { organisationId: string }) {
 
 // ─── Post Invoice Button ──────────────────────────────────────────────────────
 
-function PostInvoiceButton({ organisationId, invoiceId }: { organisationId: string; invoiceId: string }) {
+function PostInvoiceButton({ organisationId, invoiceId, status }: { organisationId: string; invoiceId: string; status: string }) {
   const qc = useQueryClient();
   const { data: periodsData } = useQuery({
     queryKey: ['periods', organisationId],
     queryFn: () => listPeriods(organisationId),
+    enabled: status === 'DRAFT',
   });
   const openPeriods = (periodsData ?? []).filter((p) => p.status === 'OPEN');
 
@@ -352,6 +353,17 @@ function PostInvoiceButton({ organisationId, invoiceId }: { organisationId: stri
     mutationFn: (periodId: string) => postInvoice(organisationId, invoiceId, periodId),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['ar-invoices'] }),
   });
+
+  if (status !== 'DRAFT') {
+    return (
+      <span
+        title="Invoice already posted"
+        className="text-xs text-muted-foreground cursor-default select-none"
+      >
+        Posted
+      </span>
+    );
+  }
 
   if (openPeriods.length === 0) return null;
 
@@ -485,8 +497,8 @@ export function ARPage() {
                       </TableCell>
                       <TableCell><Badge variant={STATUS_VARIANT[inv.status] ?? 'secondary'}>{inv.status.replace(/_/g, ' ')}</Badge></TableCell>
                       <TableCell>
-                        {inv.status === 'DRAFT' && activeOrganisationId && (
-                          <PostInvoiceButton organisationId={activeOrganisationId} invoiceId={inv.id} />
+                        {activeOrganisationId && (
+                          <PostInvoiceButton organisationId={activeOrganisationId} invoiceId={inv.id} status={inv.status} />
                         )}
                       </TableCell>
                     </TableRow>
