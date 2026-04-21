@@ -12,7 +12,7 @@ import {
   Cell,
   Legend,
 } from 'recharts';
-import { TrendingUp, TrendingDown, DollarSign, Scale, FileText, ArrowUpRight } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Scale, FileText, ArrowUpRight, Users, ShoppingCart, Clock } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuthStore } from '@/stores/auth.store';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -21,6 +21,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { getTrialBalance } from '@/services/ledger.service';
 import { getIncomeStatement } from '@/services/reports.service';
 import { listJournals } from '@/services/journals.service';
+import { getArAgeing } from '@/services/ar.service';
+import { getApAgeing } from '@/services/ap.service';
+import { listRequests } from '@/services/approvals.service';
 import { cn } from '@/lib/utils';
 
 function fmt(value: string | number, currency = 'USD') {
@@ -64,6 +67,24 @@ export function DashboardPage() {
   const { data: journalsData, isLoading: journalsLoading } = useQuery({
     queryKey: ['journals', activeOrganisationId],
     queryFn: () => listJournals(activeOrganisationId!, { pageSize: 8 }),
+    enabled: !!activeOrganisationId,
+  });
+
+  const { data: arAgeing } = useQuery({
+    queryKey: ['ar-ageing', activeOrganisationId],
+    queryFn: () => getArAgeing(activeOrganisationId!),
+    enabled: !!activeOrganisationId,
+  });
+
+  const { data: apAgeing } = useQuery({
+    queryKey: ['ap-ageing', activeOrganisationId],
+    queryFn: () => getApAgeing(activeOrganisationId!),
+    enabled: !!activeOrganisationId,
+  });
+
+  const { data: pendingApprovals } = useQuery({
+    queryKey: ['approvals', activeOrganisationId, 'PENDING'],
+    queryFn: () => listRequests(activeOrganisationId!, { status: 'PENDING' }),
     enabled: !!activeOrganisationId,
   });
 
@@ -232,6 +253,72 @@ export function DashboardPage() {
             )}
           </CardContent>
         </Card>
+      </div>
+
+      {/* AR / AP / Approvals quick tiles */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <Link to="/ar?tab=ageing">
+          <Card className="hover:border-primary/40 transition-colors cursor-pointer">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2 text-sm"><Users size={14} /> AR Outstanding</CardTitle>
+                <ArrowUpRight size={14} className="text-muted-foreground" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <p className="text-xl font-bold font-mono">
+                {fmt(arAgeing?.grandTotal ?? 0, currency)}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Overdue: {fmt(
+                  (Number(arAgeing?.buckets?.days1_30 ?? 0) + Number(arAgeing?.buckets?.days31_60 ?? 0) +
+                   Number(arAgeing?.buckets?.days61_90 ?? 0) + Number(arAgeing?.buckets?.over90 ?? 0)),
+                  currency,
+                )}
+              </p>
+            </CardContent>
+          </Card>
+        </Link>
+
+        <Link to="/ap?tab=ageing">
+          <Card className="hover:border-primary/40 transition-colors cursor-pointer">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2 text-sm"><ShoppingCart size={14} /> AP Outstanding</CardTitle>
+                <ArrowUpRight size={14} className="text-muted-foreground" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <p className="text-xl font-bold font-mono">
+                {fmt(apAgeing?.grandTotal ?? 0, currency)}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Overdue: {fmt(
+                  (Number(apAgeing?.buckets?.days1_30 ?? 0) + Number(apAgeing?.buckets?.days31_60 ?? 0) +
+                   Number(apAgeing?.buckets?.days61_90 ?? 0) + Number(apAgeing?.buckets?.over90 ?? 0)),
+                  currency,
+                )}
+              </p>
+            </CardContent>
+          </Card>
+        </Link>
+
+        <Link to="/approvals">
+          <Card className={cn('hover:border-primary/40 transition-colors cursor-pointer', (pendingApprovals?.total ?? 0) > 0 && 'border-amber-400/60')}>
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2 text-sm"><Clock size={14} /> Pending Approvals</CardTitle>
+                <ArrowUpRight size={14} className="text-muted-foreground" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <p className="text-xl font-bold font-mono">{pendingApprovals?.total ?? 0}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {(pendingApprovals?.total ?? 0) === 0 ? 'All clear' : 'Requires your action'}
+              </p>
+            </CardContent>
+          </Card>
+        </Link>
       </div>
 
       {/* Recent Journals */}

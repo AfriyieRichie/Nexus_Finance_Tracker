@@ -1,10 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
-import { Banknote, ArrowUp, ArrowDown } from 'lucide-react';
+import { Banknote, ArrowUp, ArrowDown, Download } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { getCashFlow } from '@/services/reports.service';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+import { downloadCsv } from '@/utils/export';
 
 function fmt(v: string | number) {
   const n = Number(v);
@@ -33,13 +35,40 @@ export function CashFlowPage() {
     enabled: !!activeOrganisationId,
   });
 
+  function exportCsv() {
+    if (!data) return;
+    const rows: (string | number)[][] = [['Account', 'Amount']];
+    rows.push(['Net Profit', Number(data.operatingActivities.netProfit)]);
+    for (const item of data.operatingActivities.workingCapitalAdjustments) {
+      rows.push([item.name, Number(item.balance)]);
+    }
+    rows.push(['Net Cash from Operating', Number(data.operatingActivities.netCashFromOperating)]);
+    for (const item of data.investingActivities.items) {
+      rows.push([item.name, Number(item.balance)]);
+    }
+    rows.push(['Net Cash from Investing', Number(data.investingActivities.netCashFromInvesting)]);
+    for (const item of data.financingActivities.items) {
+      rows.push([item.name, Number(item.balance)]);
+    }
+    rows.push(['Net Cash from Financing', Number(data.financingActivities.netCashFromFinancing)]);
+    rows.push(['Opening Cash Balance', Number(data.openingCashBalance)]);
+    rows.push(['Net Change in Cash', Number(data.netChangeInCash)]);
+    rows.push(['Closing Cash Balance', Number(data.closingCashBalance)]);
+    downloadCsv('cash-flow.csv', rows);
+  }
+
   return (
     <div className="p-6 space-y-5 max-w-2xl">
-      <div>
-        <h1 className="text-xl font-semibold flex items-center gap-2">
-          <Banknote size={18} /> Cash Flow Statement
-        </h1>
-        <p className="text-sm text-muted-foreground mt-0.5">IAS 7 — Indirect Method · {currency}</p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-xl font-semibold flex items-center gap-2">
+            <Banknote size={18} /> Cash Flow Statement
+          </h1>
+          <p className="text-sm text-muted-foreground mt-0.5">IAS 7 — Indirect Method · {currency}</p>
+        </div>
+        <Button variant="outline" size="sm" onClick={exportCsv} disabled={!data}>
+          <Download size={14} className="mr-1" /> CSV
+        </Button>
       </div>
 
       {isLoading ? (

@@ -1,11 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
-import { Building2, CheckCircle, AlertCircle } from 'lucide-react';
+import { Building2, CheckCircle, AlertCircle, Download } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { getBalanceSheet } from '@/services/reports.service';
 import type { StatementSection } from '@/services/reports.service';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+import { downloadCsv } from '@/utils/export';
 
 function fmt(v: string | number, _currency?: string) {
   return new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v));
@@ -60,6 +62,28 @@ export function BalanceSheetPage() {
     enabled: !!activeOrganisationId,
   });
 
+  function exportCsv() {
+    if (!data) return;
+    const rows: (string | number)[][] = [['Code', 'Account', 'Balance']];
+    const addSection = (section: StatementSection) => {
+      for (const line of section.lines) {
+        rows.push([line.code, line.name, Number(line.balance)]);
+      }
+      rows.push(['', `Total ${section.label}`, Number(section.subtotal)]);
+    };
+    addSection(data.assets.current);
+    addSection(data.assets.nonCurrent);
+    rows.push(['', 'TOTAL ASSETS', Number(data.assets.total)]);
+    addSection(data.liabilities.current);
+    addSection(data.liabilities.nonCurrent);
+    rows.push(['', 'TOTAL LIABILITIES', Number(data.liabilities.total)]);
+    addSection(data.equity.items);
+    rows.push(['', 'Current Period Profit', Number(data.equity.currentPeriodProfit)]);
+    rows.push(['', 'TOTAL EQUITY', Number(data.equity.total)]);
+    rows.push(['', 'TOTAL LIABILITIES & EQUITY', Number(data.totalLiabilitiesAndEquity)]);
+    downloadCsv('balance-sheet.csv', rows);
+  }
+
   return (
     <div className="p-6 space-y-5 max-w-4xl">
       <div className="flex items-center justify-between">
@@ -71,12 +95,17 @@ export function BalanceSheetPage() {
             Statement of Financial Position · {currency}
           </p>
         </div>
-        {data && (
-          <div className={cn('flex items-center gap-1.5 text-sm font-medium', data.isBalanced ? 'text-green-600' : 'text-red-600')}>
-            {data.isBalanced ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
-            {data.isBalanced ? 'Assets = Liabilities + Equity' : 'Out of balance'}
-          </div>
-        )}
+        <div className="flex items-center gap-3">
+          {data && (
+            <div className={cn('flex items-center gap-1.5 text-sm font-medium', data.isBalanced ? 'text-green-600' : 'text-red-600')}>
+              {data.isBalanced ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
+              {data.isBalanced ? 'Assets = Liabilities + Equity' : 'Out of balance'}
+            </div>
+          )}
+          <Button variant="outline" size="sm" onClick={exportCsv} disabled={!data}>
+            <Download size={14} className="mr-1" /> CSV
+          </Button>
+        </div>
       </div>
 
       {isLoading ? (

@@ -70,3 +70,11 @@ export async function getCashFlow(
   const res = await api.get(`/organisations/${organisationId}/reports/cash-flow`, { params });
   return res.data.data;
 }
+
+export async function getChangesInEquity(
+  organisationId: string,
+  params?: { fromDate?: string; toDate?: string; periodId?: string },
+) {
+  const res = await api.get(`/organisations/${organisationId}/reports/changes-in-equity`, { params });
+  return res.data.data;
+}

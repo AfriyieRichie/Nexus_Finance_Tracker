@@ -19,6 +19,7 @@ import {
   PiggyBank,
   Receipt,
   CheckCircle,
+  Shield,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth.store';
@@ -76,6 +77,7 @@ const navGroups: NavGroup[] = [
     heading: 'Workflow',
     items: [
       { label: 'Approvals', to: '/approvals', icon: <CheckCircle size={16} /> },
+      { label: 'Audit Trail', to: '/audit', icon: <Shield size={16} /> },
     ],
   },
   {
@@ -84,6 +86,7 @@ const navGroups: NavGroup[] = [
       { label: 'Balance Sheet', to: '/reports/balance-sheet', icon: <Building2 size={16} /> },
       { label: 'Income Statement', to: '/reports/income-statement', icon: <TrendingUp size={16} /> },
       { label: 'Cash Flow', to: '/reports/cash-flow', icon: <Banknote size={16} /> },
+      { label: 'Changes in Equity', to: '/reports/changes-in-equity', icon: <TrendingUp size={16} /> },
     ],
   },
 ];

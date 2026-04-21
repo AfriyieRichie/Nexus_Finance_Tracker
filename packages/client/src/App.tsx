@@ -12,6 +12,7 @@ import { TrialBalancePage } from './pages/ledger/TrialBalancePage';
 import { BalanceSheetPage } from './pages/reports/BalanceSheetPage';
 import { IncomeStatementPage } from './pages/reports/IncomeStatementPage';
 import { CashFlowPage } from './pages/reports/CashFlowPage';
+import { ChangesInEquityPage } from './pages/reports/ChangesInEquityPage';
 import { PeriodsPage } from './pages/periods/PeriodsPage';
 import { ARPage } from './pages/ar/ARPage';
 import { APPage } from './pages/ap/APPage';
@@ -22,6 +23,7 @@ import { BudgetsPage } from './pages/budgets/BudgetsPage';
 import { TaxPage } from './pages/tax/TaxPage';
 import { PayrollPage } from './pages/payroll/PayrollPage';
 import { ApprovalsPage } from './pages/approvals/ApprovalsPage';
+import { AuditPage } from './pages/audit/AuditPage';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)();
@@ -86,10 +88,12 @@ export default function App() {
           <Route path="/tax" element={<TaxPage />} />
           <Route path="/payroll" element={<PayrollPage />} />
           <Route path="/approvals" element={<ApprovalsPage />} />
+          <Route path="/audit" element={<AuditPage />} />
           <Route path="/ledger/trial-balance" element={<TrialBalancePage />} />
           <Route path="/reports/balance-sheet" element={<BalanceSheetPage />} />
           <Route path="/reports/income-statement" element={<IncomeStatementPage />} />
           <Route path="/reports/cash-flow" element={<CashFlowPage />} />
+          <Route path="/reports/changes-in-equity" element={<ChangesInEquityPage />} />
         </Route>
 
         {/* Default */}

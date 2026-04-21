@@ -1,10 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
-import { TrendingUp } from 'lucide-react';
+import { TrendingUp, Download } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { getIncomeStatement, type StatementSection } from '@/services/reports.service';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+import { downloadCsv } from '@/utils/export';
 
 function fmt(v: string | number) {
   return new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v));
@@ -46,13 +48,35 @@ export function IncomeStatementPage() {
     enabled: !!activeOrganisationId,
   });
 
+  function exportCsv() {
+    if (!data) return;
+    const rows: (string | number)[][] = [['Code', 'Account', 'Balance']];
+    const addSection = (section: StatementSection) => {
+      for (const line of section.lines) {
+        rows.push([line.code, line.name, Number(line.balance)]);
+      }
+      rows.push(['', `Total ${section.label}`, Number(section.subtotal)]);
+    };
+    addSection(data.revenue);
+    addSection(data.costOfSales);
+    rows.push(['', 'Gross Profit', Number(data.grossProfit)]);
+    addSection(data.operatingExpenses);
+    rows.push(['', 'Profit for Period', Number(data.profitForPeriod)]);
+    downloadCsv('income-statement.csv', rows);
+  }
+
   return (
     <div className="p-6 space-y-5 max-w-2xl">
-      <div>
-        <h1 className="text-xl font-semibold flex items-center gap-2">
-          <TrendingUp size={18} /> Income Statement
-        </h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Profit & Loss · {currency}</p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-xl font-semibold flex items-center gap-2">
+            <TrendingUp size={18} /> Income Statement
+          </h1>
+          <p className="text-sm text-muted-foreground mt-0.5">Profit & Loss · {currency}</p>
+        </div>
+        <Button variant="outline" size="sm" onClick={exportCsv} disabled={!data}>
+          <Download size={14} className="mr-1" /> CSV
+        </Button>
       </div>
 
       {isLoading ? (
