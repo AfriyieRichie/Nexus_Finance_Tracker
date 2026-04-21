@@ -7,7 +7,6 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Select } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
@@ -122,8 +121,8 @@ export function AuditPage() {
 
         <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-muted-foreground">Entity Type</label>
-          <Select
-            className="h-8 text-xs w-44"
+          <select
+            className="h-8 text-xs w-44 rounded-md border border-input bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
             value={entityTypeFilter}
             onChange={(e) => {
               setEntityTypeFilter(e.target.value);
@@ -136,7 +135,7 @@ export function AuditPage() {
                 {t.replace(/_/g, ' ')}
               </option>
             ))}
-          </Select>
+          </select>
         </div>
 
         <div className="flex flex-col gap-1">
