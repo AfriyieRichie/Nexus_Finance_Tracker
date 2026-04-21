@@ -13,6 +13,25 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogTrigger, DialogClose } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 
+const ASSET_CATEGORIES = [
+  'Land',
+  'Buildings & Structures',
+  'Leasehold Improvements',
+  'Plant & Machinery',
+  'Equipment',
+  'Office Equipment',
+  'Computer Hardware',
+  'Computer Software',
+  'Motor Vehicles',
+  'Furniture & Fittings',
+  'Tools & Instruments',
+  'Right-of-Use Assets (IFRS 16)',
+  'Investment Property',
+  'Biological Assets',
+  'Intangible Assets',
+  'Other Fixed Assets',
+];
+
 const STATUS_VARIANT: Record<string, 'success' | 'warning' | 'secondary' | 'destructive'> = {
   ACTIVE: 'success',
   FULLY_DEPRECIATED: 'warning',
@@ -60,7 +79,9 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
             </div>
             <div>
               <label className="text-xs font-medium mb-1 block">Category</label>
-              <Input value={form.category} onChange={(e) => set('category', e.target.value)} className="h-8 text-xs" />
+              <Select value={form.category} onChange={(e) => set('category', e.target.value)} className="h-8 text-xs">
+                {ASSET_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+              </Select>
             </div>
           </div>
           <div>
