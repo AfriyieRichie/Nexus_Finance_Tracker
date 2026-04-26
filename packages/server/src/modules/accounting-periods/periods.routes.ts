@@ -19,7 +19,7 @@ periodsRouter.post('/', requireRole(UserRole.FINANCE_MANAGER), periodsController
 
 // Status transitions — Finance Manager and above
 periodsRouter.post('/:periodId/close', requireRole(UserRole.FINANCE_MANAGER), periodsController.closePeriod);
-periodsRouter.post('/:periodId/reopen', requireRole(UserRole.FINANCE_MANAGER), periodsController.reopenPeriod);
+periodsRouter.post('/:periodId/reopen', requireRole(UserRole.ORG_ADMIN), periodsController.reopenPeriod);
 
 // Lock and year-end close — ORG_ADMIN only (irreversible)
 periodsRouter.post('/:periodId/lock', requireRole(UserRole.ORG_ADMIN), periodsController.lockPeriod);

@@ -86,7 +86,7 @@ export async function getBudget(organisationId: string, budgetId: string) {
 
 export async function createBudget(
   organisationId: string,
-  userId: string,
+  _userId: string,
   input: CreateBudgetInput,
 ) {
   if (input.fiscalYear < 2000 || input.fiscalYear > 2100) {

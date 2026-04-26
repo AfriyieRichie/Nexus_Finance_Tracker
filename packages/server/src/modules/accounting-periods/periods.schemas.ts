@@ -16,6 +16,12 @@ export const updatePeriodStatusSchema = z.object({
   status: z.nativeEnum(PeriodStatus),
 });
 
+export const reopenPeriodSchema = z.object({
+  reason: z.string().min(5, 'Reason must be at least 5 characters'),
+});
+
+export type ReopenPeriodInput = z.infer<typeof reopenPeriodSchema>;
+
 export const listPeriodsSchema = z.object({
   fiscalYear: z
     .string()

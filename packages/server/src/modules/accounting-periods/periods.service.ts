@@ -1,6 +1,7 @@
 import { PeriodStatus } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { ConflictError, NotFoundError, ForbiddenError, ValidationError } from '../../utils/errors';
+import { createAuditLog } from '../audit-trail/audit.service';
 import type { CreateFiscalYearInput, ListPeriodsQuery } from './periods.schemas';
 
 const MONTH_NAMES = [
@@ -139,7 +140,12 @@ export async function closePeriod(organisationId: string, periodId: string, user
   });
 }
 
-export async function reopenPeriod(organisationId: string, periodId: string) {
+export async function reopenPeriod(
+  organisationId: string,
+  periodId: string,
+  userId: string,
+  reason: string,
+) {
   const period = await getPeriod(organisationId, periodId);
 
   if (period.status === PeriodStatus.LOCKED) {
@@ -149,10 +155,21 @@ export async function reopenPeriod(organisationId: string, periodId: string) {
     throw new ForbiddenError('Period is already OPEN');
   }
 
-  return prisma.accountingPeriod.update({
+  const updated = await prisma.accountingPeriod.update({
     where: { id: periodId },
     data: { status: PeriodStatus.OPEN, closedBy: null, closedAt: null },
   });
+
+  await createAuditLog({
+    organisationId,
+    userId,
+    action: 'PERIOD_REOPEN',
+    entityType: 'ACCOUNTING_PERIOD',
+    entityId: periodId,
+    newValue: { reason, periodName: period.name, fiscalYear: period.fiscalYear },
+  });
+
+  return updated;
 }
 
 export async function lockPeriod(organisationId: string, periodId: string, userId: string) {

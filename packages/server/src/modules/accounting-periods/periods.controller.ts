@@ -4,6 +4,7 @@ import { sendSuccess, sendCreated } from '../../utils/response';
 import {
   createFiscalYearSchema,
   listPeriodsSchema,
+  reopenPeriodSchema,
 } from './periods.schemas';
 import * as periodsService from './periods.service';
 
@@ -41,7 +42,8 @@ export const closePeriod = async (req: AuthenticatedRequest, res: Response) => {
 
 export const reopenPeriod = async (req: AuthenticatedRequest, res: Response) => {
   const { organisationId, periodId } = req.params;
-  const period = await periodsService.reopenPeriod(organisationId, periodId);
+  const { reason } = reopenPeriodSchema.parse(req.body);
+  const period = await periodsService.reopenPeriod(organisationId, periodId, req.user!.sub, reason);
   sendSuccess(res, period, 'Period reopened');
 };
 
