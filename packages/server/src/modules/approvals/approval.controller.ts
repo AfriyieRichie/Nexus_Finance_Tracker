@@ -9,8 +9,7 @@ import {
   decisionSchema,
 } from './approval.schemas';
 import * as approvalService from './approval.service';
-import { postJournalEntry } from '../journals/journal.service';
-import { ApprovalRequestStatus, ApprovalEntityType } from '@prisma/client';
+import { ApprovalRequestStatus } from '@prisma/client';
 
 // ─── Workflows ────────────────────────────────────────────────────────────────
 
@@ -88,16 +87,5 @@ export const decide = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId, requestId } = req.params;
   const input = decisionSchema.parse(req.body);
   const result = await approvalService.decide(organisationId, requestId, req.user!.sub, input);
-
-  // Auto-post journal entry once all approval levels are satisfied
-  if (
-    result.status === 'APPROVED' &&
-    'entityType' in result &&
-    result.entityType === ApprovalEntityType.JOURNAL_ENTRY &&
-    'entityId' in result
-  ) {
-    await postJournalEntry(organisationId, result.entityId as string, req.user!.sub);
-  }
-
   return sendSuccess(res, result, `Decision recorded: ${result.status}`);
 });
