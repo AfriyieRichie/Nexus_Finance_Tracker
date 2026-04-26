@@ -6,6 +6,7 @@ import {
   listRequests, getRequest, decide, listWorkflows, createWorkflow,
   getWorkflow, updateWorkflow, addLevel, removeLevel, addApprover, removeApprover,
 } from '@/services/approvals.service';
+import { getJournal } from '@/services/journals.service';
 import { listOrgUsers } from '@/services/organisations.service';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -358,71 +359,286 @@ function WorkflowDetailDialog({ organisationId, workflowId, onClose }: { organis
 function RequestDetailDialog({ organisationId, requestId, onClose }: { organisationId: string; requestId: string; onClose: () => void }) {
   const qc = useQueryClient();
   const [comment, setComment] = useState('');
+  const [pendingDecision, setPendingDecision] = useState<'APPROVED' | 'REJECTED' | null>(null);
 
   const { data: request, isLoading } = useQuery({
     queryKey: ['approval-request', requestId],
     queryFn: () => getRequest(organisationId, requestId),
   });
 
+  // Fetch the linked entity — currently only JOURNAL_ENTRY is supported
+  const isJournal = request?.entityType === 'JOURNAL_ENTRY';
+  const { data: journal, isLoading: journalLoading } = useQuery({
+    queryKey: ['journal', organisationId, request?.entityId],
+    queryFn: () => getJournal(organisationId, request!.entityId),
+    enabled: isJournal && !!request?.entityId,
+  });
+
   const mutation = useMutation({
-    mutationFn: (decision: 'APPROVED' | 'REJECTED') => decide(organisationId, requestId, { decision, comments: comment || undefined }),
+    mutationFn: (decision: 'APPROVED' | 'REJECTED') =>
+      decide(organisationId, requestId, { decision, comments: comment || undefined }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['approvals'] });
       onClose();
     },
   });
 
+  const journalLines = journal?.lines ?? [];
+  const totalDebit = journalLines.reduce((s, l) => s + parseFloat(l.debitAmount || '0'), 0);
+  const totalCredit = journalLines.reduce((s, l) => s + parseFloat(l.creditAmount || '0'), 0);
+
+  const canReject = comment.trim().length > 0;
+  const isPending = request?.status === 'PENDING';
+
   return (
-    <DialogContent className="max-w-lg" title="Approval Request" description="Review and act on this approval request.">
+    <DialogContent
+      className="max-w-3xl max-h-[90vh] overflow-y-auto"
+      title="Approval Request"
+      description="Review the entry in full before approving or rejecting."
+    >
       {isLoading ? (
         <div className="space-y-2">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}</div>
       ) : request ? (
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <div><span className="text-muted-foreground">Type:</span> <span className="font-medium">{request.entityType.replace(/_/g, ' ')}</span></div>
-            <div><span className="text-muted-foreground">Status:</span> <Badge variant={STATUS_VARIANT[request.status] ?? 'secondary'} className="ml-1">{request.status}</Badge></div>
-            <div><span className="text-muted-foreground">Requested by:</span> <span className="font-medium">{request.requester?.firstName} {request.requester?.lastName}</span></div>
-            <div><span className="text-muted-foreground">Level:</span> <span className="font-medium">{request.currentLevel}</span></div>
-            <div><span className="text-muted-foreground">Workflow:</span> <span className="font-medium">{request.workflow?.name ?? '—'}</span></div>
-            <div><span className="text-muted-foreground">Requested:</span> <span className="font-medium">{new Date(request.requestedAt).toLocaleDateString()}</span></div>
+        <div className="space-y-5">
+
+          {/* Request meta */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs pb-4 border-b">
+            <div>
+              <span className="text-muted-foreground">Type</span>
+              <p className="font-semibold mt-0.5">{request.entityType.replace(/_/g, ' ')}</p>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Status</span>
+              <div className="mt-0.5">
+                <Badge variant={STATUS_VARIANT[request.status] ?? 'secondary'}>{request.status}</Badge>
+              </div>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Approval Level</span>
+              <p className="font-semibold mt-0.5">Level {request.currentLevel}</p>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Requested By</span>
+              <p className="font-medium mt-0.5">{request.requester?.firstName} {request.requester?.lastName}</p>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Workflow</span>
+              <p className="font-medium mt-0.5">{request.workflow?.name ?? '—'}</p>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Date Submitted</span>
+              <p className="font-medium mt-0.5">{new Date(request.requestedAt).toLocaleDateString()}</p>
+            </div>
           </div>
 
+          {/* Journal entry detail */}
+          {isJournal && (
+            journalLoading ? (
+              <div className="space-y-2">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}</div>
+            ) : journal ? (
+              <div className="space-y-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Journal Entry Detail</p>
+
+                {/* Journal header info */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs bg-muted/30 rounded-lg p-3">
+                  <div>
+                    <span className="text-muted-foreground">Number</span>
+                    <p className="font-mono font-semibold text-primary mt-0.5">{journal.journalNumber}</p>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Type</span>
+                    <p className="font-medium mt-0.5">{journal.type.replace(/_/g, ' ')}</p>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Entry Date</span>
+                    <p className="font-medium mt-0.5">{new Date(journal.entryDate).toLocaleDateString()}</p>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Period</span>
+                    <p className="font-medium mt-0.5">{journal.period?.name ?? '—'}</p>
+                  </div>
+                  <div className="col-span-2">
+                    <span className="text-muted-foreground">Description</span>
+                    <p className="font-medium mt-0.5">{journal.description}</p>
+                  </div>
+                  {journal.reference && (
+                    <div className="col-span-2">
+                      <span className="text-muted-foreground">Reference</span>
+                      <p className="font-medium mt-0.5">{journal.reference}</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Lines table */}
+                <div className="border rounded-lg overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-muted/40 border-b">
+                        <th className="px-3 py-2 text-left font-medium text-muted-foreground w-8">#</th>
+                        <th className="px-3 py-2 text-left font-medium text-muted-foreground">Account</th>
+                        <th className="px-3 py-2 text-left font-medium text-muted-foreground">Description</th>
+                        <th className="px-3 py-2 text-right font-medium text-muted-foreground w-28">Debit ({journal.currency})</th>
+                        <th className="px-3 py-2 text-right font-medium text-muted-foreground w-28">Credit ({journal.currency})</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {journalLines.map((line) => (
+                        <tr key={line.id} className="border-b last:border-0">
+                          <td className="px-3 py-2 text-muted-foreground">{line.lineNumber}</td>
+                          <td className="px-3 py-2">
+                            {line.account ? (
+                              <span className="flex items-baseline gap-1.5">
+                                <span className="font-mono text-primary">{line.account.code}</span>
+                                <span>{line.account.name}</span>
+                                <span className="text-muted-foreground text-[10px]">({line.account.class})</span>
+                              </span>
+                            ) : (
+                              <span className="font-mono text-muted-foreground">{line.accountId}</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-muted-foreground">{line.description ?? '—'}</td>
+                          <td className="px-3 py-2 text-right font-mono">
+                            {parseFloat(line.debitAmount) > 0 ? parseFloat(line.debitAmount).toFixed(2) : ''}
+                          </td>
+                          <td className="px-3 py-2 text-right font-mono">
+                            {parseFloat(line.creditAmount) > 0 ? parseFloat(line.creditAmount).toFixed(2) : ''}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t bg-muted/20 font-semibold">
+                        <td colSpan={3} className="px-3 py-2 text-muted-foreground">Total</td>
+                        <td className="px-3 py-2 text-right font-mono">{totalDebit.toFixed(2)}</td>
+                        <td className="px-3 py-2 text-right font-mono">{totalCredit.toFixed(2)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+
+                {/* Balance check */}
+                <div className={cn(
+                  'text-xs px-3 py-1.5 rounded-md font-medium',
+                  Math.abs(totalDebit - totalCredit) < 0.0001
+                    ? 'bg-green-100 text-green-700'
+                    : 'bg-red-100 text-red-700',
+                )}>
+                  {Math.abs(totalDebit - totalCredit) < 0.0001
+                    ? '✓ Entry is balanced'
+                    : `⚠ Unbalanced by ${Math.abs(totalDebit - totalCredit).toFixed(2)}`}
+                </div>
+              </div>
+            ) : null
+          )}
+
+          {/* Decision history */}
           {(request.decisions ?? []).length > 0 && (
             <div>
-              <p className="text-xs font-semibold mb-2">Decision History</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Decision History</p>
               <div className="space-y-2">
                 {(request.decisions ?? []).map((d) => (
-                  <div key={d.id} className="text-xs border rounded p-2">
+                  <div key={d.id} className="text-xs border rounded-lg p-2.5">
                     <div className="flex items-center justify-between">
-                      <span className="font-medium">Level {d.levelNumber} — {d.decider?.firstName} {d.decider?.lastName}</span>
-                      <Badge variant={d.decision === 'APPROVED' ? 'success' : 'destructive'} className="text-[10px]">{d.decision}</Badge>
+                      <span className="font-medium">
+                        Level {d.levelNumber} — {d.decider?.firstName} {d.decider?.lastName}
+                      </span>
+                      <Badge variant={d.decision === 'APPROVED' ? 'success' : 'destructive'} className="text-[10px]">
+                        {d.decision}
+                      </Badge>
                     </div>
                     {d.comments && <p className="text-muted-foreground mt-1">{d.comments}</p>}
+                    <p className="text-muted-foreground mt-1">{new Date(d.decidedAt).toLocaleString()}</p>
                   </div>
                 ))}
               </div>
             </div>
           )}
 
-          {request.status === 'PENDING' && (
-            <div className="space-y-2 pt-2 border-t">
-              <label className="text-xs font-medium">Comment (optional)</label>
-              <Input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Add a comment…" className="h-8 text-xs" />
-              <div className="flex gap-2 pt-1">
-                <Button size="sm" variant="outline" className="flex-1 text-destructive border-destructive hover:bg-destructive/10"
-                  disabled={mutation.isPending} onClick={() => mutation.mutate('REJECTED')}>
-                  <XCircle size={14} /> Reject
-                </Button>
-                <Button size="sm" className="flex-1" disabled={mutation.isPending} onClick={() => mutation.mutate('APPROVED')}>
-                  <CheckCircle size={14} /> Approve
-                </Button>
-              </div>
+          {/* Action area */}
+          {isPending && (
+            <div className="pt-3 border-t space-y-3">
+              {/* Inline decision panel */}
+              {pendingDecision === 'REJECTED' ? (
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-destructive">
+                    Rejection reason <span className="text-destructive">*</span>
+                  </label>
+                  <Input
+                    value={comment}
+                    onChange={(e) => setComment(e.target.value)}
+                    placeholder="State reason for rejection (required)…"
+                    className="h-8 text-xs border-destructive/50 focus-visible:ring-destructive"
+                    autoFocus
+                  />
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      disabled={!canReject || mutation.isPending}
+                      onClick={() => mutation.mutate('REJECTED')}
+                    >
+                      <XCircle size={13} className="mr-1" />
+                      {mutation.isPending ? 'Rejecting…' : 'Confirm Rejection'}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => { setPendingDecision(null); setComment(''); }}>
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : pendingDecision === 'APPROVED' ? (
+                <div className="space-y-2">
+                  <label className="text-xs font-medium">Comments (optional)</label>
+                  <Input
+                    value={comment}
+                    onChange={(e) => setComment(e.target.value)}
+                    placeholder="Add approval notes…"
+                    className="h-8 text-xs"
+                    autoFocus
+                  />
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      disabled={mutation.isPending}
+                      onClick={() => mutation.mutate('APPROVED')}
+                    >
+                      <CheckCircle size={13} className="mr-1" />
+                      {mutation.isPending ? 'Approving…' : 'Confirm Approval'}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => { setPendingDecision(null); setComment(''); }}>
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="flex-1 text-destructive border-destructive/40 hover:bg-destructive/10"
+                    onClick={() => setPendingDecision('REJECTED')}
+                  >
+                    <XCircle size={14} className="mr-1" /> Reject
+                  </Button>
+                  <Button size="sm" className="flex-1" onClick={() => setPendingDecision('APPROVED')}>
+                    <CheckCircle size={14} className="mr-1" /> Approve
+                  </Button>
+                </div>
+              )}
+
+              {mutation.isError && (
+                <p className="text-xs text-destructive">
+                  {(mutation.error as { response?: { data?: { error?: { message?: string } } } })
+                    ?.response?.data?.error?.message ?? 'Failed to submit decision'}
+                </p>
+              )}
             </div>
           )}
 
-          {request.status !== 'PENDING' && (
+          {!isPending && (
             <div className="flex justify-end pt-2 border-t">
-              <DialogClose asChild><Button variant="outline" size="sm" onClick={onClose}>Close</Button></DialogClose>
+              <DialogClose asChild>
+                <Button variant="outline" size="sm" onClick={onClose}>Close</Button>
+              </DialogClose>
             </div>
           )}
         </div>
