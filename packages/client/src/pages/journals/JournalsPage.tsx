@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { FileText, Plus } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { FileText, Plus, Search, X } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/stores/auth.store';
 import { listJournals } from '@/services/journals.service';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
@@ -36,15 +37,26 @@ const TYPE_LABELS: Record<string, string> = {
 };
 
 export function JournalsPage() {
+  const navigate = useNavigate();
   const activeOrganisationId = useAuthStore((s) => s.activeOrganisationId);
   const [statusFilter, setStatusFilter] = useState('');
+  const [search, setSearch] = useState('');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
+  const [myDrafts, setMyDrafts] = useState(false);
   const [page, setPage] = useState(1);
 
+  const effectiveStatus = myDrafts ? 'DRAFT' : statusFilter || undefined;
+
   const { data, isLoading } = useQuery({
-    queryKey: ['journals', activeOrganisationId, statusFilter, page],
+    queryKey: ['journals', activeOrganisationId, effectiveStatus, search, fromDate, toDate, myDrafts, page],
     queryFn: () =>
       listJournals(activeOrganisationId!, {
-        status: statusFilter || undefined,
+        status: effectiveStatus,
+        search: search || undefined,
+        fromDate: fromDate || undefined,
+        toDate: toDate || undefined,
+        createdByMe: myDrafts || undefined,
         page,
         pageSize: 20,
       }),
@@ -52,6 +64,17 @@ export function JournalsPage() {
   });
 
   const totalPages = data ? Math.ceil(data.total / 20) : 0;
+
+  function resetFilters() {
+    setSearch('');
+    setFromDate('');
+    setToDate('');
+    setStatusFilter('');
+    setMyDrafts(false);
+    setPage(1);
+  }
+
+  const hasActiveFilters = search || fromDate || toDate || statusFilter || myDrafts;
 
   return (
     <div className="p-6 space-y-5">
@@ -63,27 +86,80 @@ export function JournalsPage() {
           <p className="text-sm text-muted-foreground mt-0.5">{data?.total ?? 0} entries</p>
         </div>
         <Link to="/journals/new">
-          <Button size="sm"><Plus size={14} /> New Entry</Button>
+          <Button size="sm">
+            <Plus size={14} className="mr-1" /> New Entry
+          </Button>
         </Link>
       </div>
 
       <Card>
-        <CardHeader className="pb-3">
-          <div className="flex flex-wrap gap-1.5">
+        <CardHeader className="pb-3 space-y-3">
+          {/* Status filter chips */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              onClick={() => { setMyDrafts(true); setStatusFilter(''); setPage(1); }}
+              className={cn(
+                'px-3 py-1 rounded-full text-xs font-medium border transition-colors',
+                myDrafts
+                  ? 'bg-primary text-primary-foreground border-primary'
+                  : 'bg-background text-muted-foreground border-border hover:bg-accent',
+              )}
+            >
+              My Drafts
+            </button>
             {STATUS_OPTIONS.map((s) => (
               <button
                 key={s || 'all'}
-                onClick={() => { setStatusFilter(s); setPage(1); }}
+                onClick={() => { setStatusFilter(s); setMyDrafts(false); setPage(1); }}
                 className={cn(
                   'px-3 py-1 rounded-full text-xs font-medium border transition-colors',
-                  statusFilter === s
+                  !myDrafts && statusFilter === s
                     ? 'bg-primary text-primary-foreground border-primary'
                     : 'bg-background text-muted-foreground border-border hover:bg-accent',
                 )}
               >
-                {s ? s.replace('_', ' ') : 'All'}
+                {s ? s.replace(/_/g, ' ') : 'All'}
               </button>
             ))}
+          </div>
+
+          {/* Search + date range row */}
+          <div className="flex flex-wrap gap-2 items-center">
+            <div className="relative flex-1 min-w-48">
+              <Search size={13} className="absolute left-2.5 top-2.5 text-muted-foreground pointer-events-none" />
+              <Input
+                className="pl-7 h-8 text-xs"
+                placeholder="Search by number or description…"
+                value={search}
+                onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+              />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <label className="text-xs text-muted-foreground whitespace-nowrap">From</label>
+              <Input
+                type="date"
+                className="h-8 text-xs w-36"
+                value={fromDate}
+                onChange={(e) => { setFromDate(e.target.value); setPage(1); }}
+              />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <label className="text-xs text-muted-foreground whitespace-nowrap">To</label>
+              <Input
+                type="date"
+                className="h-8 text-xs w-36"
+                value={toDate}
+                onChange={(e) => { setToDate(e.target.value); setPage(1); }}
+              />
+            </div>
+            {hasActiveFilters && (
+              <button
+                onClick={resetFilters}
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+              >
+                <X size={12} /> Clear
+              </button>
+            )}
           </div>
         </CardHeader>
 
@@ -112,7 +188,11 @@ export function JournalsPage() {
                 </TableHeader>
                 <TableBody>
                   {data.entries.map((j) => (
-                    <TableRow key={j.id}>
+                    <TableRow
+                      key={j.id}
+                      className="cursor-pointer hover:bg-muted/40"
+                      onClick={() => void navigate(`/journals/${j.id}`)}
+                    >
                       <TableCell className="font-mono text-xs font-semibold text-primary">
                         {j.journalNumber}
                       </TableCell>
@@ -144,7 +224,6 @@ export function JournalsPage() {
                 </TableBody>
               </Table>
 
-              {/* Pagination */}
               {totalPages > 1 && (
                 <div className="flex items-center justify-between px-4 py-3 border-t text-sm text-muted-foreground">
                   <span>Page {page} of {totalPages}</span>

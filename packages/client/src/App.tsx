@@ -8,6 +8,7 @@ import { DashboardPage } from './pages/dashboard/DashboardPage';
 import { AccountsPage } from './pages/accounts/AccountsPage';
 import { JournalsPage } from './pages/journals/JournalsPage';
 import { JournalCreatePage } from './pages/journals/JournalCreatePage';
+import { JournalDetailPage } from './pages/journals/JournalDetailPage';
 import { TrialBalancePage } from './pages/ledger/TrialBalancePage';
 import { BalanceSheetPage } from './pages/reports/BalanceSheetPage';
 import { IncomeStatementPage } from './pages/reports/IncomeStatementPage';
@@ -78,6 +79,8 @@ export default function App() {
           <Route path="/accounts" element={<AccountsPage />} />
           <Route path="/journals" element={<JournalsPage />} />
           <Route path="/journals/new" element={<JournalCreatePage />} />
+          <Route path="/journals/:id" element={<JournalDetailPage />} />
+          <Route path="/journals/:id/edit" element={<JournalCreatePage />} />
           <Route path="/periods" element={<PeriodsPage />} />
           <Route path="/ar" element={<ARPage />} />
           <Route path="/ap" element={<APPage />} />

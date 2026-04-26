@@ -1,9 +1,11 @@
-import { useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useCallback, useEffect } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { Plus, Trash2, ArrowLeft, AlertCircle } from 'lucide-react';
+import { Plus, Trash2, ArrowLeft, AlertCircle, Wand2 } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
-import { createJournal } from '@/services/journals.service';
+import {
+  createJournal, updateJournal, submitJournal, getJournal,
+} from '@/services/journals.service';
 import { listAccounts } from '@/services/accounts.service';
 import { listPeriods } from '@/services/periods.service';
 import { Button } from '@/components/ui/button';
@@ -28,6 +30,8 @@ interface Line {
 function numVal(s: string) { return parseFloat(s) || 0; }
 
 export function JournalCreatePage() {
+  const { id } = useParams<{ id?: string }>();
+  const isEdit = !!id;
   const navigate = useNavigate();
   const activeOrganisationId = useAuthStore((s) => s.activeOrganisationId);
   const user = useAuthStore((s) => s.user);
@@ -46,6 +50,35 @@ export function JournalCreatePage() {
     { id: 2, accountId: '', description: '', debitAmount: '', creditAmount: '' },
   ]);
   const [nextId, setNextId] = useState(3);
+  const [initialized, setInitialized] = useState(false);
+
+  const { data: existingJournal } = useQuery({
+    queryKey: ['journal', activeOrganisationId, id],
+    queryFn: () => getJournal(activeOrganisationId!, id!),
+    enabled: isEdit && !!activeOrganisationId,
+  });
+
+  useEffect(() => {
+    if (existingJournal && !initialized) {
+      setType(existingJournal.type);
+      setDescription(existingJournal.description);
+      setReference(existingJournal.reference ?? '');
+      setEntryDate(existingJournal.entryDate.slice(0, 10));
+      if (existingJournal.periodId) setPeriodId(existingJournal.periodId);
+      const mapped = (existingJournal.lines ?? []).map((l, i) => ({
+        id: i + 1,
+        accountId: l.accountId,
+        description: l.description ?? '',
+        debitAmount: parseFloat(l.debitAmount) > 0 ? l.debitAmount : '',
+        creditAmount: parseFloat(l.creditAmount) > 0 ? l.creditAmount : '',
+      }));
+      if (mapped.length) {
+        setLines(mapped);
+        setNextId(mapped.length + 1);
+      }
+      setInitialized(true);
+    }
+  }, [existingJournal, initialized]);
 
   const { data: accountsData } = useQuery({
     queryKey: ['accounts', activeOrganisationId],
@@ -64,54 +97,109 @@ export function JournalCreatePage() {
   const totalDebit = lines.reduce((s, l) => s + numVal(l.debitAmount), 0);
   const totalCredit = lines.reduce((s, l) => s + numVal(l.creditAmount), 0);
   const isBalanced = Math.abs(totalDebit - totalCredit) < 0.0001 && totalDebit > 0;
+  const imbalance = totalDebit - totalCredit;
 
   const addLine = useCallback(() => {
-    setLines((prev) => [...prev, { id: nextId, accountId: '', description: '', debitAmount: '', creditAmount: '' }]);
+    setLines((prev) => [
+      ...prev,
+      { id: nextId, accountId: '', description: '', debitAmount: '', creditAmount: '' },
+    ]);
     setNextId((n) => n + 1);
   }, [nextId]);
 
-  const removeLine = useCallback((id: number) => {
-    setLines((prev) => prev.filter((l) => l.id !== id));
+  const removeLine = useCallback((lineId: number) => {
+    setLines((prev) => prev.filter((l) => l.id !== lineId));
   }, []);
 
-  const updateLine = useCallback((id: number, field: keyof Line, value: string) => {
-    setLines((prev) => prev.map((l) => l.id === id ? { ...l, [field]: value } : l));
-  }, []);
-
-  const mutation = useMutation({
-    mutationFn: () =>
-      createJournal(activeOrganisationId!, {
-        type,
-        description,
-        reference: reference || undefined,
-        entryDate,
-        periodId,
-        currency,
-        exchangeRate: 1,
-        lines: lines
-          .filter((l) => l.accountId)
-          .map((l) => ({
-            accountId: l.accountId,
-            description: l.description || undefined,
-            debitAmount: numVal(l.debitAmount),
-            creditAmount: numVal(l.creditAmount),
-            exchangeRate: 1,
-          })),
+  const updateLine = useCallback((lineId: number, field: keyof Line, value: string) => {
+    setLines((prev) =>
+      prev.map((l) => {
+        if (l.id !== lineId) return l;
+        // Mutual exclusion: entering a debit clears credit and vice versa
+        if (field === 'debitAmount' && value !== '')
+          return { ...l, debitAmount: value, creditAmount: '' };
+        if (field === 'creditAmount' && value !== '')
+          return { ...l, debitAmount: '', creditAmount: value };
+        return { ...l, [field]: value };
       }),
-    onSuccess: () => void navigate('/journals'),
+    );
+  }, []);
+
+  // Auto-balance: fill the last line's empty side to make totals equal
+  const autoBalance = useCallback(() => {
+    const lastLine = lines[lines.length - 1];
+    if (!lastLine) return;
+    const diff = Math.abs(imbalance);
+    if (diff < 0.0001) return;
+    if (imbalance > 0) {
+      // debits > credits → add credit to last line
+      setLines((prev) =>
+        prev.map((l, i) =>
+          i === prev.length - 1
+            ? { ...l, debitAmount: '', creditAmount: diff.toFixed(2) }
+            : l,
+        ),
+      );
+    } else {
+      // credits > debits → add debit to last line
+      setLines((prev) =>
+        prev.map((l, i) =>
+          i === prev.length - 1
+            ? { ...l, debitAmount: diff.toFixed(2), creditAmount: '' }
+            : l,
+        ),
+      );
+    }
+  }, [lines, imbalance]);
+
+  function buildPayload() {
+    return {
+      type,
+      description,
+      reference: reference || undefined,
+      entryDate,
+      periodId,
+      currency,
+      exchangeRate: 1,
+      lines: lines
+        .filter((l) => l.accountId)
+        .map((l) => ({
+          accountId: l.accountId,
+          description: l.description || undefined,
+          debitAmount: numVal(l.debitAmount),
+          creditAmount: numVal(l.creditAmount),
+          exchangeRate: 1,
+        })),
+    };
+  }
+
+  const saveMut = useMutation({
+    mutationFn: async ({ submitAfter }: { submitAfter: boolean }) => {
+      const payload = buildPayload();
+      const entry = isEdit
+        ? await updateJournal(activeOrganisationId!, id!, payload)
+        : await createJournal(activeOrganisationId!, payload);
+      if (submitAfter) await submitJournal(activeOrganisationId!, entry.id);
+      return entry;
+    },
+    onSuccess: (entry, { submitAfter }) => {
+      void navigate(submitAfter ? `/journals/${entry.id}` : '/journals');
+    },
   });
 
   const accounts = accountsData?.accounts ?? [];
-  const canSubmit = description && periodId && isBalanced && lines.some((l) => l.accountId);
+  const canSave = description && periodId && isBalanced && lines.some((l) => l.accountId);
 
   return (
     <div className="p-6 max-w-5xl space-y-5">
       <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" onClick={() => void navigate('/journals')}>
+        <Button variant="ghost" size="icon" onClick={() => void navigate(isEdit ? `/journals/${id}` : '/journals')}>
           <ArrowLeft size={16} />
         </Button>
         <div>
-          <h1 className="text-xl font-semibold">New Journal Entry</h1>
+          <h1 className="text-xl font-semibold">
+            {isEdit ? 'Edit Journal Entry' : 'New Journal Entry'}
+          </h1>
           <p className="text-sm text-muted-foreground">Double-entry — debits must equal credits</p>
         </div>
       </div>
@@ -169,14 +257,26 @@ export function JournalCreatePage() {
       {/* Lines */}
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-4">
             <CardTitle>Journal Lines</CardTitle>
-            <div className={cn(
-              'text-xs font-mono px-2 py-1 rounded-md',
-              isBalanced ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700',
-            )}>
-              DR {totalDebit.toFixed(2)} / CR {totalCredit.toFixed(2)}
-              {isBalanced ? ' ✓' : ' — unbalanced'}
+            <div className="flex items-center gap-2">
+              {!isBalanced && totalDebit > 0 && (
+                <button
+                  onClick={autoBalance}
+                  className="flex items-center gap-1 text-xs text-primary border border-primary/30 px-2 py-1 rounded hover:bg-primary/5"
+                >
+                  <Wand2 size={11} /> Auto-balance last line
+                </button>
+              )}
+              <div
+                className={cn(
+                  'text-xs font-mono px-2 py-1 rounded-md',
+                  isBalanced ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700',
+                )}
+              >
+                DR {totalDebit.toFixed(2)} / CR {totalCredit.toFixed(2)}
+                {isBalanced ? ' ✓' : ' — unbalanced'}
+              </div>
             </div>
           </div>
         </CardHeader>
@@ -188,8 +288,12 @@ export function JournalCreatePage() {
                   <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground w-8">#</th>
                   <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-52">Account *</th>
                   <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground min-w-40">Description</th>
-                  <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground w-36">Debit ({currency})</th>
-                  <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground w-36">Credit ({currency})</th>
+                  <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground w-36">
+                    Debit ({currency})
+                  </th>
+                  <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground w-36">
+                    Credit ({currency})
+                  </th>
                   <th className="px-3 py-2 w-10"></th>
                 </tr>
               </thead>
@@ -234,7 +338,10 @@ export function JournalCreatePage() {
                         placeholder="0.00"
                         min={0}
                         step="0.01"
-                        className="w-full text-xs border border-input rounded-md px-2 py-1.5 bg-background text-right focus:outline-none focus:ring-2 focus:ring-ring debit-amount"
+                        className={cn(
+                          'w-full text-xs border border-input rounded-md px-2 py-1.5 bg-background text-right focus:outline-none focus:ring-2 focus:ring-ring',
+                          line.debitAmount ? 'font-semibold' : '',
+                        )}
                       />
                     </td>
                     <td className="px-3 py-2">
@@ -245,7 +352,10 @@ export function JournalCreatePage() {
                         placeholder="0.00"
                         min={0}
                         step="0.01"
-                        className="w-full text-xs border border-input rounded-md px-2 py-1.5 bg-background text-right focus:outline-none focus:ring-2 focus:ring-ring credit-amount"
+                        className={cn(
+                          'w-full text-xs border border-input rounded-md px-2 py-1.5 bg-background text-right focus:outline-none focus:ring-2 focus:ring-ring',
+                          line.creditAmount ? 'font-semibold' : '',
+                        )}
                       />
                     </td>
                     <td className="px-3 py-2">
@@ -271,10 +381,10 @@ export function JournalCreatePage() {
                       <Plus size={12} /> Add line
                     </button>
                   </td>
-                  <td className="px-3 py-2 text-right font-mono text-xs font-semibold debit-amount">
+                  <td className="px-3 py-2 text-right font-mono text-xs font-semibold">
                     {totalDebit.toFixed(2)}
                   </td>
-                  <td className="px-3 py-2 text-right font-mono text-xs font-semibold credit-amount">
+                  <td className="px-3 py-2 text-right font-mono text-xs font-semibold">
                     {totalCredit.toFixed(2)}
                   </td>
                   <td></td>
@@ -286,24 +396,35 @@ export function JournalCreatePage() {
       </Card>
 
       {/* Error */}
-      {mutation.isError && (
+      {saveMut.isError && (
         <div className="flex items-center gap-2 text-sm text-destructive bg-destructive/10 rounded-md px-4 py-3 border border-destructive/20">
           <AlertCircle size={14} />
-          {(mutation.error as { response?: { data?: { error?: { message?: string } } } })
+          {(saveMut.error as { response?: { data?: { error?: { message?: string } } } })
             ?.response?.data?.error?.message ?? 'Failed to save journal entry'}
         </div>
       )}
 
       {/* Actions */}
       <div className="flex items-center justify-between">
-        <Button variant="outline" onClick={() => void navigate('/journals')}>Cancel</Button>
+        <Button
+          variant="outline"
+          onClick={() => void navigate(isEdit ? `/journals/${id}` : '/journals')}
+        >
+          Cancel
+        </Button>
         <div className="flex gap-2">
           <Button
             variant="outline"
-            disabled={!canSubmit || mutation.isPending}
-            onClick={() => mutation.mutate()}
+            disabled={!canSave || saveMut.isPending}
+            onClick={() => saveMut.mutate({ submitAfter: false })}
           >
-            {mutation.isPending ? 'Saving…' : 'Save as Draft'}
+            {saveMut.isPending && !saveMut.variables?.submitAfter ? 'Saving…' : 'Save as Draft'}
+          </Button>
+          <Button
+            disabled={!canSave || saveMut.isPending}
+            onClick={() => saveMut.mutate({ submitAfter: true })}
+          >
+            {saveMut.isPending && saveMut.variables?.submitAfter ? 'Submitting…' : 'Save & Submit'}
           </Button>
         </div>
       </div>
