@@ -29,8 +29,19 @@ prisma.$on('warn' as never, (e: { message: string; target: string }) => {
 });
 
 export async function connectDatabase(): Promise<void> {
-  await prisma.$connect();
-  logger.info('Database connection established');
+  const maxRetries = 5;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await prisma.$connect();
+      logger.info('Database connection established');
+      return;
+    } catch (err) {
+      if (attempt === maxRetries) throw err;
+      const delay = attempt * 2000;
+      logger.warn(`Database connection attempt ${attempt} failed — retrying in ${delay}ms`, { err });
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
 }
 
 export async function disconnectDatabase(): Promise<void> {
