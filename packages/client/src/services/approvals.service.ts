@@ -14,13 +14,30 @@ export interface ApprovalRequest {
   decisions?: { id: string; levelNumber: number; decision: string; comments: string; decidedAt: string; decider?: { firstName: string; lastName: string } }[];
 }
 
+export interface ApprovalLevelUser {
+  id: string;
+  userId: string;
+  user: { id: string; firstName: string; lastName: string; email: string };
+}
+
+export interface ApprovalLevel {
+  id: string;
+  levelNumber: number;
+  name: string;
+  approvalType: 'ANY_ONE' | 'ALL_REQUIRED' | 'MAJORITY';
+  amountThresholdMin: string | null;
+  amountThresholdMax: string | null;
+  escalationHours: number | null;
+  approvers: ApprovalLevelUser[];
+}
+
 export interface ApprovalWorkflow {
   id: string;
   name: string;
   description: string | null;
   entityType: string;
   isActive: boolean;
-  levels?: { id: string; levelNumber: number; name: string; approvalType: string }[];
+  levels?: ApprovalLevel[];
 }
 
 export async function listRequests(organisationId: string, params?: { status?: string; entityType?: string }) {
@@ -43,7 +60,42 @@ export async function listWorkflows(organisationId: string) {
   return res.data.data as ApprovalWorkflow[];
 }
 
+export async function getWorkflow(organisationId: string, workflowId: string) {
+  const res = await api.get(`/organisations/${organisationId}/approvals/workflows/${workflowId}`);
+  return res.data.data as ApprovalWorkflow;
+}
+
 export async function createWorkflow(organisationId: string, data: { name: string; description?: string; entityType: string }) {
   const res = await api.post(`/organisations/${organisationId}/approvals/workflows`, data);
   return res.data.data as ApprovalWorkflow;
+}
+
+export async function updateWorkflow(organisationId: string, workflowId: string, data: { name?: string; description?: string; isActive?: boolean }) {
+  const res = await api.patch(`/organisations/${organisationId}/approvals/workflows/${workflowId}`, data);
+  return res.data.data as ApprovalWorkflow;
+}
+
+export async function addLevel(organisationId: string, workflowId: string, data: {
+  levelNumber: number;
+  name: string;
+  approvalType: string;
+  escalationHours?: number;
+  amountThresholdMin?: number;
+  amountThresholdMax?: number;
+}) {
+  const res = await api.post(`/organisations/${organisationId}/approvals/workflows/${workflowId}/levels`, data);
+  return res.data.data as ApprovalLevel;
+}
+
+export async function removeLevel(organisationId: string, workflowId: string, levelId: string) {
+  await api.delete(`/organisations/${organisationId}/approvals/workflows/${workflowId}/levels/${levelId}`);
+}
+
+export async function addApprover(organisationId: string, workflowId: string, levelId: string, userId: string) {
+  const res = await api.post(`/organisations/${organisationId}/approvals/workflows/${workflowId}/levels/${levelId}/approvers`, { userId });
+  return res.data.data as ApprovalLevelUser;
+}
+
+export async function removeApprover(organisationId: string, workflowId: string, levelId: string, userId: string) {
+  await api.delete(`/organisations/${organisationId}/approvals/workflows/${workflowId}/levels/${levelId}/approvers/${userId}`);
 }
