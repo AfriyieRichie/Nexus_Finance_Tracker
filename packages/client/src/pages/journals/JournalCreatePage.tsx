@@ -81,8 +81,8 @@ export function JournalCreatePage() {
   }, [existingJournal, initialized]);
 
   const { data: accountsData } = useQuery({
-    queryKey: ['accounts', activeOrganisationId],
-    queryFn: () => listAccounts(activeOrganisationId!, { pageSize: 500 }),
+    queryKey: ['accounts', activeOrganisationId, 'posting'],
+    queryFn: () => listAccounts(activeOrganisationId!, { pageSize: 500, isControlAccount: false }),
     enabled: !!activeOrganisationId,
   });
 

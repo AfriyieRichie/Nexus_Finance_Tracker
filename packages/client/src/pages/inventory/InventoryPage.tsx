@@ -18,8 +18,8 @@ function NewItemDialog({ organisationId }: { organisationId: string }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const { data: accountsData } = useQuery({
-    queryKey: ['accounts', organisationId],
-    queryFn: () => listAccounts(organisationId, { pageSize: 200 }),
+    queryKey: ['accounts', organisationId, 'posting'],
+    queryFn: () => listAccounts(organisationId, { pageSize: 200, isControlAccount: false }),
     enabled: open,
   });
   const [form, setForm] = useState({

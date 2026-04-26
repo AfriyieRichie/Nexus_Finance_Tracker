@@ -102,8 +102,8 @@ function NewSupplierInvoiceDialog({ organisationId }: { organisationId: string }
   });
 
   const { data: accountsData } = useQuery({
-    queryKey: ['accounts', organisationId],
-    queryFn: () => listAccounts(organisationId, { pageSize: 200 }),
+    queryKey: ['accounts', organisationId, 'posting'],
+    queryFn: () => listAccounts(organisationId, { pageSize: 200, isControlAccount: false }),
     enabled: open,
   });
 

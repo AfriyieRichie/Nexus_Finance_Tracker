@@ -155,6 +155,7 @@ export async function listAccounts(organisationId: string, query: ListAccountsQu
     ...(query.class && { class: query.class }),
     ...(query.type && { type: query.type }),
     ...(query.isActive !== undefined && { isActive: query.isActive }),
+    ...(query.isControlAccount !== undefined && { isControlAccount: query.isControlAccount }),
     ...(query.parentId !== undefined && { parentId: query.parentId }),
     ...(query.search && {
       OR: [

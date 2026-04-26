@@ -36,6 +36,10 @@ export const listAccountsSchema = z.object({
     .string()
     .optional()
     .transform((v) => (v === undefined ? undefined : v === 'true')),
+  isControlAccount: z
+    .string()
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v === 'true')),
   search: z.string().max(100).optional(),
   page: z
     .string()

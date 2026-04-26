@@ -66,7 +66,7 @@ export const ACCOUNT_TYPES_BY_CLASS: Record<string, { value: string; label: stri
 
 export async function listAccounts(
   organisationId: string,
-  params?: { search?: string; class?: string; isActive?: boolean; page?: number; pageSize?: number },
+  params?: { search?: string; class?: string; isActive?: boolean; isControlAccount?: boolean; page?: number; pageSize?: number },
 ) {
   const res = await api.get<AccountsResponse>(`/organisations/${organisationId}/accounts`, {
     params: { pageSize: 500, ...params },
