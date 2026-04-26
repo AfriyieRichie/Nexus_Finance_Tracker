@@ -449,5 +449,10 @@ async function checkLevelSatisfied(
     });
   }
 
-  return { status: 'APPROVED', requestId: request.id };
+  return {
+    status: 'APPROVED' as const,
+    requestId: request.id,
+    entityType: request.entityType,
+    entityId: request.entityId,
+  };
 }
