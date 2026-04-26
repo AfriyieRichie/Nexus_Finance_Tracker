@@ -17,6 +17,8 @@ export const ledgerQuerySchema = z.object({
 export const trialBalanceQuerySchema = z.object({
   asOfDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   periodId: z.string().uuid().optional(),
+  fromDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  toDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   includeZeroBalances: z
     .string()
     .optional()

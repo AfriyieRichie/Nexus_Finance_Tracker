@@ -79,6 +79,8 @@ export async function getAccountLedger(
 export interface TrialBalanceOptions {
   asOfDate?: string;
   periodId?: string;
+  fromDate?: string;
+  toDate?: string;
   includeZeroBalances?: boolean;
 }
 
@@ -104,6 +106,13 @@ export async function getTrialBalance(
     ? { transactionDate: { lte: new Date(options.asOfDate + 'T00:00:00Z') } }
     : options.periodId
     ? { periodId: options.periodId }
+    : options.fromDate || options.toDate
+    ? {
+        transactionDate: {
+          ...(options.fromDate && { gte: new Date(options.fromDate + 'T00:00:00Z') }),
+          ...(options.toDate && { lte: new Date(options.toDate + 'T00:00:00Z') }),
+        },
+      }
     : {};
 
   // Aggregate all posted ledger amounts grouped by account

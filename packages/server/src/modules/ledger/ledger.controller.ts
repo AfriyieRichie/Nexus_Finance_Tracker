@@ -30,6 +30,8 @@ export const getTrialBalance = asyncHandler(async (req: Request, res: Response) 
   const result = await ledgerService.getTrialBalance(organisationId, {
     asOfDate: query.asOfDate,
     periodId: query.periodId,
+    fromDate: query.fromDate,
+    toDate: query.toDate,
     includeZeroBalances: query.includeZeroBalances,
   });
   return sendSuccess(res, result);
