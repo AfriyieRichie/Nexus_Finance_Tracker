@@ -18,8 +18,10 @@ router.post('/invoices', ctrl.createInvoice);
 router.get('/invoices/:invoiceId', ctrl.getInvoice);
 router.post('/invoices/:invoiceId/post', ctrl.postInvoice);
 
-// Payments & Ageing
+// Payments, Credit Notes, Bad Debt & Ageing
 router.post('/payments', ctrl.recordPayment);
+router.post('/credit-notes', ctrl.createCreditNote);
+router.post('/write-offs', ctrl.writeBadDebt);
 router.get('/ageing', ctrl.getArAgeing);
 
 export { router as arRouter };

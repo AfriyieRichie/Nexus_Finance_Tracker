@@ -5,6 +5,7 @@ import * as journalService from '../journals/journal.service';
 import type {
   CreateCustomerInput, UpdateCustomerInput, ListCustomersQuery,
   CreateInvoiceInput, ListInvoicesQuery, RecordPaymentInput,
+  CreateCreditNoteInput, WriteBadDebtInput,
 } from './ar.schemas';
 
 // ─── Customers ───────────────────────────────────────────────────────────────
@@ -329,6 +330,177 @@ export async function getInvoice(organisationId: string, invoiceId: string) {
   });
   if (!invoice) throw new NotFoundError('Invoice not found');
   return invoice;
+}
+
+// ─── Credit Notes ────────────────────────────────────────────────────────────
+
+async function nextCreditNoteNumber(orgId: string): Promise<string> {
+  const year = new Date().getFullYear();
+  const count = await prisma.journalEntry.count({
+    where: { organisationId: orgId, reference: { startsWith: `CN-${year}-` } },
+  });
+  return `CN-${year}-${String(count + 1).padStart(6, '0')}`;
+}
+
+export async function createCreditNote(organisationId: string, userId: string, input: CreateCreditNoteInput) {
+  const invoice = await prisma.invoice.findFirst({
+    where: { id: input.invoiceId, organisationId },
+    include: { customer: true, lines: true },
+  });
+  if (!invoice) throw new NotFoundError('Invoice not found');
+  if (invoice.status === 'DRAFT') throw new ValidationError('Cannot issue credit note against a draft invoice');
+  if (invoice.status === 'VOID') throw new ValidationError('Invoice is already voided');
+
+  const arAccount = await prisma.account.findFirst({
+    where: { organisationId, type: 'RECEIVABLE', isActive: true, isDeleted: false },
+  });
+  if (!arAccount) throw new ValidationError('No AR control account found');
+
+  let revenueAccountId = input.revenueAccountId;
+  if (!revenueAccountId) {
+    const lineWithAccount = invoice.lines.find((l) => l.accountId);
+    if (lineWithAccount?.accountId) {
+      revenueAccountId = lineWithAccount.accountId;
+    } else {
+      const revenueAccount = await prisma.account.findFirst({
+        where: { organisationId, class: 'REVENUE', isActive: true, isDeleted: false },
+      });
+      if (!revenueAccount) throw new ValidationError('No revenue account found');
+      revenueAccountId = revenueAccount.id;
+    }
+  }
+
+  const amount = new Prisma.Decimal(input.amount);
+  const outstanding = invoice.totalAmount.minus(invoice.amountPaid);
+  if (amount.greaterThan(outstanding)) {
+    throw new ValidationError(`Credit note amount exceeds outstanding balance of ${outstanding.toFixed(2)}`);
+  }
+
+  const cnNumber = await nextCreditNoteNumber(organisationId);
+
+  const journalEntry = await journalService.createJournalEntry(
+    organisationId,
+    {
+      type: 'GENERAL',
+      reference: cnNumber,
+      description: `Credit Note – ${invoice.customer.name} – ${invoice.invoiceNumber}${input.reason ? ` – ${input.reason}` : ''}`,
+      entryDate: input.creditDate,
+      periodId: input.periodId,
+      currency: invoice.currency,
+      exchangeRate: Number(invoice.exchangeRate),
+      lines: [
+        {
+          accountId: revenueAccountId,
+          description: `Credit Note – ${invoice.invoiceNumber}`,
+          debitAmount: Number(amount),
+          creditAmount: 0,
+          currency: invoice.currency,
+          exchangeRate: Number(invoice.exchangeRate),
+        },
+        {
+          accountId: arAccount.id,
+          description: `AR Credit – ${invoice.invoiceNumber}`,
+          debitAmount: 0,
+          creditAmount: Number(amount),
+          currency: invoice.currency,
+          exchangeRate: Number(invoice.exchangeRate),
+        },
+      ],
+    },
+    userId,
+  );
+
+  await journalService.postJournalEntry(organisationId, journalEntry.id, userId);
+
+  const newAmountPaid = invoice.amountPaid.plus(amount);
+  const newStatus = newAmountPaid.greaterThanOrEqualTo(invoice.totalAmount) ? 'PAID' : 'PARTIALLY_PAID';
+
+  await prisma.invoice.update({
+    where: { id: input.invoiceId },
+    data: { amountPaid: newAmountPaid, status: newStatus },
+  });
+
+  return { creditNoteNumber: cnNumber, journalEntryId: journalEntry.id, newStatus };
+}
+
+// ─── Bad Debt Write-off ───────────────────────────────────────────────────────
+
+export async function writeBadDebt(organisationId: string, userId: string, input: WriteBadDebtInput) {
+  const invoice = await prisma.invoice.findFirst({
+    where: { id: input.invoiceId, organisationId },
+    include: { customer: true },
+  });
+  if (!invoice) throw new NotFoundError('Invoice not found');
+  if (invoice.status === 'DRAFT') throw new ValidationError('Cannot write off a draft invoice');
+  if (invoice.status === 'VOID' || invoice.status === 'PAID') throw new ValidationError('Invoice is already closed');
+
+  const arAccount = await prisma.account.findFirst({
+    where: { organisationId, type: 'RECEIVABLE', isActive: true, isDeleted: false },
+  });
+  if (!arAccount) throw new ValidationError('No AR control account found');
+
+  let expenseAccountId = input.expenseAccountId;
+  if (!expenseAccountId) {
+    const badDebtAccount = await prisma.account.findFirst({
+      where: { organisationId, class: 'EXPENSE', isActive: true, isDeleted: false, name: { contains: 'bad debt', mode: 'insensitive' } },
+    });
+    if (badDebtAccount) {
+      expenseAccountId = badDebtAccount.id;
+    } else {
+      const fallbackExpense = await prisma.account.findFirst({
+        where: { organisationId, class: 'EXPENSE', isActive: true, isDeleted: false },
+      });
+      if (!fallbackExpense) throw new ValidationError('No expense account found. Specify an expense account for write-off.');
+      expenseAccountId = fallbackExpense.id;
+    }
+  }
+
+  const outstanding = invoice.totalAmount.minus(invoice.amountPaid);
+  const amount = new Prisma.Decimal(input.amount);
+  if (amount.greaterThan(outstanding)) {
+    throw new ValidationError(`Write-off amount exceeds outstanding balance of ${outstanding.toFixed(2)}`);
+  }
+
+  const journalEntry = await journalService.createJournalEntry(
+    organisationId,
+    {
+      type: 'GENERAL',
+      reference: `WO-${invoice.invoiceNumber}`,
+      description: `Bad Debt Write-off – ${invoice.customer.name} – ${invoice.invoiceNumber}`,
+      entryDate: input.writeOffDate,
+      periodId: input.periodId,
+      currency: invoice.currency,
+      exchangeRate: Number(invoice.exchangeRate),
+      lines: [
+        {
+          accountId: expenseAccountId,
+          description: `Bad Debt – ${invoice.invoiceNumber}`,
+          debitAmount: Number(amount),
+          creditAmount: 0,
+          currency: invoice.currency,
+          exchangeRate: Number(invoice.exchangeRate),
+        },
+        {
+          accountId: arAccount.id,
+          description: `AR Write-off – ${invoice.invoiceNumber}`,
+          debitAmount: 0,
+          creditAmount: Number(amount),
+          currency: invoice.currency,
+          exchangeRate: Number(invoice.exchangeRate),
+        },
+      ],
+    },
+    userId,
+  );
+
+  await journalService.postJournalEntry(organisationId, journalEntry.id, userId);
+
+  await prisma.invoice.update({
+    where: { id: input.invoiceId },
+    data: { status: 'VOID', amountPaid: invoice.totalAmount },
+  });
+
+  return { journalEntryId: journalEntry.id, amountWrittenOff: Number(amount).toFixed(2) };
 }
 
 // ─── AR Ageing ───────────────────────────────────────────────────────────────

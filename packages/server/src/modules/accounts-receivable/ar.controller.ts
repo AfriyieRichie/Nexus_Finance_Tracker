@@ -4,6 +4,7 @@ import { sendSuccess, sendCreated, sendPaginated, buildPagination } from '../../
 import {
   createCustomerSchema, updateCustomerSchema, listCustomersSchema,
   createInvoiceSchema, listInvoicesSchema, recordPaymentSchema,
+  createCreditNoteSchema, writeBadDebtSchema,
 } from './ar.schemas';
 import * as arService from './ar.service';
 
@@ -85,4 +86,20 @@ export const getArAgeing = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId } = req.params;
   const ageing = await arService.getArAgeing(organisationId);
   return sendSuccess(res, ageing);
+});
+
+export const createCreditNote = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId } = req.params;
+  const userId = req.user!.sub;
+  const input = createCreditNoteSchema.parse(req.body);
+  const result = await arService.createCreditNote(organisationId, userId, input);
+  return sendCreated(res, result, 'Credit note issued');
+});
+
+export const writeBadDebt = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId } = req.params;
+  const userId = req.user!.sub;
+  const input = writeBadDebtSchema.parse(req.body);
+  const result = await arService.writeBadDebt(organisationId, userId, input);
+  return sendSuccess(res, result, 'Bad debt written off');
 });

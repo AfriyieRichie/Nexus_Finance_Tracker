@@ -63,9 +63,28 @@ export const recordPaymentSchema = z.object({
   reference: z.string().optional(),
 });
 
+export const createCreditNoteSchema = z.object({
+  invoiceId: z.string().uuid(),
+  creditDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  periodId: z.string().uuid(),
+  amount: z.number().positive(),
+  reason: z.string().optional(),
+  revenueAccountId: z.string().uuid().optional(),
+});
+
+export const writeBadDebtSchema = z.object({
+  invoiceId: z.string().uuid(),
+  writeOffDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  periodId: z.string().uuid(),
+  amount: z.number().positive(),
+  expenseAccountId: z.string().uuid().optional(),
+});
+
 export type CreateCustomerInput = z.infer<typeof createCustomerSchema>;
 export type UpdateCustomerInput = z.infer<typeof updateCustomerSchema>;
 export type ListCustomersQuery = z.infer<typeof listCustomersSchema>;
 export type CreateInvoiceInput = z.infer<typeof createInvoiceSchema>;
 export type ListInvoicesQuery = z.infer<typeof listInvoicesSchema>;
 export type RecordPaymentInput = z.infer<typeof recordPaymentSchema>;
+export type CreateCreditNoteInput = z.infer<typeof createCreditNoteSchema>;
+export type WriteBadDebtInput = z.infer<typeof writeBadDebtSchema>;
