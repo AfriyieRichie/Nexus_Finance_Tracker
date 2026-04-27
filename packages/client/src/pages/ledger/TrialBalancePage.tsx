@@ -1,8 +1,9 @@
 import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { Scale, CheckCircle, AlertCircle, Download, Printer } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
-import { getTrialBalance, getAccountLedger } from '@/services/ledger.service';
+import { getTrialBalance } from '@/services/ledger.service';
 import type { TrialBalanceLine } from '@/services/ledger.service';
 import { listPeriods } from '@/services/periods.service';
 import type { AccountingPeriod } from '@/services/periods.service';
@@ -21,7 +22,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 
 const CLASS_ORDER = ['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'];
@@ -62,17 +62,18 @@ function fmtDate(d: string) {
   });
 }
 
-// Extract distinct fiscal years from periods, sorted descending
 function fiscalYears(periods: AccountingPeriod[]): number[] {
   return [...new Set(periods.map((p) => p.fiscalYear))].sort((a, b) => b - a);
 }
 
-// Get all periods in a fiscal year sorted by period number
 function periodsForYear(periods: AccountingPeriod[], year: number): AccountingPeriod[] {
-  return periods.filter((p) => p.fiscalYear === year).sort((a, b) => a.periodNumber - b.periodNumber);
+  return periods
+    .filter((p) => p.fiscalYear === year)
+    .sort((a, b) => a.periodNumber - b.periodNumber);
 }
 
 export function TrialBalancePage() {
+  const navigate = useNavigate();
   const { activeOrganisationId, user } = useAuthStore((s) => ({
     activeOrganisationId: s.activeOrganisationId,
     user: s.user,
@@ -94,9 +95,6 @@ export function TrialBalancePage() {
   // Committed (generated) state
   const [committed, setCommitted] = useState<CommittedParams | null>(null);
   const [generatedAt, setGeneratedAt] = useState<Date | null>(null);
-
-  // Drill-down
-  const [drillDown, setDrillDown] = useState<TrialBalanceLine | null>(null);
 
   // Periods list
   const { data: periods = [] } = useQuery({
@@ -124,23 +122,6 @@ export function TrialBalancePage() {
     enabled: !!activeOrganisationId && !!committed,
   });
 
-  // Account ledger drill-down
-  const drillParams = committed
-    ? {
-        periodId: committed.periodId,
-        fromDate: committed.fromDate,
-        toDate: committed.toDate,
-        pageSize: 100,
-      }
-    : undefined;
-
-  const { data: ledgerData, isLoading: ledgerLoading } = useQuery({
-    queryKey: ['account-ledger', activeOrganisationId, drillDown?.accountId, drillParams],
-    queryFn: () =>
-      getAccountLedger(activeOrganisationId!, drillDown!.accountId, drillParams),
-    enabled: !!drillDown && !!activeOrganisationId,
-  });
-
   function buildCommitted(): CommittedParams | null {
     const base = { includeZeroBalances: includeZeros };
 
@@ -157,7 +138,12 @@ export function TrialBalancePage() {
       if (yPeriods.length === 0) return null;
       const fromDate = yPeriods[0].startDate.slice(0, 10);
       const toDate = yPeriods[yPeriods.length - 1].endDate.slice(0, 10);
-      return { ...base, fromDate, toDate, label: `Fiscal Year ${year} (${fmtDate(fromDate)} – ${fmtDate(toDate)})` };
+      return {
+        ...base,
+        fromDate,
+        toDate,
+        label: `Fiscal Year ${year} (${fmtDate(fromDate)} – ${fmtDate(toDate)})`,
+      };
     }
 
     if (mode === 'periodRange') {
@@ -180,7 +166,6 @@ export function TrialBalancePage() {
       return { ...base, asOfDate, label: `As of ${fmtDate(asOfDate)}` };
     }
 
-    // allTime
     return { ...base, label: 'All Time (Cumulative)' };
   }
 
@@ -193,7 +178,23 @@ export function TrialBalancePage() {
 
   const canGenerate = !!buildCommitted();
 
-  // Filter table lines by class
+  // Navigate to Account Ledger (Level 2) on row click
+  function handleRowClick(line: TrialBalanceLine) {
+    if (!committed) return;
+    const p = new URLSearchParams();
+    if (committed.periodId) p.set('periodId', committed.periodId);
+    if (committed.fromDate) p.set('fromDate', committed.fromDate);
+    if (committed.toDate) p.set('toDate', committed.toDate);
+    if (committed.asOfDate) p.set('asOfDate', committed.asOfDate);
+    p.set('tbLabel', committed.label);
+    p.set('code', line.code);
+    p.set('name', line.name);
+    p.set('accountClass', line.class);
+    p.set('normalBalance', line.normalBalance);
+    navigate(`/ledger/accounts/${line.accountId}?${p.toString()}`);
+  }
+
+  // Filter displayed lines by class
   const filteredLines = useMemo(() => {
     const lines = data?.lines ?? [];
     if (!classFilter) return lines;
@@ -213,13 +214,7 @@ export function TrialBalancePage() {
       [],
       ['Code', 'Account', 'Class', 'Type', 'Debit', 'Credit', 'Balance'],
       ...filteredLines.map((l) => [
-        l.code,
-        l.name,
-        l.class,
-        l.type,
-        l.totalDebit,
-        l.totalCredit,
-        l.balance,
+        l.code, l.name, l.class, l.type, l.totalDebit, l.totalCredit, l.balance,
       ]),
       [],
       ['', '', '', 'TOTALS', data.totalDebit, data.totalCredit, ''],
@@ -229,14 +224,11 @@ export function TrialBalancePage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `trial-balance-${(committed?.label ?? 'export')
-      .replace(/[^a-z0-9]/gi, '-')
-      .toLowerCase()}.csv`;
+    a.download = `trial-balance-${(committed?.label ?? 'export').replace(/[^a-z0-9]/gi, '-').toLowerCase()}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
 
-  // Determine if to-period list should be constrained to same FY as fromPeriod
   const fromPeriod = periods.find((p) => p.id === fromPeriodId);
   const toPeriodOptions = fromPeriod
     ? periodsSortedDesc.filter(
@@ -255,7 +247,7 @@ export function TrialBalancePage() {
             <Scale size={18} /> Trial Balance
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            On-demand snapshot of all account balances
+            On-demand snapshot of all account balances. Click any account to drill down.
           </p>
         </div>
       </div>
@@ -264,7 +256,6 @@ export function TrialBalancePage() {
       <Card className="print:hidden">
         <CardContent className="pt-4 pb-4">
           <div className="flex flex-wrap gap-3 items-end">
-            {/* Mode */}
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">View Mode</label>
               <Select
@@ -287,15 +278,10 @@ export function TrialBalancePage() {
               </Select>
             </div>
 
-            {/* Single period */}
             {mode === 'period' && (
               <div className="space-y-1">
                 <label className="text-xs font-medium text-muted-foreground">Period</label>
-                <Select
-                  value={periodId}
-                  onChange={(e) => setPeriodId(e.target.value)}
-                  className="w-56"
-                >
+                <Select value={periodId} onChange={(e) => setPeriodId(e.target.value)} className="w-56">
                   <option value="">Select period…</option>
                   {periodsSortedDesc.map((p) => (
                     <option key={p.id} value={p.id}>
@@ -306,25 +292,16 @@ export function TrialBalancePage() {
               </div>
             )}
 
-            {/* Full fiscal year */}
             {mode === 'fiscalYear' && (
               <div className="space-y-1">
                 <label className="text-xs font-medium text-muted-foreground">Fiscal Year</label>
-                <Select
-                  value={selectedYear}
-                  onChange={(e) => setSelectedYear(e.target.value)}
-                  className="w-36"
-                >
+                <Select value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)} className="w-36">
                   <option value="">Select year…</option>
                   {years.map((y) => {
                     const yp = periodsForYear(periods, y);
-                    const label =
-                      yp.length > 0
-                        ? `FY${y} (${yp.length} periods)`
-                        : `FY${y}`;
                     return (
                       <option key={y} value={y}>
-                        {label}
+                        FY{y} ({yp.length} periods)
                       </option>
                     );
                   })}
@@ -332,24 +309,18 @@ export function TrialBalancePage() {
               </div>
             )}
 
-            {/* Period range */}
             {mode === 'periodRange' && (
               <>
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-muted-foreground">From Period</label>
                   <Select
                     value={fromPeriodId}
-                    onChange={(e) => {
-                      setFromPeriodId(e.target.value);
-                      setToPeriodId('');
-                    }}
+                    onChange={(e) => { setFromPeriodId(e.target.value); setToPeriodId(''); }}
                     className="w-52"
                   >
                     <option value="">Select start period…</option>
                     {periodsSortedDesc.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} · FY{p.fiscalYear}
-                      </option>
+                      <option key={p.id} value={p.id}>{p.name} · FY{p.fiscalYear}</option>
                     ))}
                   </Select>
                 </div>
@@ -363,16 +334,13 @@ export function TrialBalancePage() {
                   >
                     <option value="">Select end period…</option>
                     {toPeriodOptions.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} · FY{p.fiscalYear}
-                      </option>
+                      <option key={p.id} value={p.id}>{p.name} · FY{p.fiscalYear}</option>
                     ))}
                   </Select>
                 </div>
               </>
             )}
 
-            {/* As-of date */}
             {mode === 'asOf' && (
               <div className="space-y-1">
                 <label className="text-xs font-medium text-muted-foreground">As of Date</label>
@@ -385,7 +353,6 @@ export function TrialBalancePage() {
               </div>
             )}
 
-            {/* Include zeros */}
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground invisible">opt</label>
               <label className="flex items-center gap-2 text-sm cursor-pointer h-9 px-1">
@@ -399,14 +366,9 @@ export function TrialBalancePage() {
               </label>
             </div>
 
-            {/* Generate */}
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground invisible">go</label>
-              <Button
-                onClick={handleGenerate}
-                disabled={!canGenerate || isFetching}
-                className="h-9"
-              >
+              <Button onClick={handleGenerate} disabled={!canGenerate || isFetching} className="h-9">
                 {isFetching ? 'Generating…' : 'Generate Report'}
               </Button>
             </div>
@@ -421,11 +383,8 @@ export function TrialBalancePage() {
           <div>
             <p className="font-semibold text-sm">Trial Balance is Out of Balance</p>
             <p className="text-xs mt-0.5">
-              Total Debits (
-              {Number(data.totalDebit).toLocaleString('en-US', { minimumFractionDigits: 2 })}) ≠
-              Total Credits (
-              {Number(data.totalCredit).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-              ). Review recent journal entries for posting errors.
+              Total Debits ({Number(data.totalDebit).toLocaleString('en-US', { minimumFractionDigits: 2 })}) ≠
+              Total Credits ({Number(data.totalCredit).toLocaleString('en-US', { minimumFractionDigits: 2 })}). Review recent journal entries.
             </p>
           </div>
         </div>
@@ -457,17 +416,8 @@ export function TrialBalancePage() {
                   <h2 className="text-lg font-semibold mt-0.5">{orgName}</h2>
                   <p className="text-sm text-muted-foreground mt-0.5">{committed.label}</p>
                   {data && (
-                    <div
-                      className={cn(
-                        'flex items-center gap-1.5 text-sm font-medium mt-2',
-                        data.isBalanced ? 'text-green-600' : 'text-red-600',
-                      )}
-                    >
-                      {data.isBalanced ? (
-                        <CheckCircle size={14} />
-                      ) : (
-                        <AlertCircle size={14} />
-                      )}
+                    <div className={cn('flex items-center gap-1.5 text-sm font-medium mt-2', data.isBalanced ? 'text-green-600' : 'text-red-600')}>
+                      {data.isBalanced ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
                       {data.isBalanced ? 'Balanced' : 'Out of balance — review required'}
                     </div>
                   )}
@@ -475,41 +425,19 @@ export function TrialBalancePage() {
 
                 <div className="flex flex-col items-end gap-2 print:hidden shrink-0">
                   <div className="flex items-center gap-2">
-                    <Select
-                      value={classFilter}
-                      onChange={(e) => setClassFilter(e.target.value)}
-                      className="w-36 h-8 text-xs"
-                    >
+                    <Select value={classFilter} onChange={(e) => setClassFilter(e.target.value)} className="w-36 h-8 text-xs">
                       <option value="">All Classes</option>
-                      {CLASS_ORDER.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
+                      {CLASS_ORDER.map((c) => <option key={c} value={c}>{c}</option>)}
                     </Select>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={exportCsv}
-                      disabled={!data}
-                      className="h-8 gap-1.5"
-                    >
+                    <Button variant="outline" size="sm" onClick={exportCsv} disabled={!data} className="h-8 gap-1.5">
                       <Download size={13} /> CSV
                     </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => window.print()}
-                      disabled={!data}
-                      className="h-8 gap-1.5"
-                    >
+                    <Button variant="outline" size="sm" onClick={() => window.print()} disabled={!data} className="h-8 gap-1.5">
                       <Printer size={13} /> Print
                     </Button>
                   </div>
                   {generatedAt && (
-                    <p className="text-xs text-muted-foreground">
-                      Generated {generatedAt.toLocaleString()}
-                    </p>
+                    <p className="text-xs text-muted-foreground">Generated {generatedAt.toLocaleString()}</p>
                   )}
                 </div>
               </div>
@@ -518,9 +446,7 @@ export function TrialBalancePage() {
             {/* Table */}
             {isLoading ? (
               <div className="p-6 space-y-2">
-                {[...Array(12)].map((_, i) => (
-                  <Skeleton key={i} className="h-9 w-full" />
-                ))}
+                {[...Array(12)].map((_, i) => <Skeleton key={i} className="h-9 w-full" />)}
               </div>
             ) : !data?.lines.length ? (
               <div className="py-16 text-center text-sm text-muted-foreground">
@@ -542,40 +468,24 @@ export function TrialBalancePage() {
                 <TableBody>
                   {grouped.map((group) => (
                     <>
-                      <TableRow
-                        key={`heading-${group.class}`}
-                        className="bg-muted/40 hover:bg-muted/40"
-                      >
-                        <TableCell
-                          colSpan={6}
-                          className={cn(
-                            'text-xs font-semibold uppercase tracking-widest py-2',
-                            CLASS_COLORS[group.class],
-                          )}
-                        >
+                      <TableRow key={`heading-${group.class}`} className="bg-muted/40 hover:bg-muted/40">
+                        <TableCell colSpan={6} className={cn('text-xs font-semibold uppercase tracking-widest py-2', CLASS_COLORS[group.class])}>
                           {group.class}
                         </TableCell>
                       </TableRow>
                       {group.lines.map((line) => (
                         <TableRow
                           key={line.accountId}
-                          className="cursor-pointer hover:bg-accent/50"
-                          onClick={() => setDrillDown(line)}
-                          title="Click to view ledger entries for this account"
+                          className="cursor-pointer hover:bg-accent/50 group"
+                          onClick={() => handleRowClick(line)}
+                          title="Click to view account ledger"
                         >
-                          <TableCell className="font-mono text-xs text-muted-foreground">
-                            {line.code}
+                          <TableCell className="font-mono text-xs text-muted-foreground">{line.code}</TableCell>
+                          <TableCell className="text-sm group-hover:text-primary group-hover:underline">
+                            {line.name}
                           </TableCell>
-                          <TableCell className="text-sm">{line.name}</TableCell>
                           <TableCell className="text-center print:hidden">
-                            <span
-                              className={cn(
-                                'text-[11px] font-medium',
-                                CLASS_COLORS[line.class],
-                              )}
-                            >
-                              {line.class}
-                            </span>
+                            <span className={cn('text-[11px] font-medium', CLASS_COLORS[line.class])}>{line.class}</span>
                           </TableCell>
                           <TableCell className="text-right font-mono text-xs tabular-nums text-blue-600 dark:text-blue-400">
                             {Number(line.totalDebit) > 0 ? fmt(line.totalDebit) : '—'}
@@ -583,15 +493,8 @@ export function TrialBalancePage() {
                           <TableCell className="text-right font-mono text-xs tabular-nums text-red-600 dark:text-red-400">
                             {Number(line.totalCredit) > 0 ? fmt(line.totalCredit) : '—'}
                           </TableCell>
-                          <TableCell
-                            className={cn(
-                              'text-right font-mono text-xs tabular-nums font-semibold',
-                              Number(line.balance) < 0 && 'text-red-600',
-                            )}
-                          >
-                            {Number(line.balance) < 0
-                              ? `(${fmt(line.balance)})`
-                              : fmt(line.balance)}
+                          <TableCell className={cn('text-right font-mono text-xs tabular-nums font-semibold', Number(line.balance) < 0 && 'text-red-600')}>
+                            {Number(line.balance) < 0 ? `(${fmt(line.balance)})` : fmt(line.balance)}
                           </TableCell>
                         </TableRow>
                       ))}
@@ -601,25 +504,15 @@ export function TrialBalancePage() {
 
                 <TableFooter>
                   <TableRow>
-                    <TableCell colSpan={3} className="font-semibold text-sm">
-                      Grand Totals
-                    </TableCell>
+                    <TableCell colSpan={3} className="font-semibold text-sm">Grand Totals</TableCell>
                     <TableCell className="text-right font-mono font-semibold text-sm text-blue-600 dark:text-blue-400">
-                      {Number(data.totalDebit).toLocaleString('en-US', {
-                        minimumFractionDigits: 2,
-                      })}
+                      {Number(data.totalDebit).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                     </TableCell>
                     <TableCell className="text-right font-mono font-semibold text-sm text-red-600 dark:text-red-400">
-                      {Number(data.totalCredit).toLocaleString('en-US', {
-                        minimumFractionDigits: 2,
-                      })}
+                      {Number(data.totalCredit).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                     </TableCell>
                     <TableCell className="text-right">
-                      {data.isBalanced ? (
-                        <Badge variant="success">Balanced</Badge>
-                      ) : (
-                        <Badge variant="destructive">Unbalanced</Badge>
-                      )}
+                      {data.isBalanced ? <Badge variant="success">Balanced</Badge> : <Badge variant="destructive">Unbalanced</Badge>}
                     </TableCell>
                   </TableRow>
                 </TableFooter>
@@ -628,157 +521,6 @@ export function TrialBalancePage() {
           </CardContent>
         </Card>
       )}
-
-      {/* Account Ledger Drill-down Dialog */}
-      <Dialog open={!!drillDown} onOpenChange={(open) => !open && setDrillDown(null)}>
-        <DialogContent
-          title={drillDown ? `${drillDown.code} · ${drillDown.name}` : ''}
-          description={`${drillDown?.class ?? ''} · ${committed?.label ?? ''}`}
-          className="max-w-4xl"
-        >
-          {ledgerLoading ? (
-            <div className="space-y-2">
-              {[...Array(6)].map((_, i) => (
-                <Skeleton key={i} className="h-9 w-full" />
-              ))}
-            </div>
-          ) : !ledgerData ? null : (
-            <div className="space-y-4">
-              <div className="grid grid-cols-3 gap-3">
-                <div className="bg-muted/40 rounded-md p-3">
-                  <p className="text-[11px] text-muted-foreground">Opening Balance</p>
-                  <p className="font-semibold font-mono text-sm mt-1">
-                    {Number(ledgerData.openingBalance) === 0
-                      ? '0.00'
-                      : fmt(ledgerData.openingBalance)}
-                  </p>
-                </div>
-                <div className="bg-muted/40 rounded-md p-3">
-                  <p className="text-[11px] text-muted-foreground">Total Entries</p>
-                  <p className="font-semibold text-sm mt-1">{ledgerData.pagination.total}</p>
-                </div>
-                <div className="bg-muted/40 rounded-md p-3">
-                  <p className="text-[11px] text-muted-foreground">Closing Balance</p>
-                  <p
-                    className={cn(
-                      'font-semibold font-mono text-sm mt-1',
-                      drillDown && Number(drillDown.balance) < 0 && 'text-red-600',
-                    )}
-                  >
-                    {drillDown
-                      ? Number(drillDown.balance) < 0
-                        ? `(${fmt(drillDown.balance)})`
-                        : fmt(drillDown.balance)
-                      : '—'}
-                  </p>
-                </div>
-              </div>
-
-              {ledgerData.entries.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-8">
-                  No ledger entries for this account in the selected period.
-                </p>
-              ) : (
-                <div className="overflow-x-auto rounded-md border">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b bg-muted/30 text-left">
-                        <th className="px-3 py-2 text-xs font-medium text-muted-foreground">
-                          Date
-                        </th>
-                        <th className="px-3 py-2 text-xs font-medium text-muted-foreground">
-                          Journal #
-                        </th>
-                        <th className="px-3 py-2 text-xs font-medium text-muted-foreground">
-                          Description
-                        </th>
-                        <th className="px-3 py-2 text-xs font-medium text-muted-foreground text-right">
-                          Debit
-                        </th>
-                        <th className="px-3 py-2 text-xs font-medium text-muted-foreground text-right">
-                          Credit
-                        </th>
-                        <th className="px-3 py-2 text-xs font-medium text-muted-foreground text-right">
-                          Running Balance
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(() => {
-                        let running = Number(ledgerData.openingBalance);
-                        const isDebitNormal = drillDown?.normalBalance === 'DEBIT';
-                        return ledgerData.entries.map((entry) => {
-                          const dr = Number(entry.debitAmount);
-                          const cr = Number(entry.creditAmount);
-                          running += isDebitNormal ? dr - cr : cr - dr;
-                          return (
-                            <tr
-                              key={entry.id}
-                              className="border-b last:border-0 hover:bg-accent/30 transition-colors"
-                            >
-                              <td className="px-3 py-2 font-mono text-xs text-muted-foreground whitespace-nowrap">
-                                {new Date(entry.transactionDate).toLocaleDateString('en-US', {
-                                  month: 'short',
-                                  day: 'numeric',
-                                  year: 'numeric',
-                                })}
-                              </td>
-                              <td className="px-3 py-2 font-mono text-xs font-medium">
-                                {entry.journalEntry.journalNumber}
-                              </td>
-                              <td
-                                className="px-3 py-2 text-xs max-w-[200px] truncate"
-                                title={
-                                  entry.journalEntry.description ??
-                                  entry.journalEntry.reference ??
-                                  ''
-                                }
-                              >
-                                {entry.journalEntry.description ??
-                                  entry.journalEntry.reference ??
-                                  '—'}
-                              </td>
-                              <td className="px-3 py-2 font-mono text-xs text-right text-blue-600 dark:text-blue-400">
-                                {dr > 0 ? fmt(dr) : '—'}
-                              </td>
-                              <td className="px-3 py-2 font-mono text-xs text-right text-red-600 dark:text-red-400">
-                                {cr > 0 ? fmt(cr) : '—'}
-                              </td>
-                              <td
-                                className={cn(
-                                  'px-3 py-2 font-mono text-xs text-right font-medium',
-                                  running < 0 && 'text-red-600',
-                                )}
-                              >
-                                {running < 0
-                                  ? `(${new Intl.NumberFormat('en-US', {
-                                      minimumFractionDigits: 2,
-                                      maximumFractionDigits: 2,
-                                    }).format(Math.abs(running))})`
-                                  : new Intl.NumberFormat('en-US', {
-                                      minimumFractionDigits: 2,
-                                      maximumFractionDigits: 2,
-                                    }).format(running)}
-                              </td>
-                            </tr>
-                          );
-                        });
-                      })()}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              {ledgerData.pagination.hasNext && (
-                <p className="text-xs text-muted-foreground text-center">
-                  Showing first {ledgerData.entries.length} of {ledgerData.pagination.total}{' '}
-                  entries
-                </p>
-              )}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

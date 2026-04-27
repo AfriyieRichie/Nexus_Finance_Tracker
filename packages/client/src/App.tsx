@@ -10,6 +10,7 @@ import { JournalsPage } from './pages/journals/JournalsPage';
 import { JournalCreatePage } from './pages/journals/JournalCreatePage';
 import { JournalDetailPage } from './pages/journals/JournalDetailPage';
 import { TrialBalancePage } from './pages/ledger/TrialBalancePage';
+import { AccountLedgerPage } from './pages/ledger/AccountLedgerPage';
 import { BalanceSheetPage } from './pages/reports/BalanceSheetPage';
 import { IncomeStatementPage } from './pages/reports/IncomeStatementPage';
 import { CashFlowPage } from './pages/reports/CashFlowPage';
@@ -93,6 +94,7 @@ export default function App() {
           <Route path="/approvals" element={<ApprovalsPage />} />
           <Route path="/audit" element={<AuditPage />} />
           <Route path="/ledger/trial-balance" element={<TrialBalancePage />} />
+          <Route path="/ledger/accounts/:accountId" element={<AccountLedgerPage />} />
           <Route path="/reports/balance-sheet" element={<BalanceSheetPage />} />
           <Route path="/reports/income-statement" element={<IncomeStatementPage />} />
           <Route path="/reports/cash-flow" element={<CashFlowPage />} />

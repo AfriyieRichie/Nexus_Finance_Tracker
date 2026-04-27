@@ -21,6 +21,7 @@ export interface TrialBalanceResult {
 
 export interface LedgerEntry {
   id: string;
+  journalEntryId: string;
   transactionDate: string;
   debitAmount: string;
   creditAmount: string;

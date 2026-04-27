@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { ChevronRight } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft, Send, CheckCircle, XCircle, BookOpen, RotateCcw,
@@ -45,6 +46,17 @@ function errMsg(e: unknown) {
 export function JournalDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  // Drill-down context — set when navigating from Account Ledger
+  const drillFrom = searchParams.get('from');        // full URL of the account ledger page
+  const drillFromLabel = searchParams.get('fromLabel'); // e.g. "111200 · Main Bank Account"
+  const drillTbLabel = searchParams.get('tbLabel');  // e.g. "April 2024"
+
+  function handleBack() {
+    if (drillFrom) navigate(drillFrom);
+    else navigate('/journals');
+  }
   const qc = useQueryClient();
   const activeOrganisationId = useAuthStore((s) => s.activeOrganisationId);
 
@@ -140,10 +152,34 @@ export function JournalDetailPage() {
 
   return (
     <div className="p-6 max-w-5xl space-y-5">
+      {/* Breadcrumb — only shown when drilled down from account ledger */}
+      {drillFrom && drillFromLabel && (
+        <nav className="flex items-center gap-1.5 text-sm text-muted-foreground flex-wrap">
+          <Link to="/ledger/trial-balance" className="hover:text-foreground transition-colors">
+            Trial Balance
+          </Link>
+          {drillTbLabel && (
+            <>
+              <ChevronRight size={13} className="shrink-0" />
+              <span>{drillTbLabel}</span>
+            </>
+          )}
+          <ChevronRight size={13} className="shrink-0" />
+          <button
+            onClick={() => navigate(drillFrom)}
+            className="hover:text-foreground transition-colors"
+          >
+            {drillFromLabel}
+          </button>
+          <ChevronRight size={13} className="shrink-0" />
+          <span className="text-foreground font-medium">{journal.journalNumber}</span>
+        </nav>
+      )}
+
       {/* Header */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" onClick={() => void navigate('/journals')}>
+          <Button variant="ghost" size="icon" onClick={handleBack} title="Back">
             <ArrowLeft size={16} />
           </Button>
           <div>
