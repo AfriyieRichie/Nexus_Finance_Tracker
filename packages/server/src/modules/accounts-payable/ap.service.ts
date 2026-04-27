@@ -166,7 +166,7 @@ export async function postSupplierInvoice(
   const total = invoice.totalAmount;
   const entryDate = invoice.invoiceDate.toISOString().split('T')[0];
 
-  const journalEntry = await journalService.createJournalEntry(
+  const journalEntry = await journalService.createAndPostSystemEntry(
     organisationId,
     {
       type: 'PURCHASE',
@@ -197,8 +197,6 @@ export async function postSupplierInvoice(
     },
     userId,
   );
-
-  await journalService.postJournalEntry(organisationId, journalEntry.id, userId);
 
   await prisma.supplierInvoice.update({
     where: { id: supplierInvoiceId },
@@ -235,7 +233,7 @@ export async function recordSupplierPayment(
     throw new ValidationError(`Payment exceeds outstanding balance of ${outstanding.toFixed(2)}`);
   }
 
-  const journalEntry = await journalService.createJournalEntry(
+  const journalEntry = await journalService.createAndPostSystemEntry(
     organisationId,
     {
       type: 'CASH_PAYMENT',
@@ -266,8 +264,6 @@ export async function recordSupplierPayment(
     },
     userId,
   );
-
-  await journalService.postJournalEntry(organisationId, journalEntry.id, userId);
 
   const newAmountPaid = invoice.amountPaid.plus(amount);
   const newStatus = newAmountPaid.greaterThanOrEqualTo(invoice.totalAmount) ? 'PAID' : 'PARTIALLY_PAID';

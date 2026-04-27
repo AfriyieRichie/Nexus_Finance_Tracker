@@ -182,7 +182,7 @@ export async function runDepreciation(
 
     const entryDate = asOfDate.toISOString().split('T')[0];
 
-    const je = await journalService.createJournalEntry(
+    await journalService.createAndPostSystemEntry(
       organisationId,
       {
         type: 'DEPRECIATION',
@@ -212,8 +212,6 @@ export async function runDepreciation(
       },
       userId,
     );
-
-    await journalService.postJournalEntry(organisationId, je.id, userId);
 
     const newCarrying = asset.carryingValue.minus(deprnAmount);
     const newStatus = newCarrying.lessThanOrEqualTo(asset.residualValue) ? 'FULLY_DEPRECIATED' as const : 'ACTIVE' as const;
@@ -322,7 +320,7 @@ export async function disposeAsset(
     }
   }
 
-  const je = await journalService.createJournalEntry(
+  await journalService.createAndPostSystemEntry(
     organisationId,
     {
       type: 'GENERAL',
@@ -335,8 +333,6 @@ export async function disposeAsset(
     },
     userId,
   );
-
-  await journalService.postJournalEntry(organisationId, je.id, userId);
 
   await prisma.fixedAsset.update({
     where: { id: assetId },

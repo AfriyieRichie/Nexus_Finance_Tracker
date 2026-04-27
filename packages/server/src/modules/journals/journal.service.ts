@@ -504,6 +504,23 @@ export async function postJournalEntry(
   });
 }
 
+// ─── System Entry Helper ──────────────────────────────────────────────────────
+// For machine-generated journals (AR, AP, Assets, Payroll) that must post
+// immediately without going through the human approval workflow.
+
+export async function createAndPostSystemEntry(
+  organisationId: string,
+  input: Parameters<typeof createJournalEntry>[1],
+  userId: string,
+) {
+  const entry = await createJournalEntry(organisationId, input, userId);
+  await prisma.journalEntry.update({
+    where: { id: entry.id },
+    data: { status: EntryStatus.APPROVED },
+  });
+  return postJournalEntry(organisationId, entry.id, userId);
+}
+
 // ─── Reversal ─────────────────────────────────────────────────────────────────
 
 export async function reverseJournalEntry(

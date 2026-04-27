@@ -183,7 +183,7 @@ export async function postInvoice(organisationId: string, invoiceId: string, per
   const entryDate = invoice.invoiceDate.toISOString().split('T')[0];
 
   // Use the journal service to create + post the entry properly
-  const journalEntry = await journalService.createJournalEntry(
+  const journalEntry = await journalService.createAndPostSystemEntry(
     organisationId,
     {
       type: 'SALES',
@@ -215,7 +215,6 @@ export async function postInvoice(organisationId: string, invoiceId: string, per
     userId,
   );
 
-  await journalService.postJournalEntry(organisationId, journalEntry.id, userId);
 
   await prisma.invoice.update({
     where: { id: invoiceId },
@@ -250,7 +249,7 @@ export async function recordPayment(organisationId: string, userId: string, inpu
     throw new ValidationError(`Payment amount exceeds outstanding balance of ${outstanding.toFixed(2)}`);
   }
 
-  const journalEntry = await journalService.createJournalEntry(
+  const journalEntry = await journalService.createAndPostSystemEntry(
     organisationId,
     {
       type: 'CASH_RECEIPT',
@@ -282,7 +281,6 @@ export async function recordPayment(organisationId: string, userId: string, inpu
     userId,
   );
 
-  await journalService.postJournalEntry(organisationId, journalEntry.id, userId);
 
   const newAmountPaid = invoice.amountPaid.plus(amount);
   const newStatus = newAmountPaid.greaterThanOrEqualTo(invoice.totalAmount) ? 'PAID' : 'PARTIALLY_PAID';
@@ -378,7 +376,7 @@ export async function createCreditNote(organisationId: string, userId: string, i
 
   const cnNumber = await nextCreditNoteNumber(organisationId);
 
-  const journalEntry = await journalService.createJournalEntry(
+  const journalEntry = await journalService.createAndPostSystemEntry(
     organisationId,
     {
       type: 'GENERAL',
@@ -410,7 +408,6 @@ export async function createCreditNote(organisationId: string, userId: string, i
     userId,
   );
 
-  await journalService.postJournalEntry(organisationId, journalEntry.id, userId);
 
   const newAmountPaid = invoice.amountPaid.plus(amount);
   const newStatus = newAmountPaid.greaterThanOrEqualTo(invoice.totalAmount) ? 'PAID' : 'PARTIALLY_PAID';
@@ -461,7 +458,7 @@ export async function writeBadDebt(organisationId: string, userId: string, input
     throw new ValidationError(`Write-off amount exceeds outstanding balance of ${outstanding.toFixed(2)}`);
   }
 
-  const journalEntry = await journalService.createJournalEntry(
+  const journalEntry = await journalService.createAndPostSystemEntry(
     organisationId,
     {
       type: 'GENERAL',
@@ -493,7 +490,6 @@ export async function writeBadDebt(organisationId: string, userId: string, input
     userId,
   );
 
-  await journalService.postJournalEntry(organisationId, journalEntry.id, userId);
 
   await prisma.invoice.update({
     where: { id: input.invoiceId },
