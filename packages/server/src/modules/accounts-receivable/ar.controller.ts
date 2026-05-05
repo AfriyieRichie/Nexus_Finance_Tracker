@@ -5,6 +5,7 @@ import {
   createCustomerSchema, updateCustomerSchema, listCustomersSchema,
   createInvoiceSchema, listInvoicesSchema, recordPaymentSchema,
   createCreditNoteSchema, writeBadDebtSchema, rejectInvoiceSchema,
+  statementQuerySchema, emailStatementSchema,
 } from './ar.schemas';
 import * as arService from './ar.service';
 
@@ -124,4 +125,18 @@ export const rejectInvoice = asyncHandler(async (req: Request, res: Response) =>
   const { reason } = rejectInvoiceSchema.parse(req.body);
   const result = await arService.rejectInvoice(organisationId, invoiceId, userId, reason);
   return sendSuccess(res, result, 'Invoice rejected');
+});
+
+export const getCustomerStatement = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId, customerId } = req.params;
+  const query = statementQuerySchema.parse(req.query);
+  const statement = await arService.generateCustomerStatement(organisationId, customerId, query);
+  return sendSuccess(res, statement);
+});
+
+export const emailCustomerStatement = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId, customerId } = req.params;
+  const input = emailStatementSchema.parse(req.body);
+  const result = await arService.emailCustomerStatement(organisationId, customerId, input);
+  return sendSuccess(res, result, `Statement emailed to ${result.sentTo}`);
 });

@@ -58,6 +58,17 @@ export const rejectInvoiceSchema = z.object({
   reason: z.string().min(1),
 });
 
+export const statementQuerySchema = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+
+export const emailStatementSchema = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  toEmail: z.string().email().optional(),
+});
+
 export const recordPaymentSchema = z.object({
   invoiceId: z.string().uuid(),
   amount: z.number().positive(),
@@ -93,3 +104,5 @@ export type RecordPaymentInput = z.infer<typeof recordPaymentSchema>;
 export type CreateCreditNoteInput = z.infer<typeof createCreditNoteSchema>;
 export type WriteBadDebtInput = z.infer<typeof writeBadDebtSchema>;
 export type RejectInvoiceInput = z.infer<typeof rejectInvoiceSchema>;
+export type StatementQuery = z.infer<typeof statementQuerySchema>;
+export type EmailStatementInput = z.infer<typeof emailStatementSchema>;

@@ -125,3 +125,37 @@ export async function getArAgeing(organisationId: string) {
   const res = await api.get(`/organisations/${organisationId}/ar/ageing`);
   return res.data.data;
 }
+
+export interface StatementLine {
+  date: string;
+  type: 'INVOICE' | 'PAYMENT' | 'CREDIT_NOTE';
+  reference: string;
+  description: string;
+  debit: number;
+  credit: number;
+  balance: number;
+}
+
+export interface CustomerStatement {
+  customer: { id: string; name: string; code: string; email: string | null; phone: string | null; address: unknown };
+  organisation: { name: string; currency: string; address: unknown; email: string | null };
+  period: { from: string; to: string };
+  currency: string;
+  openingBalance: number;
+  transactions: StatementLine[];
+  closingBalance: number;
+  totalInvoiced: number;
+  totalPayments: number;
+  totalCredits: number;
+  generatedAt: string;
+}
+
+export async function getCustomerStatement(organisationId: string, customerId: string, from: string, to: string) {
+  const res = await api.get(`/organisations/${organisationId}/ar/customers/${customerId}/statement`, { params: { from, to } });
+  return res.data.data as CustomerStatement;
+}
+
+export async function emailCustomerStatement(organisationId: string, customerId: string, data: { from: string; to: string; toEmail?: string }) {
+  const res = await api.post(`/organisations/${organisationId}/ar/customers/${customerId}/statement/email`, data);
+  return res.data.data as { sentTo: string; period: { from: string; to: string } };
+}

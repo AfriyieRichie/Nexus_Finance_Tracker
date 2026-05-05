@@ -27,4 +27,8 @@ router.post('/credit-notes', ctrl.createCreditNote);
 router.post('/write-offs', ctrl.writeBadDebt);
 router.get('/ageing', ctrl.getArAgeing);
 
+// Customer Statements
+router.get('/customers/:customerId/statement', ctrl.getCustomerStatement);
+router.post('/customers/:customerId/statement/email', ctrl.emailCustomerStatement);
+
 export { router as arRouter };

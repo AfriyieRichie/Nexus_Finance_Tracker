@@ -1,15 +1,16 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Users, Plus, FileText, TrendingUp, Trash2, Eye, CreditCard, AlertTriangle, Pencil, Send, CheckCircle, XCircle, Clock } from 'lucide-react';
+import { Users, Plus, FileText, TrendingUp, Trash2, Eye, CreditCard, AlertTriangle, Pencil, Send, CheckCircle, XCircle, Clock, BookOpen, Mail, Printer } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import {
   listCustomers, createCustomer, updateCustomer,
   createInvoice, listInvoices, getInvoice, postInvoice,
   recordPayment, createCreditNote, writeBadDebt, getArAgeing,
   submitInvoiceForApproval, approveInvoice, rejectInvoice,
+  getCustomerStatement, emailCustomerStatement,
 } from '@/services/ar.service';
-import type { Customer, Invoice } from '@/services/ar.service';
+import type { Customer, Invoice, CustomerStatement } from '@/services/ar.service';
 import { listAccounts } from '@/services/accounts.service';
 import { listPeriods } from '@/services/periods.service';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -876,6 +877,239 @@ function BadDebtDialog({ organisationId, invoice, trigger }: { organisationId: s
   );
 }
 
+// ─── Customer Statement Dialog ────────────────────────────────────────────────
+
+function printStatement(s: CustomerStatement) {
+  const fmtAmt = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtDate = (d: string) => new Date(d + 'T00:00:00Z').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  const typeLabel = (t: string) => t === 'INVOICE' ? 'Invoice' : t === 'PAYMENT' ? 'Payment' : 'Credit Note';
+  const rows = s.transactions.map((t) => `
+    <tr style="border-bottom:1px solid #e5e7eb">
+      <td style="padding:6px 8px;font-size:12px">${fmtDate(t.date)}</td>
+      <td style="padding:6px 8px;font-size:11px;color:#6b7280">${typeLabel(t.type)}</td>
+      <td style="padding:6px 8px;font-size:12px;color:#1d4ed8">${t.reference}</td>
+      <td style="padding:6px 8px;font-size:11px;max-width:220px">${t.description}</td>
+      <td style="padding:6px 8px;font-size:12px;text-align:right">${t.debit > 0 ? fmtAmt(t.debit) : ''}</td>
+      <td style="padding:6px 8px;font-size:12px;text-align:right;color:#16a34a">${t.credit > 0 ? fmtAmt(t.credit) : ''}</td>
+      <td style="padding:6px 8px;font-size:12px;text-align:right;font-weight:600">${fmtAmt(t.balance)}</td>
+    </tr>`).join('');
+
+  const win = window.open('', '_blank', 'width=900,height=700');
+  if (!win) return;
+  win.document.write(`<!DOCTYPE html><html><head><title>Statement – ${s.customer.name}</title>
+  <style>body{font-family:Arial,sans-serif;color:#111;padding:32px;max-width:860px;margin:0 auto}@media print{body{padding:0}}</style>
+  </head><body>
+  <div style="border-bottom:3px solid #1d4ed8;padding-bottom:12px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:flex-end">
+    <div><h2 style="margin:0;font-size:20px;color:#1d4ed8">${s.organisation.name}</h2><p style="margin:4px 0 0;font-size:12px;color:#6b7280">Customer Account Statement</p></div>
+    <div style="text-align:right;font-size:12px">
+      <div><strong>Period:</strong> ${fmtDate(s.period.from)} – ${fmtDate(s.period.to)}</div>
+      <div><strong>Generated:</strong> ${fmtDate(s.generatedAt.split('T')[0])}</div>
+    </div>
+  </div>
+  <div style="display:flex;justify-content:space-between;margin-bottom:20px">
+    <div><p style="margin:0;font-size:14px;font-weight:600">${s.customer.name}</p><p style="margin:2px 0;font-size:12px;color:#6b7280">Code: ${s.customer.code}</p>${s.customer.email ? `<p style="margin:2px 0;font-size:12px;color:#6b7280">${s.customer.email}</p>` : ''}</div>
+    <div style="text-align:right;font-size:12px"><p style="margin:0"><strong>Currency:</strong> ${s.currency}</p><p style="margin:4px 0 0;font-size:18px;font-weight:700;color:${s.closingBalance > 0 ? '#dc2626' : '#16a34a'}">${s.currency} ${fmtAmt(s.closingBalance)}</p><p style="margin:2px 0;font-size:11px;color:#6b7280">Closing Balance</p></div>
+  </div>
+  <table style="width:100%;border-collapse:collapse">
+    <thead><tr style="background:#1d4ed8;color:white">
+      <th style="padding:8px;text-align:left;font-size:12px">Date</th>
+      <th style="padding:8px;text-align:left;font-size:12px">Type</th>
+      <th style="padding:8px;text-align:left;font-size:12px">Reference</th>
+      <th style="padding:8px;text-align:left;font-size:12px">Description</th>
+      <th style="padding:8px;text-align:right;font-size:12px">Charges</th>
+      <th style="padding:8px;text-align:right;font-size:12px">Credits</th>
+      <th style="padding:8px;text-align:right;font-size:12px">Balance</th>
+    </thead>
+    <tr style="background:#f1f5f9;border-bottom:1px solid #e5e7eb">
+      <td colspan="6" style="padding:6px 8px;font-size:12px;font-weight:600">Opening Balance</td>
+      <td style="padding:6px 8px;text-align:right;font-size:12px;font-weight:600">${fmtAmt(s.openingBalance)}</td>
+    </tr>
+    ${rows}
+    <tr style="background:#1e3a5f;color:white">
+      <td colspan="6" style="padding:8px;font-size:13px;font-weight:700">Closing Balance</td>
+      <td style="padding:8px;text-align:right;font-size:14px;font-weight:700">${s.currency} ${fmtAmt(s.closingBalance)}</td>
+    </tr>
+  </table>
+  <div style="display:flex;justify-content:space-between;margin-top:16px;font-size:11px;color:#6b7280">
+    <span>Invoiced: ${s.currency} ${fmtAmt(s.totalInvoiced)}</span>
+    <span>Payments: ${s.currency} ${fmtAmt(s.totalPayments)}</span>
+    <span>Credits: ${s.currency} ${fmtAmt(s.totalCredits)}</span>
+  </div>
+  <script>window.onload=function(){window.print()}<\/script>
+  </body></html>`);
+  win.document.close();
+}
+
+function CustomerStatementDialog({ organisationId, customer }: { organisationId: string; customer: Customer }) {
+  const [open, setOpen] = useState(false);
+  const today = new Date().toISOString().split('T')[0];
+  const firstOfMonth = today.slice(0, 8) + '01';
+  const [from, setFrom] = useState(firstOfMonth);
+  const [to, setTo] = useState(today);
+  const [emailOverride, setEmailOverride] = useState('');
+  const [emailSent, setEmailSent] = useState('');
+
+  const { data: statement, isFetching, error, refetch } = useQuery({
+    queryKey: ['customer-statement', organisationId, customer.id, from, to],
+    queryFn: () => getCustomerStatement(organisationId, customer.id, from, to),
+    enabled: open && !!from && !!to && from <= to,
+  });
+
+  const emailMutation = useMutation({
+    mutationFn: () => emailCustomerStatement(organisationId, customer.id, { from, to, toEmail: emailOverride || undefined }),
+    onSuccess: (r) => setEmailSent(r.sentTo),
+  });
+
+  const fmtAmt = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtDate = (d: string) => new Date(d + 'T00:00:00Z').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  const typeLabel = (t: string) => t === 'INVOICE' ? 'Invoice' : t === 'PAYMENT' ? 'Payment' : 'Credit Note';
+  const typeBadgeColor = (t: string) => t === 'INVOICE' ? 'text-primary' : t === 'PAYMENT' ? 'text-green-600' : 'text-amber-600';
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { setOpen(v); setEmailSent(''); }}>
+      <DialogTrigger asChild>
+        <button className="text-muted-foreground hover:text-foreground transition-colors p-1" title="Customer statement">
+          <BookOpen size={13} />
+        </button>
+      </DialogTrigger>
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto" title={`Statement – ${customer.name}`} description="Account statement showing all transactions in the selected period.">
+        <div className="space-y-4">
+          {/* Controls */}
+          <div className="flex flex-wrap items-end gap-3">
+            <div>
+              <label className="text-xs font-medium mb-1 block">From</label>
+              <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-7 text-xs w-36" />
+            </div>
+            <div>
+              <label className="text-xs font-medium mb-1 block">To</label>
+              <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-7 text-xs w-36" />
+            </div>
+            <Button size="sm" variant="outline" onClick={() => void refetch()} disabled={isFetching} className="h-7 text-xs">
+              {isFetching ? 'Loading…' : 'Generate'}
+            </Button>
+            {statement && (
+              <Button size="sm" variant="outline" className="h-7 text-xs ml-auto" onClick={() => printStatement(statement)}>
+                <Printer size={12} className="mr-1" /> Print / PDF
+              </Button>
+            )}
+          </div>
+
+          {/* Error */}
+          {error && <p className="text-xs text-destructive">{errMsg(error)}</p>}
+
+          {/* Statement */}
+          {statement && (
+            <div className="space-y-3">
+              {/* Header summary */}
+              <div className="flex items-center justify-between p-3 bg-muted/40 rounded-md border">
+                <div>
+                  <p className="text-sm font-semibold">{statement.customer.name}</p>
+                  <p className="text-xs text-muted-foreground">{fmtDate(statement.period.from)} – {fmtDate(statement.period.to)}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs text-muted-foreground">Closing Balance</p>
+                  <p className={cn('text-lg font-bold', statement.closingBalance > 0 ? 'text-destructive' : 'text-green-600')}>
+                    {statement.currency} {fmtAmt(statement.closingBalance)}
+                  </p>
+                </div>
+              </div>
+
+              {/* Transactions table */}
+              <div className="border rounded-md overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/60">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium">Date</th>
+                      <th className="text-left px-3 py-2 font-medium">Type</th>
+                      <th className="text-left px-3 py-2 font-medium">Reference</th>
+                      <th className="text-left px-3 py-2 font-medium">Description</th>
+                      <th className="text-right px-3 py-2 font-medium">Charges</th>
+                      <th className="text-right px-3 py-2 font-medium">Credits</th>
+                      <th className="text-right px-3 py-2 font-medium">Balance</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {/* Opening balance row */}
+                    <tr className="bg-muted/30 border-t">
+                      <td colSpan={6} className="px-3 py-1.5 font-semibold text-xs">Opening Balance</td>
+                      <td className="px-3 py-1.5 text-right font-semibold">{fmtAmt(statement.openingBalance)}</td>
+                    </tr>
+                    {statement.transactions.length === 0 ? (
+                      <tr className="border-t">
+                        <td colSpan={7} className="px-3 py-6 text-center text-muted-foreground">No transactions in this period</td>
+                      </tr>
+                    ) : (
+                      statement.transactions.map((t, i) => (
+                        <tr key={i} className="border-t hover:bg-muted/20">
+                          <td className="px-3 py-1.5 text-muted-foreground whitespace-nowrap">{fmtDate(t.date)}</td>
+                          <td className={cn('px-3 py-1.5 font-medium', typeBadgeColor(t.type))}>{typeLabel(t.type)}</td>
+                          <td className="px-3 py-1.5 font-mono text-primary">{t.reference}</td>
+                          <td className="px-3 py-1.5 text-muted-foreground max-w-[200px] truncate" title={t.description}>{t.description}</td>
+                          <td className="px-3 py-1.5 text-right">{t.debit > 0 ? fmtAmt(t.debit) : ''}</td>
+                          <td className="px-3 py-1.5 text-right text-green-600">{t.credit > 0 ? fmtAmt(t.credit) : ''}</td>
+                          <td className="px-3 py-1.5 text-right font-semibold">{fmtAmt(t.balance)}</td>
+                        </tr>
+                      ))
+                    )}
+                    {/* Closing balance row */}
+                    <tr className="border-t bg-primary text-primary-foreground">
+                      <td colSpan={6} className="px-3 py-2 font-bold text-xs">Closing Balance</td>
+                      <td className="px-3 py-2 text-right font-bold">{statement.currency} {fmtAmt(statement.closingBalance)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Totals summary */}
+              <div className="grid grid-cols-3 gap-3 text-xs">
+                {[
+                  { label: 'Total Invoiced', value: statement.totalInvoiced, color: 'text-foreground' },
+                  { label: 'Total Payments', value: statement.totalPayments, color: 'text-green-600' },
+                  { label: 'Total Credits', value: statement.totalCredits, color: 'text-amber-600' },
+                ].map(({ label, value, color }) => (
+                  <div key={label} className="border rounded-md p-2 text-center">
+                    <p className="text-muted-foreground">{label}</p>
+                    <p className={cn('font-semibold mt-0.5', color)}>{statement.currency} {fmtAmt(value)}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Email section */}
+              <div className="border rounded-md p-3 space-y-2">
+                <p className="text-xs font-medium">Send by Email</p>
+                <div className="flex gap-2">
+                  <Input
+                    value={emailOverride}
+                    onChange={(e) => setEmailOverride(e.target.value)}
+                    placeholder={customer.email ?? 'Enter email address…'}
+                    className="h-7 text-xs flex-1"
+                    type="email"
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs"
+                    disabled={emailMutation.isPending || (!emailOverride && !customer.email)}
+                    onClick={() => emailMutation.mutate()}
+                  >
+                    <Mail size={11} className="mr-1" />
+                    {emailMutation.isPending ? 'Sending…' : 'Send'}
+                  </Button>
+                </div>
+                {emailSent && <p className="text-xs text-green-600">Statement sent to {emailSent}</p>}
+                {emailMutation.isError && <p className="text-xs text-destructive">{errMsg(emailMutation.error)}</p>}
+                {!customer.email && !emailOverride && (
+                  <p className="text-xs text-muted-foreground">This customer has no email on file. Enter an address above to send.</p>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─── Invoice Actions Cell ─────────────────────────────────────────────────────
 
 function InvoiceActions({ organisationId, invoice }: { organisationId: string; invoice: Invoice }) {
@@ -1279,17 +1513,22 @@ export function ARPage() {
                       </TableCell>
                       <TableCell><Badge variant={c.isActive ? 'success' : 'secondary'}>{c.isActive ? 'Active' : 'Inactive'}</Badge></TableCell>
                       <TableCell>
-                        {activeOrganisationId && (
-                          <CustomerFormDialog
-                            organisationId={activeOrganisationId}
-                            customer={c}
-                            trigger={
-                              <button className="text-muted-foreground hover:text-foreground transition-colors p-1" title="Edit customer">
-                                <Pencil size={13} />
-                              </button>
-                            }
-                          />
-                        )}
+                        <div className="flex items-center gap-1">
+                          {activeOrganisationId && (
+                            <CustomerStatementDialog organisationId={activeOrganisationId} customer={c} />
+                          )}
+                          {activeOrganisationId && (
+                            <CustomerFormDialog
+                              organisationId={activeOrganisationId}
+                              customer={c}
+                              trigger={
+                                <button className="text-muted-foreground hover:text-foreground transition-colors p-1" title="Edit customer">
+                                  <Pencil size={13} />
+                                </button>
+                              }
+                            />
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
