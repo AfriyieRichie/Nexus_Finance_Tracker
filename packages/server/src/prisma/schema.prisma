@@ -85,6 +85,10 @@ enum ApprovalEntityType {
   PAYMENT
   PURCHASE_ORDER
   BUDGET
+  SALES_INVOICE
+  EXPENSE_CLAIM
+  PAYROLL
+  BANK_TRANSFER
 }
 
 enum ApprovalType {
