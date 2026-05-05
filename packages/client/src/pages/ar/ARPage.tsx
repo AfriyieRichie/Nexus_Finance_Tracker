@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Users, Plus, FileText, TrendingUp, Trash2, Eye, CreditCard, AlertTriangle, Pencil } from 'lucide-react';
+import { Users, Plus, FileText, TrendingUp, Trash2, Eye, CreditCard, AlertTriangle, Pencil, Send, CheckCircle, XCircle, Clock } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import {
   listCustomers, createCustomer, updateCustomer,
   createInvoice, listInvoices, getInvoice, postInvoice,
   recordPayment, createCreditNote, writeBadDebt, getArAgeing,
+  submitInvoiceForApproval, approveInvoice, rejectInvoice,
 } from '@/services/ar.service';
 import type { Customer, Invoice } from '@/services/ar.service';
 import { listAccounts } from '@/services/accounts.service';
@@ -27,6 +28,8 @@ const STATUS_VARIANT: Record<string, 'success' | 'warning' | 'info' | 'destructi
   SENT: 'info',
   OVERDUE: 'destructive',
   DRAFT: 'secondary',
+  PENDING_APPROVAL: 'warning',
+  APPROVED: 'info',
   VOID: 'secondary',
 };
 
@@ -357,7 +360,7 @@ function NewInvoiceDialog({ organisationId }: { organisationId: string }) {
               <table className="w-full text-xs">
                 <thead className="bg-muted/50">
                   <tr>
-                    <th className="text-left px-2 py-1.5 font-medium">Description</th>
+                    <th className="text-left px-2 py-1.5 font-medium">Description <span className="text-destructive">*</span></th>
                     <th className="text-right px-2 py-1.5 font-medium w-14">Qty</th>
                     <th className="text-right px-2 py-1.5 font-medium w-24">Unit Price</th>
                     <th className="text-right px-2 py-1.5 font-medium w-20">Tax</th>
@@ -371,7 +374,7 @@ function NewInvoiceDialog({ organisationId }: { organisationId: string }) {
                     <tr key={i} className="border-t">
                       <td className="px-1 py-1">
                         <Input value={line.description} onChange={(e) => updateLine(i, 'description', e.target.value)}
-                          placeholder="Description" className="h-7 text-xs border-0 shadow-none focus-visible:ring-0" />
+                          placeholder="Required" className={cn('h-7 text-xs border-0 shadow-none focus-visible:ring-0', !line.description && 'bg-destructive/5 placeholder:text-destructive/60')} />
                       </td>
                       <td className="px-1 py-1">
                         <Input type="number" value={line.quantity} onChange={(e) => updateLine(i, 'quantity', e.target.value)}
@@ -431,7 +434,12 @@ function NewInvoiceDialog({ organisationId }: { organisationId: string }) {
           {mutation.isError && <p className="text-xs text-destructive">{errMsg(mutation.error)}</p>}
         </div>
 
-        <div className="flex justify-end gap-2 pt-3 border-t">
+        <div className="flex items-center justify-end gap-2 pt-3 border-t">
+          {!canSubmit && (
+            <span className="text-xs text-muted-foreground mr-auto">
+              {!customerId ? 'Select a customer' : !invoiceDate ? 'Set invoice date' : 'Each line needs a description and price'}
+            </span>
+          )}
           <DialogClose asChild><Button variant="outline" size="sm">Cancel</Button></DialogClose>
           <Button size="sm" disabled={!canSubmit || mutation.isPending} onClick={() => mutation.mutate()}>
             {mutation.isPending ? 'Saving…' : 'Save as Draft'}
@@ -868,45 +876,50 @@ function BadDebtDialog({ organisationId, invoice, trigger }: { organisationId: s
   );
 }
 
-// ─── Post Invoice Button ──────────────────────────────────────────────────────
-
-function PostInvoiceButton({ organisationId, invoiceId, status }: { organisationId: string; invoiceId: string; status: string }) {
-  const qc = useQueryClient();
-  const { data: periodsData } = useQuery({
-    queryKey: ['periods', organisationId],
-    queryFn: () => listPeriods(organisationId),
-    enabled: status === 'DRAFT',
-  });
-  const openPeriods = (periodsData ?? []).filter((p) => p.status === 'OPEN');
-
-  const mutation = useMutation({
-    mutationFn: (periodId: string) => postInvoice(organisationId, invoiceId, periodId),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['ar-invoices'] }),
-  });
-
-  if (status !== 'DRAFT') return null;
-  if (openPeriods.length === 0) return null;
-
-  return (
-    <button
-      onClick={() => mutation.mutate(openPeriods[0].id)}
-      disabled={mutation.isPending}
-      className="text-xs text-primary hover:underline disabled:opacity-50"
-    >
-      {mutation.isPending ? 'Posting…' : 'Post'}
-    </button>
-  );
-}
-
 // ─── Invoice Actions Cell ─────────────────────────────────────────────────────
 
 function InvoiceActions({ organisationId, invoice }: { organisationId: string; invoice: Invoice }) {
+  const qc = useQueryClient();
+  const user = useAuthStore((s) => s.user);
+  const activeOrganisationId = useAuthStore((s) => s.activeOrganisationId);
+  const activeOrg = user?.organisations.find((o) => o.organisationId === activeOrganisationId);
+  const userRole = activeOrg?.role ?? '';
+  const isManager = ['ORG_ADMIN', 'FINANCE_MANAGER'].includes(userRole);
+
+  const { data: periodsData } = useQuery({
+    queryKey: ['periods', organisationId],
+    queryFn: () => listPeriods(organisationId),
+    enabled: invoice.status === 'APPROVED',
+  });
+  const openPeriods = (periodsData ?? []).filter((p) => p.status === 'OPEN');
+
+  const [rejectReason, setRejectReason] = useState('');
+  const [showRejectInput, setShowRejectInput] = useState(false);
+
+  const submitMutation = useMutation({
+    mutationFn: () => submitInvoiceForApproval(organisationId, invoice.id),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['ar-invoices'] }),
+  });
+
+  const approveMutation = useMutation({
+    mutationFn: () => approveInvoice(organisationId, invoice.id),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['ar-invoices'] }),
+  });
+
+  const rejectMutation = useMutation({
+    mutationFn: () => rejectInvoice(organisationId, invoice.id, rejectReason),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['ar-invoices'] }); setShowRejectInput(false); setRejectReason(''); },
+  });
+
+  const postMutation = useMutation({
+    mutationFn: (periodId: string) => postInvoice(organisationId, invoice.id, periodId),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['ar-invoices'] }),
+  });
+
   const canPay = ['SENT', 'PARTIALLY_PAID', 'OVERDUE'].includes(invoice.status);
-  const canCredit = ['SENT', 'PARTIALLY_PAID', 'OVERDUE'].includes(invoice.status);
-  const canWriteOff = ['SENT', 'PARTIALLY_PAID', 'OVERDUE'].includes(invoice.status);
 
   return (
-    <div className="flex items-center gap-2 justify-end">
+    <div className="flex items-center gap-2 justify-end flex-wrap">
       <InvoiceDetailDialog
         organisationId={organisationId}
         invoiceId={invoice.id}
@@ -916,7 +929,84 @@ function InvoiceActions({ organisationId, invoice }: { organisationId: string; i
           </button>
         }
       />
-      <PostInvoiceButton organisationId={organisationId} invoiceId={invoice.id} status={invoice.status} />
+
+      {/* DRAFT: submit for approval */}
+      {invoice.status === 'DRAFT' && (
+        <button
+          onClick={() => submitMutation.mutate()}
+          disabled={submitMutation.isPending}
+          className="text-xs text-primary hover:underline disabled:opacity-50 flex items-center gap-1"
+          title="Submit for approval"
+        >
+          <Send size={11} />
+          {submitMutation.isPending ? 'Submitting…' : 'Submit'}
+        </button>
+      )}
+
+      {/* PENDING_APPROVAL: managers can approve or reject */}
+      {invoice.status === 'PENDING_APPROVAL' && isManager && !showRejectInput && (
+        <>
+          <button
+            onClick={() => approveMutation.mutate()}
+            disabled={approveMutation.isPending}
+            className="text-xs text-green-600 hover:underline disabled:opacity-50 flex items-center gap-1"
+            title="Approve invoice"
+          >
+            <CheckCircle size={11} />
+            {approveMutation.isPending ? 'Approving…' : 'Approve'}
+          </button>
+          <button
+            onClick={() => setShowRejectInput(true)}
+            className="text-xs text-destructive hover:underline flex items-center gap-1"
+            title="Reject invoice"
+          >
+            <XCircle size={11} /> Reject
+          </button>
+        </>
+      )}
+
+      {/* PENDING_APPROVAL: rejection reason input inline */}
+      {invoice.status === 'PENDING_APPROVAL' && isManager && showRejectInput && (
+        <div className="flex items-center gap-1">
+          <input
+            autoFocus
+            value={rejectReason}
+            onChange={(e) => setRejectReason(e.target.value)}
+            placeholder="Rejection reason…"
+            className="text-xs border rounded px-2 py-0.5 w-36 h-6"
+          />
+          <button
+            onClick={() => rejectMutation.mutate()}
+            disabled={!rejectReason.trim() || rejectMutation.isPending}
+            className="text-xs text-destructive hover:underline disabled:opacity-40"
+          >
+            {rejectMutation.isPending ? '…' : 'Confirm'}
+          </button>
+          <button onClick={() => setShowRejectInput(false)} className="text-xs text-muted-foreground hover:underline">Cancel</button>
+        </div>
+      )}
+
+      {/* PENDING_APPROVAL: waiting badge for non-managers */}
+      {invoice.status === 'PENDING_APPROVAL' && !isManager && (
+        <span className="text-xs text-amber-600 flex items-center gap-1" title="Awaiting manager approval">
+          <Clock size={11} /> Pending
+        </span>
+      )}
+
+      {/* APPROVED: managers can post to ledger */}
+      {invoice.status === 'APPROVED' && isManager && openPeriods.length > 0 && (
+        <button
+          onClick={() => postMutation.mutate(openPeriods[0].id)}
+          disabled={postMutation.isPending}
+          className="text-xs text-primary hover:underline disabled:opacity-50 flex items-center gap-1 font-medium"
+          title="Post to ledger"
+        >
+          <CheckCircle size={11} />
+          {postMutation.isPending ? 'Posting…' : 'Post'}
+        </button>
+      )}
+
+      {/* Payment, credit note, bad debt — post-ledger actions */}
       {canPay && (
         <RecordPaymentDialog
           organisationId={organisationId}
@@ -928,7 +1018,7 @@ function InvoiceActions({ organisationId, invoice }: { organisationId: string; i
           }
         />
       )}
-      {canCredit && (
+      {canPay && (
         <CreditNoteDialog
           organisationId={organisationId}
           invoice={invoice}
@@ -939,7 +1029,7 @@ function InvoiceActions({ organisationId, invoice }: { organisationId: string; i
           }
         />
       )}
-      {canWriteOff && (
+      {canPay && (
         <BadDebtDialog
           organisationId={organisationId}
           invoice={invoice}
@@ -1058,7 +1148,7 @@ export function ARPage() {
           />
           <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="h-8 text-xs w-40">
             <option value="">All statuses</option>
-            {['DRAFT', 'POSTED', 'PARTIALLY_PAID', 'PAID', 'OVERDUE', 'CANCELLED'].map((s) => (
+            {['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'POSTED', 'PARTIALLY_PAID', 'PAID', 'OVERDUE', 'CANCELLED'].map((s) => (
               <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
             ))}
           </Select>
@@ -1121,7 +1211,7 @@ export function ARPage() {
                 <TableBody>
                   {filteredInvoices.map((inv) => {
                     const outstanding = Number(inv.totalAmount) - Number(inv.amountPaid);
-                    const isOverdue = inv.status !== 'PAID' && inv.status !== 'VOID' && inv.status !== 'DRAFT' && new Date(inv.dueDate) < new Date();
+                    const isOverdue = !['PAID', 'VOID', 'DRAFT', 'PENDING_APPROVAL', 'APPROVED'].includes(inv.status) && new Date(inv.dueDate) < new Date();
                     return (
                       <TableRow key={inv.id}>
                         <TableCell className="font-mono text-xs font-semibold text-primary">{inv.invoiceNumber}</TableCell>

@@ -126,6 +126,8 @@ enum AssetStatus {
 
 enum InvoiceStatus {
   DRAFT
+  PENDING_APPROVAL
+  APPROVED
   SENT
   PARTIALLY_PAID
   PAID

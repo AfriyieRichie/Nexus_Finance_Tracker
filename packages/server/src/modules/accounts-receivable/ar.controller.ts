@@ -4,7 +4,7 @@ import { sendSuccess, sendCreated, sendPaginated, buildPagination } from '../../
 import {
   createCustomerSchema, updateCustomerSchema, listCustomersSchema,
   createInvoiceSchema, listInvoicesSchema, recordPaymentSchema,
-  createCreditNoteSchema, writeBadDebtSchema,
+  createCreditNoteSchema, writeBadDebtSchema, rejectInvoiceSchema,
 } from './ar.schemas';
 import * as arService from './ar.service';
 
@@ -102,4 +102,26 @@ export const writeBadDebt = asyncHandler(async (req: Request, res: Response) => 
   const input = writeBadDebtSchema.parse(req.body);
   const result = await arService.writeBadDebt(organisationId, userId, input);
   return sendSuccess(res, result, 'Bad debt written off');
+});
+
+export const submitInvoiceForApproval = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId, invoiceId } = req.params;
+  const userId = req.user!.sub;
+  const result = await arService.submitInvoiceForApproval(organisationId, invoiceId, userId);
+  return sendSuccess(res, result, 'Invoice submitted for approval');
+});
+
+export const approveInvoice = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId, invoiceId } = req.params;
+  const userId = req.user!.sub;
+  const result = await arService.approveInvoice(organisationId, invoiceId, userId);
+  return sendSuccess(res, result, 'Invoice approved');
+});
+
+export const rejectInvoice = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId, invoiceId } = req.params;
+  const userId = req.user!.sub;
+  const { reason } = rejectInvoiceSchema.parse(req.body);
+  const result = await arService.rejectInvoice(organisationId, invoiceId, userId, reason);
+  return sendSuccess(res, result, 'Invoice rejected');
 });

@@ -47,11 +47,15 @@ export const createInvoiceSchema = z.object({
 
 export const listInvoicesSchema = z.object({
   customerId: z.string().uuid().optional(),
-  status: z.enum(['DRAFT', 'POSTED', 'PARTIALLY_PAID', 'PAID', 'OVERDUE', 'CANCELLED']).optional(),
+  status: z.enum(['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'POSTED', 'PARTIALLY_PAID', 'PAID', 'OVERDUE', 'CANCELLED']).optional(),
   from: z.string().optional(),
   to: z.string().optional(),
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().positive().max(200).default(50),
+});
+
+export const rejectInvoiceSchema = z.object({
+  reason: z.string().min(1),
 });
 
 export const recordPaymentSchema = z.object({
@@ -88,3 +92,4 @@ export type ListInvoicesQuery = z.infer<typeof listInvoicesSchema>;
 export type RecordPaymentInput = z.infer<typeof recordPaymentSchema>;
 export type CreateCreditNoteInput = z.infer<typeof createCreditNoteSchema>;
 export type WriteBadDebtInput = z.infer<typeof writeBadDebtSchema>;
+export type RejectInvoiceInput = z.infer<typeof rejectInvoiceSchema>;

@@ -80,6 +80,21 @@ export async function createInvoice(organisationId: string, data: object) {
   return res.data.data as Invoice;
 }
 
+export async function submitInvoiceForApproval(organisationId: string, invoiceId: string) {
+  const res = await api.post(`/organisations/${organisationId}/ar/invoices/${invoiceId}/submit`);
+  return res.data.data as Invoice;
+}
+
+export async function approveInvoice(organisationId: string, invoiceId: string) {
+  const res = await api.post(`/organisations/${organisationId}/ar/invoices/${invoiceId}/approve`);
+  return res.data.data as Invoice;
+}
+
+export async function rejectInvoice(organisationId: string, invoiceId: string, reason: string) {
+  const res = await api.post(`/organisations/${organisationId}/ar/invoices/${invoiceId}/reject`, { reason });
+  return res.data.data as Invoice;
+}
+
 export async function postInvoice(organisationId: string, invoiceId: string, periodId: string) {
   const res = await api.post(`/organisations/${organisationId}/ar/invoices/${invoiceId}/post`, { periodId });
   return res.data.data;

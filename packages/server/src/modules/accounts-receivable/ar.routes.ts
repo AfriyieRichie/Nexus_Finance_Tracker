@@ -16,6 +16,9 @@ router.delete('/customers/:customerId', ctrl.deleteCustomer);
 router.get('/invoices', ctrl.listInvoices);
 router.post('/invoices', ctrl.createInvoice);
 router.get('/invoices/:invoiceId', ctrl.getInvoice);
+router.post('/invoices/:invoiceId/submit', ctrl.submitInvoiceForApproval);
+router.post('/invoices/:invoiceId/approve', ctrl.approveInvoice);
+router.post('/invoices/:invoiceId/reject', ctrl.rejectInvoice);
 router.post('/invoices/:invoiceId/post', ctrl.postInvoice);
 
 // Payments, Credit Notes, Bad Debt & Ageing

@@ -1,12 +1,23 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../config/database';
-import { ConflictError, NotFoundError, ValidationError } from '../../utils/errors';
+import { ConflictError, NotFoundError, ValidationError, ForbiddenError } from '../../utils/errors';
 import * as journalService from '../journals/journal.service';
+import { createAuditLog } from '../audit-trail/audit.service';
 import type {
   CreateCustomerInput, UpdateCustomerInput, ListCustomersQuery,
   CreateInvoiceInput, ListInvoicesQuery, RecordPaymentInput,
   CreateCreditNoteInput, WriteBadDebtInput,
 } from './ar.schemas';
+
+const MANAGER_ROLES = ['ORG_ADMIN', 'FINANCE_MANAGER'];
+
+async function getUserRole(organisationId: string, userId: string): Promise<string | null> {
+  const member = await prisma.organisationUser.findUnique({
+    where: { organisationId_userId: { organisationId, userId } },
+    select: { role: true },
+  });
+  return member?.role ?? null;
+}
 
 // ─── Customers ───────────────────────────────────────────────────────────────
 
@@ -119,6 +130,9 @@ export async function createInvoice(organisationId: string, userId: string, inpu
   });
   if (!customer) throw new NotFoundError('Customer not found or inactive');
 
+  const role = await getUserRole(organisationId, userId);
+  const initialStatus = MANAGER_ROLES.includes(role ?? '') ? 'APPROVED' : 'DRAFT';
+
   const subtotal = input.lines.reduce((s, l) => s + l.quantity * l.unitPrice, 0);
   const taxAmount = input.lines.reduce((s, l) => s + l.taxAmount, 0);
   const totalAmount = subtotal + taxAmount;
@@ -138,6 +152,7 @@ export async function createInvoice(organisationId: string, userId: string, inpu
       totalAmount: new Prisma.Decimal(totalAmount),
       notes: input.notes,
       createdBy: userId,
+      status: initialStatus,
       lines: {
         create: input.lines.map((l) => ({
           lineNumber: l.lineNumber,
@@ -161,7 +176,7 @@ export async function postInvoice(organisationId: string, invoiceId: string, per
     include: { lines: true, customer: true },
   });
   if (!invoice) throw new NotFoundError('Invoice not found');
-  if (invoice.status !== 'DRAFT') throw new ValidationError(`Invoice cannot be posted in status ${invoice.status}`);
+  if (invoice.status !== 'APPROVED') throw new ValidationError(`Invoice must be approved before posting. Current status: ${invoice.status}`);
 
   // Find AR control account
   const arAccount = await prisma.account.findFirst({
@@ -231,7 +246,9 @@ export async function recordPayment(organisationId: string, userId: string, inpu
   });
   if (!invoice) throw new NotFoundError('Invoice not found');
   if (invoice.status === 'PAID') throw new ValidationError('Invoice is already fully paid');
-  if (invoice.status === 'DRAFT') throw new ValidationError('Post the invoice before recording payment');
+  if (['DRAFT', 'PENDING_APPROVAL', 'APPROVED'].includes(invoice.status)) {
+    throw new ValidationError('Invoice must be posted to the ledger before recording payment');
+  }
 
   const arAccount = await prisma.account.findFirst({
     where: { organisationId, type: 'RECEIVABLE', isActive: true, isDeleted: false },
@@ -328,6 +345,87 @@ export async function getInvoice(organisationId: string, invoiceId: string) {
   });
   if (!invoice) throw new NotFoundError('Invoice not found');
   return invoice;
+}
+
+// ─── Approval Workflow ────────────────────────────────────────────────────────
+
+export async function submitInvoiceForApproval(organisationId: string, invoiceId: string, userId: string) {
+  const invoice = await prisma.invoice.findFirst({ where: { id: invoiceId, organisationId } });
+  if (!invoice) throw new NotFoundError('Invoice not found');
+  if (invoice.status !== 'DRAFT') {
+    throw new ValidationError(`Only DRAFT invoices can be submitted for approval. Current status: ${invoice.status}`);
+  }
+
+  const updated = await prisma.invoice.update({
+    where: { id: invoiceId },
+    data: { status: 'PENDING_APPROVAL' },
+  });
+
+  await createAuditLog({
+    organisationId, userId,
+    action: 'INVOICE_SUBMITTED',
+    entityType: 'INVOICE',
+    entityId: invoiceId,
+    newValue: { invoiceNumber: invoice.invoiceNumber, submittedBy: userId },
+  });
+
+  return updated;
+}
+
+export async function approveInvoice(organisationId: string, invoiceId: string, userId: string) {
+  const role = await getUserRole(organisationId, userId);
+  if (!MANAGER_ROLES.includes(role ?? '')) {
+    throw new ForbiddenError('Only Finance Managers and Admins can approve invoices');
+  }
+
+  const invoice = await prisma.invoice.findFirst({ where: { id: invoiceId, organisationId } });
+  if (!invoice) throw new NotFoundError('Invoice not found');
+  if (!['DRAFT', 'PENDING_APPROVAL'].includes(invoice.status)) {
+    throw new ValidationError(`Invoice cannot be approved in status ${invoice.status}`);
+  }
+
+  const updated = await prisma.invoice.update({
+    where: { id: invoiceId },
+    data: { status: 'APPROVED' },
+  });
+
+  await createAuditLog({
+    organisationId, userId,
+    action: 'INVOICE_APPROVED',
+    entityType: 'INVOICE',
+    entityId: invoiceId,
+    newValue: { invoiceNumber: invoice.invoiceNumber, approvedBy: userId },
+  });
+
+  return updated;
+}
+
+export async function rejectInvoice(organisationId: string, invoiceId: string, userId: string, reason: string) {
+  const role = await getUserRole(organisationId, userId);
+  if (!MANAGER_ROLES.includes(role ?? '')) {
+    throw new ForbiddenError('Only Finance Managers and Admins can reject invoices');
+  }
+
+  const invoice = await prisma.invoice.findFirst({ where: { id: invoiceId, organisationId } });
+  if (!invoice) throw new NotFoundError('Invoice not found');
+  if (invoice.status !== 'PENDING_APPROVAL') {
+    throw new ValidationError(`Only PENDING_APPROVAL invoices can be rejected. Current status: ${invoice.status}`);
+  }
+
+  const updated = await prisma.invoice.update({
+    where: { id: invoiceId },
+    data: { status: 'DRAFT' },
+  });
+
+  await createAuditLog({
+    organisationId, userId,
+    action: 'INVOICE_REJECTED',
+    entityType: 'INVOICE',
+    entityId: invoiceId,
+    newValue: { invoiceNumber: invoice.invoiceNumber, rejectedBy: userId, reason },
+  });
+
+  return updated;
 }
 
 // ─── Credit Notes ────────────────────────────────────────────────────────────
