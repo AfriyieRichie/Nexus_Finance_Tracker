@@ -580,9 +580,15 @@ export function PeriodsPage() {
                                     </>
                                   )}
                                   {p.status === 'LOCKED' && (
-                                    <span className="text-xs text-muted-foreground flex items-center gap-1 pr-1">
-                                      <Lock size={11} /> Permanent
-                                    </span>
+                                    p.closedAt ? (
+                                      <span className="text-xs text-muted-foreground flex items-center gap-1 pr-1">
+                                        <Lock size={11} /> Permanent
+                                      </span>
+                                    ) : (
+                                      <span className="text-xs text-sky-600 flex items-center gap-1 pr-1">
+                                        <Lock size={11} /> Opens {new Date(p.startDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                                      </span>
+                                    )
                                   )}
                                 </div>
                               </TableCell>

@@ -9,6 +9,42 @@ const MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
+function todayUTC(): Date {
+  const d = new Date();
+  d.setUTCHours(0, 0, 0, 0);
+  return d;
+}
+
+// Unlock future-locked periods whose start date has now arrived.
+// Discriminator: future-locked periods have closedAt=null; year-end locked have closedAt set.
+async function autoUnlockDuePeriods(organisationId: string): Promise<void> {
+  const today = todayUTC();
+  await prisma.accountingPeriod.updateMany({
+    where: {
+      organisationId,
+      status: PeriodStatus.LOCKED,
+      startDate: { lte: today },
+      closedAt: null,
+    },
+    data: { status: PeriodStatus.OPEN },
+  });
+}
+
+// Lock any OPEN future periods that should not yet be postable.
+// Runs on listPeriods to retroactively fix periods created before this rule existed.
+async function autoLockFuturePeriods(organisationId: string): Promise<void> {
+  const today = todayUTC();
+  await prisma.accountingPeriod.updateMany({
+    where: {
+      organisationId,
+      status: PeriodStatus.OPEN,
+      startDate: { gt: today },
+      closedAt: null,
+    },
+    data: { status: PeriodStatus.LOCKED },
+  });
+}
+
 function addMonths(date: Date, months: number): Date {
   const d = new Date(date);
   d.setUTCMonth(d.getUTCMonth() + months);
@@ -43,12 +79,16 @@ export async function createFiscalYear(
   const startDate = new Date(input.startDate + 'T00:00:00Z');
   if (isNaN(startDate.getTime())) throw new ValidationError('Invalid startDate');
 
+  const today = todayUTC();
   const periods = [];
   for (let i = 0; i < 12; i++) {
     const periodStart = addMonths(startDate, i);
     const monthNum = periodStart.getUTCMonth(); // 0-based
     const year = periodStart.getUTCFullYear();
     const periodEnd = lastDayOf(year, monthNum + 1);
+
+    // Future periods start LOCKED; they auto-open at 00:00 on their start date.
+    const status = periodStart <= today ? PeriodStatus.OPEN : PeriodStatus.LOCKED;
 
     periods.push({
       organisationId,
@@ -57,7 +97,7 @@ export async function createFiscalYear(
       name: `${MONTH_NAMES[monthNum]} ${year}`,
       startDate: periodStart,
       endDate: periodEnd,
-      status: PeriodStatus.OPEN,
+      status,
     });
   }
 
@@ -72,6 +112,8 @@ export async function createFiscalYear(
 // ─── List Periods ─────────────────────────────────────────────────────────────
 
 export async function listPeriods(organisationId: string, query: ListPeriodsQuery) {
+  await autoLockFuturePeriods(organisationId);
+  await autoUnlockDuePeriods(organisationId);
   return prisma.accountingPeriod.findMany({
     where: {
       organisationId,
@@ -95,6 +137,7 @@ export async function getPeriod(organisationId: string, periodId: string) {
 // ─── Get Current Open Period ──────────────────────────────────────────────────
 
 export async function getCurrentPeriod(organisationId: string) {
+  await autoUnlockDuePeriods(organisationId);
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
 

@@ -81,9 +81,23 @@ async function assertPeriodOpen(
 ) {
   const period = await tx.accountingPeriod.findFirst({
     where: { id: periodId, organisationId },
-    select: { status: true, name: true },
+    select: { status: true, name: true, startDate: true, closedAt: true },
   });
   if (!period) throw new NotFoundError('Accounting period not found');
+
+  // Auto-unlock a future-locked period whose start date has now arrived
+  if (
+    period.status === PeriodStatus.LOCKED &&
+    period.closedAt === null &&
+    period.startDate <= new Date()
+  ) {
+    await tx.accountingPeriod.updateMany({
+      where: { id: periodId, organisationId },
+      data: { status: PeriodStatus.OPEN },
+    });
+    return period;
+  }
+
   if (period.status !== PeriodStatus.OPEN) {
     throw new PeriodClosedError(`Period '${period.name}' is ${period.status.toLowerCase()} — cannot post entries`);
   }
