@@ -1,19 +1,81 @@
 import { api } from './api';
 
+export interface AssetCategory {
+  id: string;
+  code: string;
+  name: string;
+  description?: string;
+  defaultDepreciationMethod: string;
+  defaultUsefulLifeMonths?: number;
+  capitalisationThreshold?: string;
+}
+
+export interface AssetRevaluation {
+  id: string;
+  revaluationDate: string;
+  fairValue: string;
+  previousCarryingValue: string;
+  surplusDeficit: string;
+  notes?: string;
+  createdAt: string;
+}
+
+export interface AssetImpairment {
+  id: string;
+  impairmentDate: string;
+  impairmentAmount: string;
+  previousCarryingValue: string;
+  newCarryingValue: string;
+  notes?: string;
+  createdAt: string;
+}
+
 export interface FixedAsset {
   id: string;
   code: string;
   name: string;
+  description?: string;
   category: string;
+  categoryId?: string;
+  serialNumber?: string;
+  location?: string;
   acquisitionDate: string;
   acquisitionCost: string;
   residualValue: string;
   usefulLifeMonths: number;
   depreciationMethod: string;
+  unitsOfProductionTotal?: number;
+  depreciationMonthsElapsed: number;
   accumulatedDeprn: string;
+  impairmentLoss: string;
   carryingValue: string;
   status: string;
   lastDeprnDate: string | null;
+  assetCategory?: AssetCategory;
+  revaluations?: AssetRevaluation[];
+  impairments?: AssetImpairment[];
+}
+
+export async function listCategories(organisationId: string) {
+  const res = await api.get(`/organisations/${organisationId}/assets/categories`);
+  return res.data.data as AssetCategory[];
+}
+
+export async function createCategory(organisationId: string, data: {
+  code: string; name: string; description?: string;
+  defaultDepreciationMethod?: string; defaultUsefulLifeMonths?: number;
+  capitalisationThreshold?: number;
+}) {
+  const res = await api.post(`/organisations/${organisationId}/assets/categories`, data);
+  return res.data.data as AssetCategory;
+}
+
+export async function updateCategory(organisationId: string, categoryId: string, data: Partial<{
+  name: string; description: string; defaultDepreciationMethod: string;
+  defaultUsefulLifeMonths: number; capitalisationThreshold: number;
+}>) {
+  const res = await api.put(`/organisations/${organisationId}/assets/categories/${categoryId}`, data);
+  return res.data.data as AssetCategory;
 }
 
 export async function listAssets(organisationId: string, params?: { search?: string; status?: string; page?: number }) {
@@ -22,16 +84,48 @@ export async function listAssets(organisationId: string, params?: { search?: str
 }
 
 export async function createAsset(organisationId: string, data: {
-  code: string; name: string; category: string; acquisitionDate: string;
-  acquisitionCost: number; residualValue?: number; usefulLifeMonths: number;
-  depreciationMethod?: string;
+  code: string; name: string; category: string; categoryId?: string;
+  serialNumber?: string; location?: string;
+  acquisitionDate: string; acquisitionCost: number;
+  residualValue?: number; usefulLifeMonths: number;
+  depreciationMethod?: string; unitsOfProductionTotal?: number;
+  assetAccountId?: string; deprnAccountId?: string; accDeprnAccountId?: string;
 }) {
   const res = await api.post(`/organisations/${organisationId}/assets`, data);
   return res.data.data as FixedAsset;
 }
 
-export async function runDepreciation(organisationId: string, data: { periodId: string; asOfDate: string }) {
-  const res = await api.post(`/organisations/${organisationId}/assets/depreciation/run`, data);
+export async function updateAsset(organisationId: string, assetId: string, data: Partial<{
+  name: string; description: string; category: string; categoryId: string;
+  serialNumber: string; location: string; residualValue: number;
+  usefulLifeMonths: number; depreciationMethod: string;
+}>) {
+  const res = await api.put(`/organisations/${organisationId}/assets/${assetId}`, data);
+  return res.data.data as FixedAsset;
+}
+
+export async function getAsset(organisationId: string, assetId: string) {
+  const res = await api.get(`/organisations/${organisationId}/assets/${assetId}`);
+  return res.data.data as FixedAsset;
+}
+
+export async function previewDepreciation(organisationId: string, data: { periodId: string; asOfDate: string }) {
+  const res = await api.post(`/organisations/${organisationId}/assets/depreciation/run`, { ...data, preview: true });
+  return res.data.data;
+}
+
+export async function runDepreciation(organisationId: string, data: { periodId: string; asOfDate: string; assetUnitsOverrides?: Array<{ assetId: string; units: number }> }) {
+  const res = await api.post(`/organisations/${organisationId}/assets/depreciation/run`, { ...data, preview: false });
+  return res.data.data;
+}
+
+export async function reverseDepreciation(organisationId: string, data: { runId: string; periodId: string; reason: string }) {
+  const res = await api.post(`/organisations/${organisationId}/assets/depreciation/reverse`, data);
+  return res.data.data;
+}
+
+export async function listDepreciationRuns(organisationId: string) {
+  const res = await api.get(`/organisations/${organisationId}/assets/depreciation/runs`);
   return res.data.data;
 }
 
@@ -39,5 +133,19 @@ export async function disposeAsset(organisationId: string, assetId: string, data
   disposalDate: string; disposalProceeds: number; periodId: string; bankAccountId?: string;
 }) {
   const res = await api.post(`/organisations/${organisationId}/assets/${assetId}/dispose`, data);
+  return res.data.data;
+}
+
+export async function revalueAsset(organisationId: string, assetId: string, data: {
+  revaluationDate: string; fairValue: number; periodId: string; reserveAccountId?: string; notes?: string;
+}) {
+  const res = await api.post(`/organisations/${organisationId}/assets/${assetId}/revalue`, data);
+  return res.data.data;
+}
+
+export async function impairAsset(organisationId: string, assetId: string, data: {
+  impairmentDate: string; impairmentAmount: number; periodId: string; impairmentAccountId?: string; notes?: string;
+}) {
+  const res = await api.post(`/organisations/${organisationId}/assets/${assetId}/impair`, data);
   return res.data.data;
 }

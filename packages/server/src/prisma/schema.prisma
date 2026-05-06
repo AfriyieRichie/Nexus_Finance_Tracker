@@ -116,6 +116,12 @@ enum DepreciationMethod {
   STRAIGHT_LINE
   REDUCING_BALANCE
   UNITS_OF_PRODUCTION
+  SUM_OF_YEARS_DIGITS
+}
+
+enum DepreciationRunStatus {
+  POSTED
+  REVERSED
 }
 
 enum CostMethod {
@@ -227,6 +233,10 @@ model Organisation {
   customers          Customer[]
   suppliers          Supplier[]
   fixedAssets        FixedAsset[]
+  assetCategories    AssetCategory[]
+  depreciationRuns   DepreciationRun[]
+  assetRevaluations  AssetRevaluation[]
+  assetImpairments   AssetImpairment[]
   bankAccounts       BankAccount[]
   inventoryItems     InventoryItem[]
   budgets            Budget[]
@@ -709,35 +719,143 @@ model SupplierInvoiceLine {
 // ============================================================
 
 model FixedAsset {
-  id                 String             @id @default(uuid())
-  organisationId     String
-  code               String
-  name               String
-  description        String?
-  category           String
-  acquisitionDate    DateTime           @db.Date
-  acquisitionCost    Decimal            @db.Decimal(20, 4)
-  residualValue      Decimal            @default(0) @db.Decimal(20, 4)
-  usefulLifeMonths   Int
-  depreciationMethod DepreciationMethod @default(STRAIGHT_LINE)
-  accumulatedDeprn   Decimal            @default(0) @db.Decimal(20, 4)
-  carryingValue      Decimal            @db.Decimal(20, 4)
-  status             AssetStatus        @default(ACTIVE)
-  disposalDate       DateTime?          @db.Date
-  disposalProceeds   Decimal?           @db.Decimal(20, 4)
-  assetAccountId     String?
-  deprnAccountId     String?
-  accDeprnAccountId  String?
-  lastDeprnDate      DateTime?          @db.Date
-  isDeleted          Boolean            @default(false)
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
+  id                        String             @id @default(uuid())
+  organisationId            String
+  code                      String
+  name                      String
+  description               String?
+  category                  String
+  categoryId                String?
+  serialNumber              String?
+  location                  String?
+  acquisitionDate           DateTime           @db.Date
+  acquisitionCost           Decimal            @db.Decimal(20, 4)
+  residualValue             Decimal            @default(0) @db.Decimal(20, 4)
+  usefulLifeMonths          Int
+  depreciationMethod        DepreciationMethod @default(STRAIGHT_LINE)
+  unitsOfProductionTotal    Int?
+  depreciationMonthsElapsed Int                @default(0)
+  accumulatedDeprn          Decimal            @default(0) @db.Decimal(20, 4)
+  impairmentLoss            Decimal            @default(0) @db.Decimal(20, 4)
+  carryingValue             Decimal            @db.Decimal(20, 4)
+  status                    AssetStatus        @default(ACTIVE)
+  disposalDate              DateTime?          @db.Date
+  disposalProceeds          Decimal?           @db.Decimal(20, 4)
+  assetAccountId            String?
+  deprnAccountId            String?
+  accDeprnAccountId         String?
+  lastDeprnDate             DateTime?          @db.Date
+  isDeleted                 Boolean            @default(false)
+  createdAt                 DateTime           @default(now())
+  updatedAt                 DateTime           @updatedAt
 
-  organisation Organisation @relation(fields: [organisationId], references: [id])
+  organisation     Organisation          @relation(fields: [organisationId], references: [id])
+  assetCategory    AssetCategory?        @relation(fields: [categoryId], references: [id])
+  revaluations     AssetRevaluation[]
+  impairments      AssetImpairment[]
+  deprnRunEntries  DepreciationRunEntry[]
 
   @@unique([organisationId, code])
   @@index([organisationId, status])
   @@map("fixed_assets")
+}
+
+model AssetCategory {
+  id                        String             @id @default(uuid())
+  organisationId            String
+  code                      String
+  name                      String
+  description               String?
+  defaultDepreciationMethod DepreciationMethod @default(STRAIGHT_LINE)
+  defaultUsefulLifeMonths   Int?
+  capitalisationThreshold   Decimal?           @db.Decimal(20, 4)
+  isActive                  Boolean            @default(true)
+  isDeleted                 Boolean            @default(false)
+  createdAt                 DateTime           @default(now())
+  updatedAt                 DateTime           @updatedAt
+
+  organisation Organisation @relation(fields: [organisationId], references: [id])
+  assets       FixedAsset[]
+
+  @@unique([organisationId, code])
+  @@index([organisationId])
+  @@map("asset_categories")
+}
+
+model AssetRevaluation {
+  id                    String       @id @default(uuid())
+  organisationId        String
+  assetId               String
+  revaluationDate       DateTime     @db.Date
+  fairValue             Decimal      @db.Decimal(20, 4)
+  previousCarryingValue Decimal      @db.Decimal(20, 4)
+  surplusDeficit        Decimal      @db.Decimal(20, 4)
+  journalEntryId        String?
+  notes                 String?
+  createdBy             String
+  createdAt             DateTime     @default(now())
+
+  asset        FixedAsset   @relation(fields: [assetId], references: [id])
+  organisation Organisation @relation(fields: [organisationId], references: [id])
+
+  @@index([assetId])
+  @@index([organisationId])
+  @@map("asset_revaluations")
+}
+
+model AssetImpairment {
+  id                    String   @id @default(uuid())
+  organisationId        String
+  assetId               String
+  impairmentDate        DateTime @db.Date
+  impairmentAmount      Decimal  @db.Decimal(20, 4)
+  previousCarryingValue Decimal  @db.Decimal(20, 4)
+  newCarryingValue      Decimal  @db.Decimal(20, 4)
+  journalEntryId        String?
+  notes                 String?
+  createdBy             String
+  createdAt             DateTime @default(now())
+
+  asset        FixedAsset   @relation(fields: [assetId], references: [id])
+  organisation Organisation @relation(fields: [organisationId], references: [id])
+
+  @@index([assetId])
+  @@index([organisationId])
+  @@map("asset_impairments")
+}
+
+model DepreciationRun {
+  id             String                @id @default(uuid())
+  organisationId String
+  periodId       String
+  asOfDate       DateTime              @db.Date
+  processedCount Int
+  totalAmount    Decimal               @db.Decimal(20, 4)
+  status         DepreciationRunStatus @default(POSTED)
+  reversedAt     DateTime?
+  reversedBy     String?
+  createdBy      String
+  createdAt      DateTime              @default(now())
+
+  organisation Organisation          @relation(fields: [organisationId], references: [id])
+  entries      DepreciationRunEntry[]
+
+  @@index([organisationId])
+  @@map("depreciation_runs")
+}
+
+model DepreciationRunEntry {
+  id             String @id @default(uuid())
+  runId          String
+  assetId        String
+  amount         Decimal @db.Decimal(20, 4)
+  journalEntryId String
+
+  run   DepreciationRun @relation(fields: [runId], references: [id])
+  asset FixedAsset      @relation(fields: [assetId], references: [id])
+
+  @@index([runId])
+  @@map("depreciation_run_entries")
 }
 
 // ============================================================

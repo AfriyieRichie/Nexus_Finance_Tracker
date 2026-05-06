@@ -1,8 +1,27 @@
 import { Request, Response } from 'express';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { sendSuccess, sendCreated, sendPaginated, buildPagination } from '../../utils/response';
-import { createAssetSchema, updateAssetSchema, listAssetsSchema, runDepreciationSchema, disposeAssetSchema } from './assets.schemas';
+import {
+  createAssetSchema, updateAssetSchema, listAssetsSchema,
+  runDepreciationSchema, reverseDepreciationSchema,
+  disposeAssetSchema, revalueAssetSchema, impairAssetSchema,
+  createCategorySchema, updateCategorySchema,
+} from './assets.schemas';
 import * as svc from './assets.service';
+
+export const listCategories = asyncHandler(async (req: Request, res: Response) => {
+  return sendSuccess(res, await svc.listCategories(req.params.organisationId));
+});
+
+export const createCategory = asyncHandler(async (req: Request, res: Response) => {
+  const input = createCategorySchema.parse(req.body);
+  return sendCreated(res, await svc.createCategory(req.params.organisationId, input), 'Category created');
+});
+
+export const updateCategory = asyncHandler(async (req: Request, res: Response) => {
+  const input = updateCategorySchema.parse(req.body);
+  return sendSuccess(res, await svc.updateCategory(req.params.organisationId, req.params.categoryId, input), 'Category updated');
+});
 
 export const createAsset = asyncHandler(async (req: Request, res: Response) => {
   const input = createAssetSchema.parse(req.body);
@@ -26,10 +45,31 @@ export const getAsset = asyncHandler(async (req: Request, res: Response) => {
 
 export const runDepreciation = asyncHandler(async (req: Request, res: Response) => {
   const input = runDepreciationSchema.parse(req.body);
-  return sendSuccess(res, await svc.runDepreciation(req.params.organisationId, req.user!.sub, input), 'Depreciation run completed');
+  const result = await svc.runDepreciation(req.params.organisationId, req.user!.sub, input);
+  const message = input.preview ? 'Depreciation preview calculated' : 'Depreciation run completed';
+  return sendSuccess(res, result, message);
+});
+
+export const reverseDepreciation = asyncHandler(async (req: Request, res: Response) => {
+  const input = reverseDepreciationSchema.parse(req.body);
+  return sendSuccess(res, await svc.reverseDepreciation(req.params.organisationId, req.user!.sub, input), 'Depreciation run reversed');
+});
+
+export const listDepreciationRuns = asyncHandler(async (req: Request, res: Response) => {
+  return sendSuccess(res, await svc.listDepreciationRuns(req.params.organisationId));
 });
 
 export const disposeAsset = asyncHandler(async (req: Request, res: Response) => {
   const input = disposeAssetSchema.parse(req.body);
   return sendSuccess(res, await svc.disposeAsset(req.params.organisationId, req.params.assetId, req.user!.sub, input), 'Asset disposed');
+});
+
+export const revalueAsset = asyncHandler(async (req: Request, res: Response) => {
+  const input = revalueAssetSchema.parse(req.body);
+  return sendSuccess(res, await svc.revalueAsset(req.params.organisationId, req.params.assetId, req.user!.sub, input), 'Asset revalued');
+});
+
+export const impairAsset = asyncHandler(async (req: Request, res: Response) => {
+  const input = impairAssetSchema.parse(req.body);
+  return sendSuccess(res, await svc.impairAsset(req.params.organisationId, req.params.assetId, req.user!.sub, input), 'Asset impairment recorded');
 });

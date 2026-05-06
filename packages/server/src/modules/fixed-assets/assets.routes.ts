@@ -5,11 +5,23 @@ import * as ctrl from './assets.controller';
 const router = Router({ mergeParams: true });
 router.use(requireAuth);
 
+// Categories
+router.get('/categories', ctrl.listCategories);
+router.post('/categories', ctrl.createCategory);
+router.put('/categories/:categoryId', ctrl.updateCategory);
+
+// Depreciation
+router.post('/depreciation/run', ctrl.runDepreciation);
+router.post('/depreciation/reverse', ctrl.reverseDepreciation);
+router.get('/depreciation/runs', ctrl.listDepreciationRuns);
+
+// Assets
 router.get('/', ctrl.listAssets);
 router.post('/', ctrl.createAsset);
 router.get('/:assetId', ctrl.getAsset);
 router.put('/:assetId', ctrl.updateAsset);
 router.post('/:assetId/dispose', ctrl.disposeAsset);
-router.post('/depreciation/run', ctrl.runDepreciation);
+router.post('/:assetId/revalue', ctrl.revalueAsset);
+router.post('/:assetId/impair', ctrl.impairAsset);
 
 export { router as assetsRouter };
