@@ -884,14 +884,16 @@ model BankAccount {
 }
 
 model BankStatement {
-  id             String   @id @default(uuid())
+  id             String    @id @default(uuid())
   bankAccountId  String
-  statementDate  DateTime @db.Date
-  openingBalance Decimal  @db.Decimal(20, 4)
-  closingBalance Decimal  @db.Decimal(20, 4)
-  isReconciled   Boolean  @default(false)
+  statementDate  DateTime  @db.Date
+  openingBalance Decimal   @db.Decimal(20, 4)
+  closingBalance Decimal   @db.Decimal(20, 4)
+  isReconciled   Boolean   @default(false)
+  isLocked       Boolean   @default(false)
   reconciledAt   DateTime?
-  createdAt      DateTime @default(now())
+  reconciledBy   String?
+  createdAt      DateTime  @default(now())
 
   bankAccount BankAccount        @relation(fields: [bankAccountId], references: [id])
   lines       BankStatementLine[]
@@ -901,15 +903,17 @@ model BankStatement {
 }
 
 model BankStatementLine {
-  id              String   @id @default(uuid())
-  statementId     String
+  id             String   @id @default(uuid())
+  statementId    String
   transactionDate DateTime @db.Date
-  description     String
-  debitAmount     Decimal  @default(0) @db.Decimal(20, 4)
-  creditAmount    Decimal  @default(0) @db.Decimal(20, 4)
-  reference       String?
-  isMatched       Boolean  @default(false)
-  matchedEntryId  String?
+  description    String
+  debitAmount    Decimal  @default(0) @db.Decimal(20, 4)
+  creditAmount   Decimal  @default(0) @db.Decimal(20, 4)
+  reference      String?
+  isMatched      Boolean  @default(false)
+  matchedEntryId String?
+  matchNote      String?
+  journalEntryId String?
 
   statement BankStatement @relation(fields: [statementId], references: [id], onDelete: Cascade)
 

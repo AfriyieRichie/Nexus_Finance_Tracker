@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { sendSuccess, sendCreated, sendPaginated, buildPagination } from '../../utils/response';
-import { createBankAccountSchema, importStatementSchema, matchLineSchema, listStatementsSchema } from './bank.schemas';
+import { createBankAccountSchema, importStatementSchema, matchLineSchema, listStatementsSchema, confirmReconciliationSchema, createJournalFromLineSchema } from './bank.schemas';
 import * as svc from './bank.service';
 
 export const createBankAccount = asyncHandler(async (req: Request, res: Response) => {
@@ -43,4 +43,16 @@ export const autoMatch = asyncHandler(async (req: Request, res: Response) => {
 
 export const getReconciliationSummary = asyncHandler(async (req: Request, res: Response) => {
   return sendSuccess(res, await svc.getReconciliationSummary(req.params.organisationId, req.params.statementId));
+});
+
+export const confirmReconciliation = asyncHandler(async (req: Request, res: Response) => {
+  const input = confirmReconciliationSchema.parse(req.body);
+  const userId = (req as any).user?.id ?? 'system';
+  return sendSuccess(res, await svc.confirmReconciliation(req.params.organisationId, req.params.statementId, userId, input), 'Reconciliation confirmed and locked');
+});
+
+export const createJournalFromLine = asyncHandler(async (req: Request, res: Response) => {
+  const input = createJournalFromLineSchema.parse(req.body);
+  const userId = (req as any).user?.id ?? 'system';
+  return sendCreated(res, await svc.createJournalFromLine(req.params.organisationId, req.params.lineId, userId, input), 'Journal created and line matched');
 });

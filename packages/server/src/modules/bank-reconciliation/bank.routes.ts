@@ -16,5 +16,8 @@ router.post('/statements/:statementId/auto-match', ctrl.autoMatch);
 
 router.post('/match', ctrl.matchLine);
 router.delete('/lines/:lineId/match', ctrl.unmatchLine);
+router.post('/lines/:lineId/journal', ctrl.createJournalFromLine);
+
+router.post('/statements/:statementId/confirm', ctrl.confirmReconciliation);
 
 export { router as bankRouter };

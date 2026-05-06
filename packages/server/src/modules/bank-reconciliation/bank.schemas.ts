@@ -33,7 +33,20 @@ export const listStatementsSchema = z.object({
   pageSize: z.coerce.number().int().positive().default(20),
 });
 
+export const confirmReconciliationSchema = z.object({
+  force: z.boolean().default(false),
+});
+
+export const createJournalFromLineSchema = z.object({
+  accountId: z.string().uuid(),
+  periodId: z.string().uuid(),
+  description: z.string().min(1).max(200),
+  note: z.string().optional(),
+});
+
 export type CreateBankAccountInput = z.infer<typeof createBankAccountSchema>;
 export type ImportStatementInput = z.infer<typeof importStatementSchema>;
 export type MatchLineInput = z.infer<typeof matchLineSchema>;
 export type ListStatementsQuery = z.infer<typeof listStatementsSchema>;
+export type ConfirmReconciliationInput = z.infer<typeof confirmReconciliationSchema>;
+export type CreateJournalFromLineInput = z.infer<typeof createJournalFromLineSchema>;

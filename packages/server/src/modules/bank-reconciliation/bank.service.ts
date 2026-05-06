@@ -1,8 +1,10 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../config/database';
-import { ConflictError, NotFoundError } from '../../utils/errors';
+import { ConflictError, NotFoundError, ValidationError } from '../../utils/errors';
+import * as journalService from '../journals/journal.service';
 import type {
   CreateBankAccountInput, ImportStatementInput, MatchLineInput, ListStatementsQuery,
+  ConfirmReconciliationInput, CreateJournalFromLineInput,
 } from './bank.schemas';
 
 export async function createBankAccount(organisationId: string, input: CreateBankAccountInput) {
@@ -41,7 +43,6 @@ export async function importStatement(organisationId: string, input: ImportState
   });
   if (!bankAccount) throw new NotFoundError('Bank account not found');
 
-  // Check for duplicate statement date
   const existing = await prisma.bankStatement.findFirst({
     where: { bankAccountId: input.bankAccountId, statementDate: new Date(input.statementDate) },
   });
@@ -106,9 +107,11 @@ export async function getStatement(organisationId: string, statementId: string) 
 export async function matchLine(organisationId: string, input: MatchLineInput) {
   const line = await prisma.bankStatementLine.findFirst({
     where: { id: input.statementLineId, statement: { bankAccount: { organisationId } } },
+    include: { statement: { select: { isLocked: true } } },
   });
   if (!line) throw new NotFoundError('Statement line not found');
   if (line.isMatched) throw new ConflictError('This line is already matched');
+  if (line.statement.isLocked) throw new ValidationError('Statement is locked — cannot modify a confirmed reconciliation');
 
   const ledgerEntry = await prisma.ledgerEntry.findFirst({
     where: { id: input.ledgerEntryId, organisationId },
@@ -124,12 +127,14 @@ export async function matchLine(organisationId: string, input: MatchLineInput) {
 export async function unmatchLine(organisationId: string, lineId: string) {
   const line = await prisma.bankStatementLine.findFirst({
     where: { id: lineId, statement: { bankAccount: { organisationId } } },
+    include: { statement: { select: { isLocked: true } } },
   });
   if (!line) throw new NotFoundError('Statement line not found');
+  if (line.statement.isLocked) throw new ValidationError('Statement is locked — cannot modify a confirmed reconciliation');
 
   return prisma.bankStatementLine.update({
     where: { id: lineId },
-    data: { isMatched: false, matchedEntryId: null },
+    data: { isMatched: false, matchedEntryId: null, matchNote: null, journalEntryId: null },
   });
 }
 
@@ -139,6 +144,7 @@ export async function autoMatch(organisationId: string, statementId: string) {
     include: { lines: { where: { isMatched: false } }, bankAccount: true },
   });
   if (!stmt) throw new NotFoundError('Statement not found');
+  if (stmt.isLocked) throw new ValidationError('Statement is locked');
 
   let matched = 0;
 
@@ -151,9 +157,7 @@ export async function autoMatch(organisationId: string, statementId: string) {
         organisationId,
         accountId: stmt.bankAccount.accountId,
         transactionDate: line.transactionDate,
-        ...(isCredit
-          ? { creditAmount: amount }
-          : { debitAmount: amount }),
+        ...(isCredit ? { creditAmount: amount } : { debitAmount: amount }),
       },
     });
 
@@ -193,6 +197,9 @@ export async function getReconciliationSummary(organisationId: string, statement
     openingBalance: stmt.openingBalance.toFixed(2),
     closingBalance: stmt.closingBalance.toFixed(2),
     isReconciled: stmt.isReconciled,
+    isLocked: stmt.isLocked,
+    reconciledAt: stmt.reconciledAt,
+    reconciledBy: stmt.reconciledBy,
     totalLines,
     matchedLines,
     unmatchedLines: unmatchedLines.length,
@@ -200,4 +207,115 @@ export async function getReconciliationSummary(organisationId: string, statement
     unmatchedCredits: unmatchedCredits.toFixed(2),
     difference: stmt.closingBalance.minus(stmt.openingBalance).toFixed(2),
   };
+}
+
+// ─── Confirm & Lock ───────────────────────────────────────────────────────────
+
+export async function confirmReconciliation(
+  organisationId: string,
+  statementId: string,
+  userId: string,
+  input: ConfirmReconciliationInput,
+) {
+  const stmt = await prisma.bankStatement.findFirst({
+    where: { id: statementId, bankAccount: { organisationId } },
+    include: { lines: { where: { isMatched: true } } },
+  });
+  if (!stmt) throw new NotFoundError('Statement not found');
+  if (stmt.isLocked) throw new ConflictError('This reconciliation is already confirmed and locked');
+
+  // Segregation of duties: the confirming user must not have posted any matched transactions
+  if (!input.force) {
+    const matchedJournalEntryIds = stmt.lines
+      .map((l) => l.journalEntryId ?? l.matchedEntryId)
+      .filter(Boolean) as string[];
+
+    if (matchedJournalEntryIds.length > 0) {
+      const conflict = await prisma.journalEntry.findFirst({
+        where: {
+          id: { in: matchedJournalEntryIds },
+          OR: [{ createdBy: userId }, { postedBy: userId }],
+        },
+        select: { journalNumber: true },
+      });
+      if (conflict) {
+        throw new ValidationError(
+          `SEGREGATION_VIOLATION:You posted journal ${conflict.journalNumber} which is matched in this reconciliation. A different user must confirm. Pass force=true to override (supervisor only).`,
+        );
+      }
+    }
+  }
+
+  return prisma.bankStatement.update({
+    where: { id: statementId },
+    data: {
+      isReconciled: true,
+      isLocked: true,
+      reconciledAt: new Date(),
+      reconciledBy: userId,
+    },
+  });
+}
+
+// ─── Create Journal from Unmatched Line ──────────────────────────────────────
+
+export async function createJournalFromLine(
+  organisationId: string,
+  lineId: string,
+  userId: string,
+  input: CreateJournalFromLineInput,
+) {
+  const line = await prisma.bankStatementLine.findFirst({
+    where: { id: lineId, statement: { bankAccount: { organisationId } } },
+    include: { statement: { include: { bankAccount: true } } },
+  });
+  if (!line) throw new NotFoundError('Statement line not found');
+  if (line.isMatched) throw new ConflictError('This line is already matched');
+  if (line.statement.isLocked) throw new ValidationError('Statement is locked');
+
+  const org = await prisma.organisation.findUnique({
+    where: { id: organisationId },
+    select: { baseCurrency: true },
+  });
+  const currency = org?.baseCurrency ?? 'USD';
+
+  const bankAccountId = line.statement.bankAccount.accountId;
+  const isDebit = line.debitAmount.greaterThan(0);
+  const amount = isDebit ? line.debitAmount : line.creditAmount;
+  const entryDate = line.transactionDate.toISOString().split('T')[0];
+
+  // Debit on statement = money out of bank = credit bank, debit expense/other account
+  // Credit on statement = money into bank = debit bank, credit income/other account
+  const lines = isDebit
+    ? [
+        { accountId: input.accountId, debitAmount: Number(amount), creditAmount: 0, description: line.description, currency, exchangeRate: 1 },
+        { accountId: bankAccountId, debitAmount: 0, creditAmount: Number(amount), description: line.description, currency, exchangeRate: 1 },
+      ]
+    : [
+        { accountId: bankAccountId, debitAmount: Number(amount), creditAmount: 0, description: line.description, currency, exchangeRate: 1 },
+        { accountId: input.accountId, debitAmount: 0, creditAmount: Number(amount), description: line.description, currency, exchangeRate: 1 },
+      ];
+
+  const je = await journalService.createAndPostSystemEntry(
+    organisationId,
+    { type: 'BANK', description: input.description, entryDate, periodId: input.periodId, currency, exchangeRate: 1, lines },
+    userId,
+  );
+
+  // Find the ledger entry for the bank account leg to use as matchedEntryId
+  const ledgerEntry = await prisma.ledgerEntry.findFirst({
+    where: { journalEntryId: je.id, accountId: bankAccountId },
+  });
+
+  await prisma.bankStatementLine.update({
+    where: { id: lineId },
+    data: {
+      isMatched: true,
+      matchedEntryId: ledgerEntry?.id,
+      matchNote: input.note,
+      journalEntryId: je.id,
+    },
+  });
+
+  return { journalEntryId: je.id, journalNumber: je.journalNumber };
 }
