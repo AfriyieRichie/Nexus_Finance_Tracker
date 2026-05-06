@@ -1,31 +1,58 @@
 import { api } from './api';
 
+export type BudgetType = 'ORIGINAL' | 'REVISED' | 'ROLLING_FORECAST';
+export type CostCentreLevel = 'COMPANY' | 'DIVISION' | 'DEPARTMENT' | 'TEAM';
+
 export interface Budget {
   id: string;
   name: string;
   fiscalYear: number;
+  budgetType: BudgetType;
+  version: number;
+  parentBudgetId: string | null;
+  parentBudget: { id: string; name: string; version: number } | null;
   isApproved: boolean;
+  approvedBy: string | null;
   approvedAt: string | null;
-  _count?: { lines: number };
+  createdAt: string;
+  updatedAt: string;
+  lineCount: number;
+}
+
+export interface BudgetDetail extends Budget {
+  revisions: { id: string; name: string; version: number; budgetType: BudgetType; isApproved: boolean }[];
+  lines: BudgetLine[];
 }
 
 export interface BudgetLine {
   id: string;
   accountId: string;
+  costCentreId: string | null;
   periodNumber: number;
   amount: string;
-  account?: { code: string; name: string; class: string };
+  account?: { id: string; code: string; name: string; class: string };
+  costCentre?: { id: string; code: string; name: string } | null;
 }
 
-export interface BudgetVarianceLine {
+export interface BudgetLineInput {
+  accountId: string;
+  costCentreId?: string | null;
+  periodNumber: number;
+  amount: number | string;
+}
+
+export interface BudgetVsActualLine {
   accountId: string;
   accountCode: string;
   accountName: string;
   accountClass: string;
-  budgeted: number;
-  actual: number;
-  variance: number;
-  variancePct: number;
+  costCentreId: string | null;
+  costCentreCode: string | null;
+  costCentreName: string | null;
+  budgeted: string;
+  actual: string;
+  variance: string;
+  variancePct: string | null;
 }
 
 export interface CostCentre {
@@ -33,7 +60,11 @@ export interface CostCentre {
   code: string;
   name: string;
   description: string | null;
+  level: CostCentreLevel;
+  parentId: string | null;
+  parent: { id: string; code: string; name: string; level: CostCentreLevel } | null;
   isActive: boolean;
+  _count: { children: number };
 }
 
 export interface Department {
@@ -44,47 +75,64 @@ export interface Department {
   isActive: boolean;
 }
 
-export async function listBudgets(organisationId: string) {
-  const res = await api.get(`/organisations/${organisationId}/budgets/budgets`);
-  return res.data.data as Budget[];
-}
+// ── Budgets ───────────────────────────────────────────────────────────────────
 
-export async function getBudget(organisationId: string, budgetId: string) {
-  const res = await api.get(`/organisations/${organisationId}/budgets/budgets/${budgetId}`);
-  return res.data.data as Budget & { lines: BudgetLine[] };
-}
+export const listBudgets = (organisationId: string) =>
+  api.get(`/organisations/${organisationId}/budgets`).then((r) => r.data.data as Budget[]);
 
-export async function createBudget(organisationId: string, data: { name: string; fiscalYear: number }) {
-  const res = await api.post(`/organisations/${organisationId}/budgets/budgets`, data);
-  return res.data.data as Budget;
-}
+export const getBudget = (organisationId: string, budgetId: string) =>
+  api.get(`/organisations/${organisationId}/budgets/${budgetId}`).then((r) => r.data.data as BudgetDetail);
 
-export async function approveBudget(organisationId: string, budgetId: string) {
-  const res = await api.post(`/organisations/${organisationId}/budgets/budgets/${budgetId}/approve`);
-  return res.data.data as Budget;
-}
+export const createBudget = (
+  organisationId: string,
+  data: { name: string; fiscalYear: number; budgetType?: BudgetType; parentBudgetId?: string },
+) =>
+  api.post(`/organisations/${organisationId}/budgets`, data).then((r) => r.data.data as Budget);
 
-export async function getBudgetVariance(organisationId: string, budgetId: string) {
-  const res = await api.get(`/organisations/${organisationId}/budgets/budgets/${budgetId}/variance`);
-  return res.data.data as BudgetVarianceLine[];
-}
+export const updateBudgetLines = (
+  organisationId: string,
+  budgetId: string,
+  lines: BudgetLineInput[],
+) =>
+  api
+    .put(`/organisations/${organisationId}/budgets/${budgetId}/lines`, { lines })
+    .then((r) => r.data.data as BudgetDetail);
 
-export async function listCostCentres(organisationId: string) {
-  const res = await api.get(`/organisations/${organisationId}/budgets/cost-centres`);
-  return res.data.data as CostCentre[];
-}
+export const approveBudget = (organisationId: string, budgetId: string) =>
+  api.post(`/organisations/${organisationId}/budgets/${budgetId}/approve`).then((r) => r.data.data as Budget);
 
-export async function createCostCentre(organisationId: string, data: { code: string; name: string; description?: string }) {
-  const res = await api.post(`/organisations/${organisationId}/budgets/cost-centres`, data);
-  return res.data.data as CostCentre;
-}
+export const deleteBudget = (organisationId: string, budgetId: string) =>
+  api.delete(`/organisations/${organisationId}/budgets/${budgetId}`);
 
-export async function listDepartments(organisationId: string) {
-  const res = await api.get(`/organisations/${organisationId}/budgets/departments`);
-  return res.data.data as Department[];
-}
+export const getBudgetVariance = (organisationId: string, budgetId: string, costCentreId?: string) =>
+  api
+    .get(`/organisations/${organisationId}/budgets/${budgetId}/variance`, {
+      params: costCentreId ? { costCentreId } : undefined,
+    })
+    .then((r) => r.data.data as BudgetVsActualLine[]);
 
-export async function createDepartment(organisationId: string, data: { code: string; name: string; description?: string }) {
-  const res = await api.post(`/organisations/${organisationId}/budgets/departments`, data);
-  return res.data.data as Department;
-}
+// ── Cost Centres ──────────────────────────────────────────────────────────────
+
+export const listCostCentres = (organisationId: string) =>
+  api.get(`/organisations/${organisationId}/budgets/cost-centres`).then((r) => r.data.data as CostCentre[]);
+
+export const createCostCentre = (
+  organisationId: string,
+  data: { code: string; name: string; description?: string; level?: CostCentreLevel; parentId?: string },
+) =>
+  api.post(`/organisations/${organisationId}/budgets/cost-centres`, data).then((r) => r.data.data as CostCentre);
+
+export const updateCostCentre = (
+  organisationId: string,
+  id: string,
+  data: { name?: string; description?: string; level?: CostCentreLevel; parentId?: string | null; isActive?: boolean },
+) =>
+  api.patch(`/organisations/${organisationId}/budgets/cost-centres/${id}`, data).then((r) => r.data.data as CostCentre);
+
+// ── Departments ───────────────────────────────────────────────────────────────
+
+export const listDepartments = (organisationId: string) =>
+  api.get(`/organisations/${organisationId}/budgets/departments`).then((r) => r.data.data as Department[]);
+
+export const createDepartment = (organisationId: string, data: { code: string; name: string; description?: string }) =>
+  api.post(`/organisations/${organisationId}/budgets/departments`, data).then((r) => r.data.data as Department);

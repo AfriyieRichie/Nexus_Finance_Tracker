@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { BudgetType, CostCentreLevel } from '@prisma/client';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { sendSuccess, sendCreated, sendNoContent } from '../../utils/response';
 import * as budgetsService from './budgets.service';
@@ -20,14 +21,18 @@ export const getBudget = asyncHandler(async (req: Request, res: Response) => {
 export const createBudget = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId } = req.params;
   const userId = req.user!.sub;
-  const { name, fiscalYear, lines } = req.body as {
+  const { name, fiscalYear, budgetType, parentBudgetId, lines } = req.body as {
     name: string;
     fiscalYear: number;
+    budgetType?: BudgetType;
+    parentBudgetId?: string;
     lines?: budgetsService.BudgetLineInput[];
   };
   const budget = await budgetsService.createBudget(organisationId, userId, {
     name,
     fiscalYear,
+    budgetType,
+    parentBudgetId,
     lines,
   });
   return sendCreated(res, budget, 'Budget created');
@@ -55,7 +60,8 @@ export const deleteBudget = asyncHandler(async (req: Request, res: Response) => 
 
 export const getBudgetVsActual = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId, budgetId } = req.params;
-  const variance = await budgetsService.getBudgetVsActual(organisationId, budgetId);
+  const { costCentreId } = req.query as { costCentreId?: string };
+  const variance = await budgetsService.getBudgetVsActual(organisationId, budgetId, costCentreId);
   return sendSuccess(res, variance);
 });
 
@@ -69,11 +75,11 @@ export const listCostCentres = asyncHandler(async (req: Request, res: Response) 
 
 export const createCostCentre = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId } = req.params;
-  const { code, name, description } = req.body as budgetsService.CreateCostCentreInput;
+  const { code, name, description, level, parentId } = req.body as budgetsService.CreateCostCentreInput;
   const costCentre = await budgetsService.createCostCentre(organisationId, {
-    code,
-    name,
-    description,
+    code, name, description,
+    level: level as CostCentreLevel | undefined,
+    parentId,
   });
   return sendCreated(res, costCentre, 'Cost centre created');
 });
@@ -96,11 +102,7 @@ export const listDepartments = asyncHandler(async (req: Request, res: Response) 
 export const createDepartment = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId } = req.params;
   const { code, name, description } = req.body as budgetsService.CreateDepartmentInput;
-  const department = await budgetsService.createDepartment(organisationId, {
-    code,
-    name,
-    description,
-  });
+  const department = await budgetsService.createDepartment(organisationId, { code, name, description });
   return sendCreated(res, department, 'Department created');
 });
 

@@ -130,6 +130,19 @@ enum CostMethod {
   STANDARD
 }
 
+enum BudgetType {
+  ORIGINAL
+  REVISED
+  ROLLING_FORECAST
+}
+
+enum CostCentreLevel {
+  COMPANY
+  DIVISION
+  DEPARTMENT
+  TEAM
+}
+
 enum MovementType {
   RECEIPT
   ISSUE
@@ -1148,20 +1161,25 @@ model StocktakeCount {
 // ============================================================
 
 model Budget {
-  id             String   @id @default(uuid())
+  id             String     @id @default(uuid())
   organisationId String
   name           String
   fiscalYear     Int
-  isApproved     Boolean  @default(false)
+  budgetType     BudgetType @default(ORIGINAL)
+  version        Int        @default(1)
+  parentBudgetId String?
+  isApproved     Boolean    @default(false)
   approvedBy     String?
   approvedAt     DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
 
   organisation Organisation @relation(fields: [organisationId], references: [id])
+  parentBudget Budget?      @relation("BudgetRevisions", fields: [parentBudgetId], references: [id])
+  revisions    Budget[]     @relation("BudgetRevisions")
   lines        BudgetLine[]
 
-  @@unique([organisationId, fiscalYear, name])
+  @@unique([organisationId, fiscalYear, name, version])
   @@index([organisationId])
   @@map("budgets")
 }
@@ -1170,13 +1188,15 @@ model BudgetLine {
   id           String  @id @default(uuid())
   budgetId     String
   accountId    String
+  costCentreId String?
   periodNumber Int
   amount       Decimal @db.Decimal(20, 4)
 
-  budget  Budget  @relation(fields: [budgetId], references: [id], onDelete: Cascade)
-  account Account @relation(fields: [accountId], references: [id])
+  budget     Budget      @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  account    Account     @relation(fields: [accountId], references: [id])
+  costCentre CostCentre? @relation(fields: [costCentreId], references: [id])
 
-  @@unique([budgetId, accountId, periodNumber])
+  @@unique([budgetId, accountId, costCentreId, periodNumber])
   @@index([budgetId])
   @@map("budget_lines")
 }
@@ -1186,17 +1206,22 @@ model BudgetLine {
 // ============================================================
 
 model CostCentre {
-  id             String   @id @default(uuid())
+  id             String          @id @default(uuid())
   organisationId String
   code           String
   name           String
   description    String?
-  isActive       Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  level          CostCentreLevel @default(DEPARTMENT)
+  parentId       String?
+  isActive       Boolean         @default(true)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
 
   organisation Organisation @relation(fields: [organisationId], references: [id])
+  parent       CostCentre?  @relation("CostCentreHierarchy", fields: [parentId], references: [id])
+  children     CostCentre[] @relation("CostCentreHierarchy")
   journalLines JournalLine[]
+  budgetLines  BudgetLine[]
 
   @@unique([organisationId, code])
   @@index([organisationId])
