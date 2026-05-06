@@ -66,7 +66,7 @@ export async function setAssetStatus(organisationId: string, assetId: string, in
 
   return prisma.fixedAsset.update({
     where: { id: assetId },
-    data: { status: input.status as 'ACTIVE' | 'DISPOSED' | 'FULLY_DEPRECIATED' },
+    data: { status: input.status },
   });
 }
 
