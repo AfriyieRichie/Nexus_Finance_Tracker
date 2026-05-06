@@ -1,4 +1,4 @@
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { UserRole } from '@prisma/client';
 import { prisma } from '../../config/database';
