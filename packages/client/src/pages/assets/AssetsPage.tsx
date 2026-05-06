@@ -42,7 +42,7 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({
-    code: '', name: '', category: 'Equipment',
+    code: '', name: '', category: 'Equipment', categoryId: '',
     serialNumber: '', location: '',
     acquisitionDate: new Date().toISOString().split('T')[0],
     acquisitionCost: '', residualValue: '0',
@@ -51,12 +51,34 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
   });
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
+  const { data: categories = [] } = useQuery({
+    queryKey: ['asset-categories', organisationId],
+    queryFn: () => assetSvc.listCategories(organisationId),
+    enabled: open,
+  });
+
+  const onCategoryChange = (catId: string) => {
+    const cat = categories.find((c) => c.id === catId);
+    if (cat) {
+      setForm((f) => ({
+        ...f,
+        categoryId: catId,
+        category: cat.name,
+        depreciationMethod: cat.defaultDepreciationMethod,
+        usefulLifeMonths: cat.defaultUsefulLifeMonths ? String(cat.defaultUsefulLifeMonths) : f.usefulLifeMonths,
+      }));
+    } else {
+      setForm((f) => ({ ...f, categoryId: '', category: catId }));
+    }
+  };
+
   const mutation = useMutation({
     mutationFn: () => assetSvc.createAsset(organisationId, {
       ...form,
       acquisitionCost: Number(form.acquisitionCost),
       residualValue: Number(form.residualValue),
       usefulLifeMonths: Number(form.usefulLifeMonths),
+      categoryId: form.categoryId || undefined,
       unitsOfProductionTotal: form.unitsOfProductionTotal ? Number(form.unitsOfProductionTotal) : undefined,
       serialNumber: form.serialNumber || undefined,
       location: form.location || undefined,
@@ -73,9 +95,16 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
             <div><label className="text-xs font-medium mb-1 block">Code *</label>
               <Input value={form.code} onChange={(e) => set('code', e.target.value)} placeholder="FA001" className="h-8 text-xs" /></div>
             <div><label className="text-xs font-medium mb-1 block">Category</label>
-              <Select value={form.category} onChange={(e) => set('category', e.target.value)} className="h-8 text-xs">
-                {ASSET_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-              </Select></div>
+              {categories.length > 0 ? (
+                <Select value={form.categoryId} onChange={(e) => onCategoryChange(e.target.value)} className="h-8 text-xs">
+                  <option value="">— Select category —</option>
+                  {categories.map((c) => <option key={c.id} value={c.id}>{c.code} · {c.name}</option>)}
+                </Select>
+              ) : (
+                <Select value={form.category} onChange={(e) => set('category', e.target.value)} className="h-8 text-xs">
+                  {ASSET_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                </Select>
+              )}</div>
           </div>
           <div><label className="text-xs font-medium mb-1 block">Name *</label>
             <Input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Asset description" className="h-8 text-xs" /></div>
@@ -557,6 +586,106 @@ function CategoriesTab({ organisationId }: { organisationId: string }) {
   );
 }
 
+// ─── Depreciation Runs Tab ───────────────────────────────────────────────────
+
+function DepreciationRunsTab({ organisationId }: { organisationId: string }) {
+  const qc = useQueryClient();
+  const [reverseOpen, setReverseOpen] = useState(false);
+  const [selectedRun, setSelectedRun] = useState<{ id: string; totalAmount: string } | null>(null);
+  const [reversePeriodId, setReversePeriodId] = useState('');
+  const [reverseReason, setReverseReason] = useState('');
+
+  const { data: runs = [], isLoading } = useQuery({
+    queryKey: ['deprn-runs', organisationId],
+    queryFn: () => assetSvc.listDepreciationRuns(organisationId),
+  });
+
+  const { data: periods } = useQuery({
+    queryKey: ['periods', organisationId],
+    queryFn: () => listPeriods(organisationId),
+    enabled: reverseOpen,
+  });
+
+  const openPeriods = (periods ?? []).filter((p: { status: string }) => p.status === 'OPEN');
+
+  const reverseMutation = useMutation({
+    mutationFn: () => assetSvc.reverseDepreciation(organisationId, {
+      runId: selectedRun!.id,
+      periodId: reversePeriodId,
+      reason: reverseReason,
+    }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['deprn-runs'] });
+      void qc.invalidateQueries({ queryKey: ['assets'] });
+      setReverseOpen(false);
+      setSelectedRun(null);
+      setReversePeriodId('');
+      setReverseReason('');
+    },
+  });
+
+  type Run = { id: string; asOfDate: string; processedCount: number; totalAmount: string; status: string };
+
+  return (
+    <div className="space-y-4">
+      {isLoading ? <Skeleton className="h-32 w-full" /> : (
+        <Card><CardContent className="p-0">
+          <Table>
+            <TableHeader><TableRow>
+              <TableHead>As-of Date</TableHead>
+              <TableHead className="text-right">Assets</TableHead>
+              <TableHead className="text-right">Total Amount</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead className="w-28" />
+            </TableRow></TableHeader>
+            <TableBody>
+              {(runs as Run[]).length === 0 ? (
+                <TableRow><TableCell colSpan={5} className="text-center text-sm text-muted-foreground py-8">No depreciation runs yet.</TableCell></TableRow>
+              ) : (runs as Run[]).map((run) => (
+                <TableRow key={run.id}>
+                  <TableCell className="text-sm">{new Date(run.asOfDate).toLocaleDateString()}</TableCell>
+                  <TableCell className="text-right text-xs">{run.processedCount}</TableCell>
+                  <TableCell className="text-right text-xs font-medium">{fmt(run.totalAmount)}</TableCell>
+                  <TableCell><Badge variant={run.status === 'POSTED' ? 'success' : 'secondary'}>{run.status}</Badge></TableCell>
+                  <TableCell>
+                    {run.status === 'POSTED' && (
+                      <Button variant="ghost" size="sm" className="text-xs h-7" onClick={() => { setSelectedRun({ id: run.id, totalAmount: run.totalAmount }); setReverseOpen(true); }}>
+                        <RotateCcw size={12} /> Reverse
+                      </Button>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Card>
+      )}
+
+      <Dialog open={reverseOpen} onOpenChange={(v) => { setReverseOpen(v); if (!v) { setSelectedRun(null); setReversePeriodId(''); setReverseReason(''); } }}>
+        <DialogContent title="Reverse Depreciation Run" description="Reverses all journal entries from this run and restores asset balances.">
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">Total amount being reversed: <strong>{fmt(selectedRun?.totalAmount ?? 0)}</strong></p>
+            <div><label className="text-xs font-medium mb-1 block">Reversal Period *</label>
+              <Select value={reversePeriodId} onChange={(e) => setReversePeriodId(e.target.value)} className="h-8 text-xs">
+                <option value="">Select period…</option>
+                {openPeriods.map((p: { id: string; name: string }) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </Select></div>
+            <div><label className="text-xs font-medium mb-1 block">Reason *</label>
+              <Input value={reverseReason} onChange={(e) => setReverseReason(e.target.value)} placeholder="Reason for reversal…" className="h-8 text-xs" /></div>
+            {reverseMutation.isError && <p className="text-xs text-destructive">{errMsg(reverseMutation.error)}</p>}
+            <div className="flex justify-end gap-2">
+              <DialogClose asChild><Button variant="outline" size="sm">Cancel</Button></DialogClose>
+              <Button size="sm" variant="destructive" disabled={!reversePeriodId || !reverseReason || reverseMutation.isPending} onClick={() => reverseMutation.mutate()}>
+                <RotateCcw size={14} /> {reverseMutation.isPending ? 'Reversing…' : 'Reverse Run'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
 export function AssetsPage() {
@@ -564,7 +693,7 @@ export function AssetsPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'assets' | 'categories'>('assets');
+  const [activeTab, setActiveTab] = useState<'assets' | 'categories' | 'runs'>('assets');
 
   const { data, isLoading } = useQuery({
     queryKey: ['assets', activeOrganisationId, statusFilter],
@@ -606,16 +735,20 @@ export function AssetsPage() {
 
       {/* Tabs */}
       <div className="flex border-b text-sm gap-6">
-        {(['assets', 'categories'] as const).map((t) => (
+        {(['assets', 'categories', 'runs'] as const).map((t) => (
           <button key={t} onClick={() => setActiveTab(t)}
             className={`pb-2 capitalize font-medium ${activeTab === t ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
-            {t === 'assets' ? `Assets (${data?.total ?? 0})` : <span className="flex items-center gap-1"><Settings size={13} /> Categories</span>}
+            {t === 'assets' ? `Assets (${data?.total ?? 0})` : t === 'categories' ? <span className="flex items-center gap-1"><Settings size={13} /> Categories</span> : <span className="flex items-center gap-1"><RotateCcw size={13} /> Deprn Runs</span>}
           </button>
         ))}
       </div>
 
       {activeTab === 'categories' && activeOrganisationId && (
         <CategoriesTab organisationId={activeOrganisationId} />
+      )}
+
+      {activeTab === 'runs' && activeOrganisationId && (
+        <DepreciationRunsTab organisationId={activeOrganisationId} />
       )}
 
       {activeTab === 'assets' && (
