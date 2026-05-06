@@ -182,6 +182,44 @@ enum FxRevaluationStatus {
   REVERSED
 }
 
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  CASUAL
+}
+
+enum PayFrequency {
+  MONTHLY
+  FORTNIGHTLY
+  WEEKLY
+}
+
+enum SalaryComponentType {
+  BASIC_SALARY
+  OVERTIME
+  BONUS
+  COMMISSION
+  ALLOWANCE
+  OTHER_EARNING
+  EMPLOYEE_DEDUCTION
+  EMPLOYER_CONTRIBUTION
+}
+
+enum PayrollRunStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  PAID
+  LOCKED
+}
+
+enum PayslipStatus {
+  DRAFT
+  FINALISED
+  PAID
+}
+
 enum MovementType {
   RECEIPT
   ISSUE
@@ -330,12 +368,17 @@ model Organisation {
   costCentres          CostCentre[]
   departments          Department[]
   budgetCommitments    BudgetCommitment[]
-  taxCodes           TaxCode[]
-  exchangeRates      ExchangeRate[]
-  vatReturns         VatReturn[]
-  fxRevaluations     FxRevaluation[]
-  invoices           Invoice[]
-  supplierInvoices   SupplierInvoice[]
+  taxCodes                TaxCode[]
+  exchangeRates           ExchangeRate[]
+  vatReturns              VatReturn[]
+  fxRevaluations          FxRevaluation[]
+  employees               Employee[]
+  salaryComponents        SalaryComponent[]
+  payrollRuns             PayrollRun[]
+  payslips                Payslip[]
+  payrollStatutoryConfigs PayrollStatutoryConfig[]
+  invoices                Invoice[]
+  supplierInvoices        SupplierInvoice[]
 
   @@map("organisations")
 }
@@ -393,8 +436,10 @@ model Account {
   budgetLines        BudgetLine[]
   budgetCommitments  BudgetCommitment[]
   bankAccount        BankAccount?
-  taxCodes           TaxCode[]           @relation("TaxGLAccount")
-  fxRevaluationLines FxRevaluationLine[]
+  taxCodes             TaxCode[]           @relation("TaxGLAccount")
+  fxRevaluationLines   FxRevaluationLine[]
+  salaryComponents     SalaryComponent[]   @relation("ComponentGLAccount")
+  employeeExpenses     Employee[]          @relation("EmployeeSalaryExpense")
 
   @@unique([organisationId, code])
   @@index([organisationId, class])
@@ -422,6 +467,7 @@ model AccountingPeriod {
   organisation   Organisation   @relation(fields: [organisationId], references: [id])
   journalEntries JournalEntry[]
   ledgerEntries  LedgerEntry[]
+  payrollRuns    PayrollRun[]
 
   @@unique([organisationId, fiscalYear, periodNumber])
   @@index([organisationId, status])
@@ -1272,6 +1318,7 @@ model CostCentre {
   journalLines  JournalLine[]
   budgetLines   BudgetLine[]
   commitments   BudgetCommitment[]
+  employees     Employee[]
 
   @@unique([organisationId, code])
   @@index([organisationId])
@@ -1290,6 +1337,7 @@ model Department {
 
   organisation Organisation @relation(fields: [organisationId], references: [id])
   journalLines JournalLine[]
+  employees    Employee[]
 
   @@unique([organisationId, code])
   @@index([organisationId])
@@ -1461,6 +1509,228 @@ model FxRevaluationLine {
 
   @@index([revaluationId])
   @@map("fx_revaluation_lines")
+}
+
+// ============================================================
+// PAYROLL
+// ============================================================
+
+model PayrollStatutoryConfig {
+  id                String   @id @default(uuid())
+  organisationId    String
+  taxYear           Int
+  // SSNIT rates (as decimals: 0.055 = 5.5%)
+  ssnitEmployeeRate Decimal  @default(0.055)  @db.Decimal(6, 4)
+  ssnitEmployerRate Decimal  @default(0.13)   @db.Decimal(6, 4)
+  tier2Rate         Decimal  @default(0.05)   @db.Decimal(6, 4)
+  // PAYE bands — JSON array: [{min, max, rate}] monthly GHS amounts, rate as percent
+  payeBands         Json
+  // Monthly personal relief (deducted before PAYE)
+  personalRelief    Decimal  @default(0)      @db.Decimal(20, 4)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  organisation Organisation @relation(fields: [organisationId], references: [id])
+
+  @@unique([organisationId, taxYear])
+  @@index([organisationId])
+  @@map("payroll_statutory_configs")
+}
+
+model Employee {
+  id                     String         @id @default(uuid())
+  organisationId         String
+  employeeNumber         String
+  firstName              String
+  lastName               String
+  email                  String?
+  phone                  String?
+  nationalId             String?
+  tinNumber              String?
+  ssnitNumber            String?
+  employmentType         EmploymentType @default(FULL_TIME)
+  payFrequency           PayFrequency   @default(MONTHLY)
+  startDate              DateTime       @db.Date
+  endDate                DateTime?      @db.Date
+  jobTitle               String?
+  departmentId           String?
+  costCentreId           String?
+  basicSalary            Decimal        @db.Decimal(20, 4)
+  bankName               String?
+  bankAccountNumber      String?
+  bankBranch             String?
+  tier3EmployeeRate      Decimal?       @db.Decimal(6, 4)
+  tier3EmployerRate      Decimal?       @db.Decimal(6, 4)
+  salaryExpenseAccountId String?
+  isActive               Boolean        @default(true)
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+
+  organisation         Organisation      @relation(fields: [organisationId], references: [id])
+  department           Department?       @relation(fields: [departmentId], references: [id])
+  costCentre           CostCentre?       @relation(fields: [costCentreId], references: [id])
+  salaryExpenseAccount Account?          @relation("EmployeeSalaryExpense", fields: [salaryExpenseAccountId], references: [id])
+  components           EmployeeComponent[]
+  payslips             Payslip[]
+
+  @@unique([organisationId, employeeNumber])
+  @@index([organisationId, isActive])
+  @@map("employees")
+}
+
+model SalaryComponent {
+  id             String              @id @default(uuid())
+  organisationId String
+  code           String
+  name           String
+  type           SalaryComponentType
+  isTaxable      Boolean             @default(true)
+  glAccountId    String?
+  description    String?
+  isActive       Boolean             @default(true)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  organisation       Organisation        @relation(fields: [organisationId], references: [id])
+  glAccount          Account?            @relation("ComponentGLAccount", fields: [glAccountId], references: [id])
+  employeeComponents EmployeeComponent[]
+  payslipLines       PayslipLine[]
+
+  @@unique([organisationId, code])
+  @@index([organisationId])
+  @@map("salary_components")
+}
+
+model EmployeeComponent {
+  id            String    @id @default(uuid())
+  employeeId    String
+  componentId   String
+  amount        Decimal?  @db.Decimal(20, 4)
+  rate          Decimal?  @db.Decimal(8, 6)
+  effectiveFrom DateTime  @db.Date
+  effectiveTo   DateTime? @db.Date
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+
+  employee  Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  component SalaryComponent @relation(fields: [componentId], references: [id])
+
+  @@index([employeeId])
+  @@map("employee_components")
+}
+
+model PayrollRun {
+  id              String           @id @default(uuid())
+  organisationId  String
+  runNumber       String
+  periodId        String
+  paymentDate     DateTime         @db.Date
+  description     String
+  status          PayrollRunStatus @default(DRAFT)
+  isSupplementary Boolean          @default(false)
+  parentRunId     String?
+  // GL accounts for this run
+  wagesPayableAccountId   String
+  payePayableAccountId    String
+  ssnitPayableAccountId   String
+  pensionPayableAccountId String
+  // Computed totals
+  totalGross           Decimal @default(0) @db.Decimal(20, 4)
+  totalPaye            Decimal @default(0) @db.Decimal(20, 4)
+  totalSsnitEmployee   Decimal @default(0) @db.Decimal(20, 4)
+  totalSsnitEmployer   Decimal @default(0) @db.Decimal(20, 4)
+  totalTier2           Decimal @default(0) @db.Decimal(20, 4)
+  totalTier3Employee   Decimal @default(0) @db.Decimal(20, 4)
+  totalTier3Employer   Decimal @default(0) @db.Decimal(20, 4)
+  totalOtherDeductions Decimal @default(0) @db.Decimal(20, 4)
+  totalNetPay          Decimal @default(0) @db.Decimal(20, 4)
+  totalEmployerCost    Decimal @default(0) @db.Decimal(20, 4)
+  // Three-person workflow
+  createdBy   String
+  submittedBy String?
+  submittedAt DateTime?
+  approvedBy  String?
+  approvedAt  DateTime?
+  paidBy      String?
+  paidAt      DateTime?
+  journalEntryId String?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  organisation Organisation     @relation(fields: [organisationId], references: [id])
+  period       AccountingPeriod @relation(fields: [periodId], references: [id])
+  parentRun    PayrollRun?      @relation("SupplementaryRun", fields: [parentRunId], references: [id])
+  supplements  PayrollRun[]     @relation("SupplementaryRun")
+  payslips     Payslip[]
+
+  @@unique([organisationId, runNumber])
+  @@index([organisationId, status])
+  @@index([organisationId, periodId])
+  @@map("payroll_runs")
+}
+
+model Payslip {
+  id             String        @id @default(uuid())
+  payrollRunId   String
+  employeeId     String
+  organisationId String
+  status         PayslipStatus @default(DRAFT)
+  // Earnings
+  basicSalary    Decimal @default(0) @db.Decimal(20, 4)
+  overtimePay    Decimal @default(0) @db.Decimal(20, 4)
+  bonuses        Decimal @default(0) @db.Decimal(20, 4)
+  allowances     Decimal @default(0) @db.Decimal(20, 4)
+  otherEarnings  Decimal @default(0) @db.Decimal(20, 4)
+  grossPay       Decimal @default(0) @db.Decimal(20, 4)
+  // Employee deductions
+  payeAmount      Decimal @default(0) @db.Decimal(20, 4)
+  ssnitEmployee   Decimal @default(0) @db.Decimal(20, 4)
+  tier3Employee   Decimal @default(0) @db.Decimal(20, 4)
+  otherDeductions Decimal @default(0) @db.Decimal(20, 4)
+  totalDeductions Decimal @default(0) @db.Decimal(20, 4)
+  netPay          Decimal @default(0) @db.Decimal(20, 4)
+  // Employer contributions (cost, not deducted from employee)
+  ssnitEmployer     Decimal @default(0) @db.Decimal(20, 4)
+  tier2Employer     Decimal @default(0) @db.Decimal(20, 4)
+  tier3Employer     Decimal @default(0) @db.Decimal(20, 4)
+  totalEmployerCost Decimal @default(0) @db.Decimal(20, 4)
+  // YTD at time of generation
+  ytdGross   Decimal @default(0) @db.Decimal(20, 4)
+  ytdPaye    Decimal @default(0) @db.Decimal(20, 4)
+  ytdSsnit   Decimal @default(0) @db.Decimal(20, 4)
+  ytdNetPay  Decimal @default(0) @db.Decimal(20, 4)
+  // Snapshot of assignment at time of run
+  departmentId String?
+  costCentreId String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  payrollRun   PayrollRun   @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  employee     Employee     @relation(fields: [employeeId], references: [id])
+  organisation Organisation @relation(fields: [organisationId], references: [id])
+  lines        PayslipLine[]
+
+  @@unique([payrollRunId, employeeId])
+  @@index([payrollRunId])
+  @@index([employeeId])
+  @@map("payslips")
+}
+
+model PayslipLine {
+  id          String              @id @default(uuid())
+  payslipId   String
+  componentId String?
+  description String
+  type        SalaryComponentType
+  amount      Decimal             @db.Decimal(20, 4)
+  isEmployer  Boolean             @default(false)
+
+  payslip   Payslip          @relation(fields: [payslipId], references: [id], onDelete: Cascade)
+  component SalaryComponent? @relation(fields: [componentId], references: [id])
+
+  @@index([payslipId])
+  @@map("payslip_lines")
 }
 
 // ============================================================
