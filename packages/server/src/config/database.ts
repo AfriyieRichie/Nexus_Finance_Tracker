@@ -6,11 +6,24 @@ declare global {
   var __prisma: PrismaClient | undefined;
 }
 
+function buildDbUrl(): string {
+  const raw = process.env.DATABASE_URL ?? '';
+  try {
+    const url = new URL(raw);
+    if (!url.searchParams.has('connection_limit')) url.searchParams.set('connection_limit', '5');
+    if (!url.searchParams.has('pool_timeout')) url.searchParams.set('pool_timeout', '20');
+    if (!url.searchParams.has('connect_timeout')) url.searchParams.set('connect_timeout', '15');
+    return url.toString();
+  } catch {
+    return raw;
+  }
+}
+
 export const prisma: PrismaClient =
   global.__prisma ??
   new PrismaClient({
+    datasources: { db: { url: buildDbUrl() } },
     log: [
-      { emit: 'event', level: 'query' },
       { emit: 'event', level: 'error' },
       { emit: 'event', level: 'warn' },
     ],
