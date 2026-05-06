@@ -16,7 +16,7 @@ const envSchema = z.object({
   JWT_REFRESH_SECRET: z.string().min(32, 'JWT_REFRESH_SECRET must be at least 32 characters'),
   JWT_ACCESS_EXPIRES_IN: z.string().default('15m'),
   JWT_REFRESH_EXPIRES_IN: z.string().default('7d'),
-  SMTP_HOST: z.string().min(1),
+  SMTP_HOST: z.string().default('localhost'),
   SMTP_PORT: z
     .string()
     .default('1025')
