@@ -5,7 +5,7 @@ import { useAuthStore } from '@/stores/auth.store';
 import * as assetSvc from '@/services/assets.service';
 import { listPeriods } from '@/services/periods.service';
 import { listAccounts } from '@/services/accounts.service';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -246,7 +246,7 @@ function AssetDetailPanel({ organisationId, assetId, onClose }: { organisationId
   });
 
   const openPeriods = (periods ?? []).filter((p) => p.status === 'OPEN');
-  const bankAccounts = (accounts ?? []).filter((a: { type: string }) => a.type === 'BANK' || a.type === 'CASH');
+  const bankAccounts = (accounts?.accounts ?? []).filter((a) => a.type === 'BANK' || a.type === 'CASH');
 
   // Revalue form
   const [revalForm, setRevalForm] = useState({ fairValue: '', revaluationDate: new Date().toISOString().split('T')[0], notes: '' });
@@ -658,7 +658,7 @@ function DepreciationRunsTab({ organisationId }: { organisationId: string }) {
               ))}
             </TableBody>
           </Table>
-        </Card>
+        </CardContent></Card>
       )}
 
       <Dialog open={reverseOpen} onOpenChange={(v) => { setReverseOpen(v); if (!v) { setSelectedRun(null); setReversePeriodId(''); setReverseReason(''); } }}>
