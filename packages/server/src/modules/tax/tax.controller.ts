@@ -1,152 +1,143 @@
 import { Request, Response } from 'express';
+import { TaxTreatment, ExchangeRateType, VatReturnStatus } from '@prisma/client';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { sendSuccess, sendCreated, sendNoContent } from '../../utils/response';
 import { ValidationError } from '../../utils/errors';
-import * as taxService from './tax.service';
+import * as svc from './tax.service';
 
-// ─── Tax Code Handlers ────────────────────────────────────────────────────────
+// ─── Tax Codes ────────────────────────────────────────────────────────────────
 
 export const listTaxCodes = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId } = req.params;
-
-  let isActive: boolean | undefined;
-  if (req.query.isActive !== undefined) {
-    isActive = req.query.isActive === 'true';
-  }
-
-  const taxCodes = await taxService.listTaxCodes(organisationId, isActive);
-  return sendSuccess(res, taxCodes);
+  const isActive = req.query.isActive !== undefined ? req.query.isActive === 'true' : undefined;
+  return sendSuccess(res, await svc.listTaxCodes(organisationId, isActive));
 });
 
 export const getTaxCode = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId, id } = req.params;
-  const taxCode = await taxService.getTaxCode(organisationId, id);
-  return sendSuccess(res, taxCode);
+  return sendSuccess(res, await svc.getTaxCode(organisationId, id));
 });
 
 export const createTaxCode = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId } = req.params;
-  const { code, name, rate, description } = req.body as {
-    code: string;
-    name: string;
-    rate: number;
-    description?: string;
-  };
-
-  if (!code || typeof code !== 'string') {
-    throw new ValidationError('code is required');
-  }
-  if (!name || typeof name !== 'string') {
-    throw new ValidationError('name is required');
-  }
-  if (rate === undefined || typeof rate !== 'number') {
-    throw new ValidationError('rate is required and must be a number');
-  }
-
-  const taxCode = await taxService.createTaxCode(organisationId, {
-    code,
-    name,
-    rate,
-    description,
+  const { code, name, treatment, rate, isInclusive, glAccountId, description } = req.body as svc.CreateTaxCodeInput;
+  if (!code) throw new ValidationError('code is required');
+  if (!name) throw new ValidationError('name is required');
+  if (rate === undefined) throw new ValidationError('rate is required');
+  const tc = await svc.createTaxCode(organisationId, {
+    code, name, treatment: treatment as TaxTreatment | undefined, rate, isInclusive, glAccountId, description,
   });
-  return sendCreated(res, taxCode, `Tax code '${taxCode.code}' created`);
+  return sendCreated(res, tc, `Tax code '${tc.code}' created`);
 });
 
 export const updateTaxCode = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId, id } = req.params;
-  const { name, rate, description, isActive } = req.body as {
-    name?: string;
-    rate?: number;
-    description?: string;
-    isActive?: boolean;
-  };
-
-  const taxCode = await taxService.updateTaxCode(organisationId, id, {
-    name,
-    rate,
-    description,
-    isActive,
-  });
-  return sendSuccess(res, taxCode, 'Tax code updated');
+  const input = req.body as svc.UpdateTaxCodeInput;
+  return sendSuccess(res, await svc.updateTaxCode(organisationId, id, input), 'Tax code updated');
 });
 
 export const deleteTaxCode = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId, id } = req.params;
-  await taxService.deleteTaxCode(organisationId, id);
+  await svc.deleteTaxCode(organisationId, id);
   return sendNoContent(res);
 });
 
 export const computeTax = asyncHandler(async (req: Request, res: Response) => {
-  const { rate, amount } = req.body as { rate: number; amount: number };
-
-  if (rate === undefined || typeof rate !== 'number') {
-    throw new ValidationError('rate is required and must be a number');
-  }
-  if (amount === undefined || typeof amount !== 'number') {
-    throw new ValidationError('amount is required and must be a number');
-  }
-  if (amount < 0) {
-    throw new ValidationError('amount must be non-negative');
-  }
-
-  const result = taxService.computeTax(rate, amount);
-  return sendSuccess(res, result);
+  const { rate, amount, isInclusive } = req.body as { rate: number; amount: number; isInclusive?: boolean };
+  if (rate === undefined || typeof rate !== 'number') throw new ValidationError('rate is required');
+  if (amount === undefined || typeof amount !== 'number') throw new ValidationError('amount is required');
+  if (amount < 0) throw new ValidationError('amount must be non-negative');
+  return sendSuccess(res, svc.computeTax(rate, amount, isInclusive));
 });
 
-// ─── Exchange Rate Handlers ───────────────────────────────────────────────────
+// ─── Exchange Rates ───────────────────────────────────────────────────────────
 
 export const listExchangeRates = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId } = req.params;
-  const { fromCurrency, toCurrency } = req.query as {
-    fromCurrency?: string;
-    toCurrency?: string;
+  const { fromCurrency, toCurrency, rateType } = req.query as {
+    fromCurrency?: string; toCurrency?: string; rateType?: string;
   };
-
-  const rates = await taxService.listExchangeRates(organisationId, {
-    fromCurrency,
-    toCurrency,
-  });
-  return sendSuccess(res, rates);
+  return sendSuccess(res, await svc.listExchangeRates(organisationId, {
+    fromCurrency, toCurrency, rateType: rateType as ExchangeRateType | undefined,
+  }));
 });
 
 export const upsertExchangeRate = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId } = req.params;
-  const { fromCurrency, toCurrency, rate, effectiveDate } = req.body as {
-    fromCurrency: string;
-    toCurrency: string;
-    rate: number;
-    effectiveDate: string;
-  };
-
-  if (!fromCurrency || typeof fromCurrency !== 'string') {
-    throw new ValidationError('fromCurrency is required');
-  }
-  if (!toCurrency || typeof toCurrency !== 'string') {
-    throw new ValidationError('toCurrency is required');
-  }
-  if (rate === undefined || typeof rate !== 'number') {
-    throw new ValidationError('rate is required and must be a number');
-  }
+  const { fromCurrency, toCurrency, rate, rateType, effectiveDate } = req.body as svc.UpsertExchangeRateInput;
+  if (!fromCurrency) throw new ValidationError('fromCurrency is required');
+  if (!toCurrency) throw new ValidationError('toCurrency is required');
+  if (rate === undefined) throw new ValidationError('rate is required');
   if (!effectiveDate || !/^\d{4}-\d{2}-\d{2}$/.test(effectiveDate)) {
-    throw new ValidationError('effectiveDate is required and must be YYYY-MM-DD');
+    throw new ValidationError('effectiveDate must be YYYY-MM-DD');
   }
-
-  const exchangeRate = await taxService.upsertExchangeRate(organisationId, {
-    fromCurrency,
-    toCurrency,
-    rate,
-    effectiveDate,
-  });
-  return sendCreated(res, exchangeRate, 'Exchange rate recorded');
+  const er = await svc.upsertExchangeRate(organisationId, { fromCurrency, toCurrency, rate, rateType, effectiveDate });
+  return sendCreated(res, er, 'Exchange rate recorded');
 });
 
 export const getLatestRate = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId } = req.params;
-  const { from, to } = req.query as { from?: string; to?: string };
-
+  const { from, to, rateType } = req.query as { from?: string; to?: string; rateType?: string };
   if (!from) throw new ValidationError('Query param "from" is required');
   if (!to) throw new ValidationError('Query param "to" is required');
+  return sendSuccess(res, await svc.getLatestRate(organisationId, from, to, rateType as ExchangeRateType | undefined));
+});
 
-  const rate = await taxService.getLatestRate(organisationId, from, to);
-  return sendSuccess(res, rate);
+// ─── VAT Return ───────────────────────────────────────────────────────────────
+
+export const listVatReturns = asyncHandler(async (req: Request, res: Response) => {
+  return sendSuccess(res, await svc.listVatReturns(req.params.organisationId));
+});
+
+export const generateVatReturn = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId } = req.params;
+  const { periodStart, periodEnd, notes } = req.body as svc.GenerateVatReturnInput;
+  if (!periodStart || !/^\d{4}-\d{2}-\d{2}$/.test(periodStart)) throw new ValidationError('periodStart must be YYYY-MM-DD');
+  if (!periodEnd || !/^\d{4}-\d{2}-\d{2}$/.test(periodEnd)) throw new ValidationError('periodEnd must be YYYY-MM-DD');
+  const vr = await svc.generateVatReturn(organisationId, req.user!.sub, { periodStart, periodEnd, notes });
+  return sendCreated(res, vr, 'VAT return generated');
+});
+
+export const getVatReturn = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId, id } = req.params;
+  return sendSuccess(res, await svc.getVatReturn(organisationId, id));
+});
+
+export const updateVatReturnStatus = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId, id } = req.params;
+  const { status } = req.body as { status: VatReturnStatus };
+  if (!status) throw new ValidationError('status is required');
+  return sendSuccess(res, await svc.updateVatReturnStatus(organisationId, id, status), 'VAT return updated');
+});
+
+export const deleteVatReturn = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId, id } = req.params;
+  await svc.deleteVatReturn(organisationId, id);
+  return sendNoContent(res);
+});
+
+// ─── FX Revaluation ───────────────────────────────────────────────────────────
+
+export const listFxRevaluations = asyncHandler(async (req: Request, res: Response) => {
+  return sendSuccess(res, await svc.listFxRevaluations(req.params.organisationId));
+});
+
+export const runFxRevaluation = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId } = req.params;
+  const { periodEndDate, notes } = req.body as svc.RunFxRevaluationInput;
+  if (!periodEndDate || !/^\d{4}-\d{2}-\d{2}$/.test(periodEndDate)) {
+    throw new ValidationError('periodEndDate must be YYYY-MM-DD');
+  }
+  const rev = await svc.runFxRevaluation(organisationId, req.user!.sub, { periodEndDate, notes });
+  return sendCreated(res, rev, 'FX revaluation run completed');
+});
+
+export const getFxRevaluation = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId, id } = req.params;
+  return sendSuccess(res, await svc.getFxRevaluation(organisationId, id));
+});
+
+export const reverseFxRevaluation = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId, id } = req.params;
+  return sendSuccess(res, await svc.reverseFxRevaluation(organisationId, id), 'FX revaluation reversed');
 });

@@ -156,6 +156,32 @@ enum CommitmentStatus {
   CANCELLED
 }
 
+enum TaxTreatment {
+  STANDARD
+  ZERO_RATED
+  EXEMPT
+  REVERSE_CHARGE
+  IMPORT_VAT
+  WITHHOLDING
+}
+
+enum ExchangeRateType {
+  SPOT
+  MONTHLY_AVERAGE
+  PERIOD_CLOSING
+}
+
+enum VatReturnStatus {
+  DRAFT
+  SUBMITTED
+  FILED
+}
+
+enum FxRevaluationStatus {
+  POSTED
+  REVERSED
+}
+
 enum MovementType {
   RECEIPT
   ISSUE
@@ -306,6 +332,8 @@ model Organisation {
   budgetCommitments    BudgetCommitment[]
   taxCodes           TaxCode[]
   exchangeRates      ExchangeRate[]
+  vatReturns         VatReturn[]
+  fxRevaluations     FxRevaluation[]
   invoices           Invoice[]
   supplierInvoices   SupplierInvoice[]
 
@@ -362,9 +390,11 @@ model Account {
   children      Account[]    @relation("AccountHierarchy")
   journalLines  JournalLine[]
   ledgerEntries LedgerEntry[]
-  budgetLines       BudgetLine[]
-  budgetCommitments BudgetCommitment[]
-  bankAccount       BankAccount?
+  budgetLines        BudgetLine[]
+  budgetCommitments  BudgetCommitment[]
+  bankAccount        BankAccount?
+  taxCodes           TaxCode[]           @relation("TaxGLAccount")
+  fxRevaluationLines FxRevaluationLine[]
 
   @@unique([organisationId, code])
   @@index([organisationId, class])
@@ -468,8 +498,9 @@ model JournalLine {
   journalEntry JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
   account      Account      @relation(fields: [accountId], references: [id])
   costCentre   CostCentre?  @relation(fields: [costCentreId], references: [id])
-  department   Department?  @relation(fields: [departmentId], references: [id])
-  ledgerEntry  LedgerEntry?
+  department     Department?     @relation(fields: [departmentId], references: [id])
+  ledgerEntry    LedgerEntry?
+  vatReturnLines VatReturnLine[]
 
   @@index([journalEntryId])
   @@index([accountId, journalEntryId])
@@ -1299,17 +1330,21 @@ model BudgetCommitment {
 // ============================================================
 
 model TaxCode {
-  id             String   @id @default(uuid())
+  id             String       @id @default(uuid())
   organisationId String
   code           String
   name           String
-  rate           Decimal  @db.Decimal(5, 2)
+  treatment      TaxTreatment @default(STANDARD)
+  rate           Decimal      @db.Decimal(5, 2)
+  isInclusive    Boolean      @default(false)
+  glAccountId    String?
   description    String?
-  isActive       Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   organisation Organisation @relation(fields: [organisationId], references: [id])
+  glAccount    Account?     @relation("TaxGLAccount", fields: [glAccountId], references: [id])
 
   @@unique([organisationId, code])
   @@index([organisationId])
@@ -1321,19 +1356,111 @@ model TaxCode {
 // ============================================================
 
 model ExchangeRate {
-  id             String   @id @default(uuid())
+  id             String           @id @default(uuid())
   organisationId String
   fromCurrency   String
   toCurrency     String
-  rate           Decimal  @db.Decimal(20, 6)
-  effectiveDate  DateTime @db.Date
-  createdAt      DateTime @default(now())
+  rate           Decimal          @db.Decimal(20, 6)
+  rateType       ExchangeRateType @default(SPOT)
+  effectiveDate  DateTime         @db.Date
+  createdAt      DateTime         @default(now())
 
   organisation Organisation @relation(fields: [organisationId], references: [id])
 
   @@index([organisationId, effectiveDate])
   @@index([fromCurrency, toCurrency, effectiveDate])
   @@map("exchange_rates")
+}
+
+// ============================================================
+// VAT RETURN
+// ============================================================
+
+model VatReturn {
+  id                 String          @id @default(uuid())
+  organisationId     String
+  periodStart        DateTime        @db.Date
+  periodEnd          DateTime        @db.Date
+  status             VatReturnStatus @default(DRAFT)
+  box1OutputTax      Decimal         @default(0) @db.Decimal(20, 4)
+  box2AcquisitionTax Decimal         @default(0) @db.Decimal(20, 4)
+  box3TotalOutput    Decimal         @default(0) @db.Decimal(20, 4)
+  box4InputTax       Decimal         @default(0) @db.Decimal(20, 4)
+  box5NetVat         Decimal         @default(0) @db.Decimal(20, 4)
+  box6TotalSupplies  Decimal         @default(0) @db.Decimal(20, 4)
+  box7TotalPurchases Decimal         @default(0) @db.Decimal(20, 4)
+  generatedBy        String?
+  submittedAt        DateTime?
+  notes              String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  organisation Organisation   @relation(fields: [organisationId], references: [id])
+  lines        VatReturnLine[]
+
+  @@index([organisationId, periodStart])
+  @@map("vat_returns")
+}
+
+model VatReturnLine {
+  id            String   @id @default(uuid())
+  vatReturnId   String
+  boxNumber     Int
+  journalLineId String?
+  netAmount     Decimal  @db.Decimal(20, 4)
+  taxAmount     Decimal  @db.Decimal(20, 4)
+  taxCode       String?
+  description   String?
+  entryDate     DateTime @db.Date
+  reference     String?
+
+  vatReturn   VatReturn    @relation(fields: [vatReturnId], references: [id], onDelete: Cascade)
+  journalLine JournalLine? @relation(fields: [journalLineId], references: [id])
+
+  @@index([vatReturnId])
+  @@map("vat_return_lines")
+}
+
+// ============================================================
+// FX REVALUATION (IAS 21)
+// ============================================================
+
+model FxRevaluation {
+  id                     String              @id @default(uuid())
+  organisationId         String
+  periodEndDate          DateTime            @db.Date
+  status                 FxRevaluationStatus @default(POSTED)
+  journalEntryId         String?
+  reversalJournalEntryId String?
+  generatedBy            String?
+  notes                  String?
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+
+  organisation Organisation        @relation(fields: [organisationId], references: [id])
+  lines        FxRevaluationLine[]
+
+  @@index([organisationId, periodEndDate])
+  @@map("fx_revaluations")
+}
+
+model FxRevaluationLine {
+  id             String  @id @default(uuid())
+  revaluationId  String
+  accountId      String
+  currency       String
+  openingBalance Decimal @db.Decimal(20, 4)
+  originalRate   Decimal @db.Decimal(20, 6)
+  closingRate    Decimal @db.Decimal(20, 6)
+  baseBefore     Decimal @db.Decimal(20, 4)
+  baseAfter      Decimal @db.Decimal(20, 4)
+  gainLoss       Decimal @db.Decimal(20, 4)
+
+  revaluation FxRevaluation @relation(fields: [revaluationId], references: [id], onDelete: Cascade)
+  account     Account       @relation(fields: [accountId], references: [id])
+
+  @@index([revaluationId])
+  @@map("fx_revaluation_lines")
 }
 
 // ============================================================

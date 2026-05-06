@@ -2,40 +2,38 @@ import { Router } from 'express';
 import { UserRole } from '@prisma/client';
 import { requireAuth } from '../../middleware/auth.middleware';
 import { requireRole } from '../../middleware/rbac.middleware';
-import * as taxController from './tax.controller';
+import * as ctrl from './tax.controller';
 
 // Mounted at /api/v1/organisations/:organisationId/tax
 export const taxRouter = Router({ mergeParams: true });
-
 taxRouter.use(requireAuth);
 
-// ─── Exchange Rate Routes (/exchange-rates/*) ─────────────────────────────────
-// Must be declared before /:id to avoid route shadowing
+// ─── Exchange Rates (static prefix before /:id) ───────────────────────────────
 
-taxRouter.get(
-  '/exchange-rates/latest',
-  requireRole(UserRole.REPORT_VIEWER),
-  taxController.getLatestRate,
-);
+taxRouter.get('/exchange-rates/latest', requireRole(UserRole.REPORT_VIEWER), ctrl.getLatestRate);
+taxRouter.get('/exchange-rates', requireRole(UserRole.REPORT_VIEWER), ctrl.listExchangeRates);
+taxRouter.post('/exchange-rates', requireRole(UserRole.ACCOUNTANT), ctrl.upsertExchangeRate);
 
-taxRouter.get(
-  '/exchange-rates',
-  requireRole(UserRole.REPORT_VIEWER),
-  taxController.listExchangeRates,
-);
+// ─── VAT Returns ──────────────────────────────────────────────────────────────
 
-taxRouter.post(
-  '/exchange-rates',
-  requireRole(UserRole.ACCOUNTANT),
-  taxController.upsertExchangeRate,
-);
+taxRouter.get('/vat-returns', requireRole(UserRole.REPORT_VIEWER), ctrl.listVatReturns);
+taxRouter.post('/vat-returns', requireRole(UserRole.FINANCE_MANAGER), ctrl.generateVatReturn);
+taxRouter.get('/vat-returns/:id', requireRole(UserRole.REPORT_VIEWER), ctrl.getVatReturn);
+taxRouter.patch('/vat-returns/:id/status', requireRole(UserRole.FINANCE_MANAGER), ctrl.updateVatReturnStatus);
+taxRouter.delete('/vat-returns/:id', requireRole(UserRole.FINANCE_MANAGER), ctrl.deleteVatReturn);
 
-// ─── Tax Code Routes ──────────────────────────────────────────────────────────
-// Specific paths must come before parameterised /:id routes
+// ─── FX Revaluation ───────────────────────────────────────────────────────────
 
-taxRouter.get('/', requireRole(UserRole.REPORT_VIEWER), taxController.listTaxCodes);
-taxRouter.post('/', requireRole(UserRole.ACCOUNTANT), taxController.createTaxCode);
-taxRouter.post('/compute', requireRole(UserRole.REPORT_VIEWER), taxController.computeTax);
-taxRouter.get('/:id', requireRole(UserRole.REPORT_VIEWER), taxController.getTaxCode);
-taxRouter.patch('/:id', requireRole(UserRole.ACCOUNTANT), taxController.updateTaxCode);
-taxRouter.delete('/:id', requireRole(UserRole.FINANCE_MANAGER), taxController.deleteTaxCode);
+taxRouter.get('/fx-revaluations', requireRole(UserRole.REPORT_VIEWER), ctrl.listFxRevaluations);
+taxRouter.post('/fx-revaluations', requireRole(UserRole.FINANCE_MANAGER), ctrl.runFxRevaluation);
+taxRouter.get('/fx-revaluations/:id', requireRole(UserRole.REPORT_VIEWER), ctrl.getFxRevaluation);
+taxRouter.post('/fx-revaluations/:id/reverse', requireRole(UserRole.FINANCE_MANAGER), ctrl.reverseFxRevaluation);
+
+// ─── Tax Codes ────────────────────────────────────────────────────────────────
+
+taxRouter.get('/', requireRole(UserRole.REPORT_VIEWER), ctrl.listTaxCodes);
+taxRouter.post('/', requireRole(UserRole.ACCOUNTANT), ctrl.createTaxCode);
+taxRouter.post('/compute', requireRole(UserRole.REPORT_VIEWER), ctrl.computeTax);
+taxRouter.get('/:id', requireRole(UserRole.REPORT_VIEWER), ctrl.getTaxCode);
+taxRouter.patch('/:id', requireRole(UserRole.ACCOUNTANT), ctrl.updateTaxCode);
+taxRouter.delete('/:id', requireRole(UserRole.FINANCE_MANAGER), ctrl.deleteTaxCode);
