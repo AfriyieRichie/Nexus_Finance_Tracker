@@ -5,6 +5,7 @@ import * as journalService from '../journals/journal.service';
 import type {
   CreateBankAccountInput, ImportStatementInput, MatchLineInput, ListStatementsQuery,
   ConfirmReconciliationInput, CreateJournalFromLineInput,
+  UnlockReconciliationInput, GetUnmatchedEntriesQuery,
 } from './bank.schemas';
 
 export async function createBankAccount(organisationId: string, input: CreateBankAccountInput) {
@@ -318,4 +319,146 @@ export async function createJournalFromLine(
   });
 
   return { journalEntryId: je.id, journalNumber: je.journalNumber };
+}
+
+// ─── Phase 2: Manual Match — Unmatched Ledger Entries ────────────────────────
+
+export async function getUnmatchedLedgerEntries(
+  organisationId: string,
+  bankAccountId: string,
+  query: GetUnmatchedEntriesQuery,
+) {
+  const bankAccount = await prisma.bankAccount.findFirst({
+    where: { id: bankAccountId, organisationId },
+  });
+  if (!bankAccount) throw new NotFoundError('Bank account not found');
+
+  // IDs already matched to any bank statement line
+  const matched = await prisma.bankStatementLine.findMany({
+    where: { matchedEntryId: { not: null }, statement: { bankAccount: { organisationId } } },
+    select: { matchedEntryId: true },
+  });
+  const matchedIds = matched.map((l) => l.matchedEntryId).filter(Boolean) as string[];
+
+  const where: Prisma.LedgerEntryWhereInput = {
+    organisationId,
+    accountId: bankAccount.accountId,
+    id: matchedIds.length > 0 ? { notIn: matchedIds } : undefined,
+  };
+
+  if (query.dateFrom) where.transactionDate = { ...(where.transactionDate as object), gte: new Date(query.dateFrom) };
+  if (query.dateTo) where.transactionDate = { ...(where.transactionDate as object), lte: new Date(query.dateTo) };
+  if (query.amount) {
+    const dec = new Prisma.Decimal(query.amount);
+    where.OR = [{ debitAmount: dec }, { creditAmount: dec }];
+  }
+
+  return prisma.ledgerEntry.findMany({
+    where,
+    include: { journalEntry: { select: { journalNumber: true, type: true, description: true } } },
+    orderBy: { transactionDate: 'desc' },
+    take: query.take,
+  });
+}
+
+// ─── Phase 2: Unlock Reconciliation ──────────────────────────────────────────
+
+export async function unlockReconciliation(
+  organisationId: string,
+  statementId: string,
+  _userId: string,
+  input: UnlockReconciliationInput,
+) {
+  void input.reason; // stored in audit log in future; acknowledged here
+  const stmt = await prisma.bankStatement.findFirst({
+    where: { id: statementId, bankAccount: { organisationId } },
+  });
+  if (!stmt) throw new NotFoundError('Statement not found');
+  if (!stmt.isLocked) throw new ValidationError('Statement is not locked');
+
+  return prisma.bankStatement.update({
+    where: { id: statementId },
+    data: { isLocked: false, isReconciled: false, reconciledAt: null, reconciledBy: null },
+  });
+}
+
+// ─── Phase 3: Reconciliation Report ──────────────────────────────────────────
+
+export async function getReconciliationReport(organisationId: string, statementId: string) {
+  const stmt = await prisma.bankStatement.findFirst({
+    where: { id: statementId, bankAccount: { organisationId } },
+    include: {
+      bankAccount: { include: { account: { select: { code: true, name: true } } } },
+      lines: { select: { matchedEntryId: true, isMatched: true } },
+    },
+  });
+  if (!stmt) throw new NotFoundError('Statement not found');
+
+  const accountId = stmt.bankAccount.accountId;
+  const asAt = stmt.statementDate;
+
+  // GL balance for the bank account as at statement date (debit − credit = net asset balance)
+  const agg = await prisma.ledgerEntry.aggregate({
+    where: { organisationId, accountId, transactionDate: { lte: asAt } },
+    _sum: { debitAmount: true, creditAmount: true },
+  });
+  const glDebits = agg._sum.debitAmount ?? new Prisma.Decimal(0);
+  const glCredits = agg._sum.creditAmount ?? new Prisma.Decimal(0);
+  const glBalance = glDebits.minus(glCredits);
+
+  // Outstanding GL items: entries for the bank account NOT matched to any statement line, dated ≤ statement date
+  const allMatchedIds = stmt.lines.map((l) => l.matchedEntryId).filter(Boolean) as string[];
+  const outstandingEntries = await prisma.ledgerEntry.findMany({
+    where: {
+      organisationId,
+      accountId,
+      transactionDate: { lte: asAt },
+      id: allMatchedIds.length > 0 ? { notIn: allMatchedIds } : undefined,
+    },
+    include: { journalEntry: { select: { journalNumber: true } } },
+    orderBy: { transactionDate: 'asc' },
+  });
+
+  // Deposits in transit: GL debit entries not yet on bank statement (money in, not cleared)
+  const depositsInTransit = outstandingEntries.filter((e) => e.debitAmount.greaterThan(0));
+  const totalDepositsInTransit = depositsInTransit.reduce((s, e) => s.plus(e.debitAmount), new Prisma.Decimal(0));
+
+  // Outstanding payments: GL credit entries not yet on bank statement (payments issued, not cleared)
+  const outstandingPayments = outstandingEntries.filter((e) => e.creditAmount.greaterThan(0));
+  const totalOutstandingPayments = outstandingPayments.reduce((s, e) => s.plus(e.creditAmount), new Prisma.Decimal(0));
+
+  const adjustedBankBalance = stmt.closingBalance.plus(totalDepositsInTransit).minus(totalOutstandingPayments);
+  const difference = adjustedBankBalance.minus(glBalance);
+
+  return {
+    bankAccount: { ...stmt.bankAccount },
+    statementDate: stmt.statementDate,
+    statementId: stmt.id,
+    isReconciled: stmt.isReconciled,
+    isLocked: stmt.isLocked,
+    reconciledAt: stmt.reconciledAt,
+    reconciledBy: stmt.reconciledBy,
+    // Bank side
+    bankStatementBalance: stmt.closingBalance.toFixed(2),
+    depositsInTransit: depositsInTransit.map((e) => ({
+      date: e.transactionDate,
+      description: e.description,
+      amount: e.debitAmount.toFixed(2),
+      journalNumber: e.journalEntry.journalNumber,
+    })),
+    totalDepositsInTransit: totalDepositsInTransit.toFixed(2),
+    outstandingPayments: outstandingPayments.map((e) => ({
+      date: e.transactionDate,
+      description: e.description,
+      amount: e.creditAmount.toFixed(2),
+      journalNumber: e.journalEntry.journalNumber,
+    })),
+    totalOutstandingPayments: totalOutstandingPayments.toFixed(2),
+    adjustedBankBalance: adjustedBankBalance.toFixed(2),
+    // Book side
+    glBalance: glBalance.toFixed(2),
+    // Verdict
+    difference: difference.toFixed(2),
+    isBalanced: difference.equals(0),
+  };
 }

@@ -20,4 +20,11 @@ router.post('/lines/:lineId/journal', ctrl.createJournalFromLine);
 
 router.post('/statements/:statementId/confirm', ctrl.confirmReconciliation);
 
+// Phase 2
+router.get('/accounts/:bankAccountId/unmatched-entries', ctrl.getUnmatchedLedgerEntries);
+router.post('/statements/:statementId/unlock', ctrl.unlockReconciliation);
+
+// Phase 3
+router.get('/statements/:statementId/report', ctrl.getReconciliationReport);
+
 export { router as bankRouter };

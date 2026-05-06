@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Landmark, Plus, RefreshCw, Upload, Lock, CheckCircle, FileText, ChevronLeft, AlertTriangle } from 'lucide-react';
+import { Landmark, Plus, RefreshCw, Upload, Lock, LockOpen, CheckCircle, FileText, ChevronLeft, AlertTriangle, Link2, BarChart2, Printer } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { api } from '@/services/api';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -53,6 +53,41 @@ interface BankStatementLine {
   matchedEntryId: string | null;
   matchNote: string | null;
   journalEntryId: string | null;
+}
+
+interface UnmatchedLedgerEntry {
+  id: string;
+  transactionDate: string;
+  description: string | null;
+  debitAmount: string;
+  creditAmount: string;
+  journalEntry: { journalNumber: string; type: string; description: string | null };
+}
+
+interface ReportOutstandingItem {
+  date: string;
+  description: string | null;
+  amount: string;
+  journalNumber: string;
+}
+
+interface ReconciliationReport {
+  statementDate: string;
+  statementId: string;
+  isReconciled: boolean;
+  isLocked: boolean;
+  reconciledAt: string | null;
+  reconciledBy: string | null;
+  bankAccount: { bankName: string; accountNumber: string; currency: string; account: { code: string; name: string } };
+  bankStatementBalance: string;
+  depositsInTransit: ReportOutstandingItem[];
+  totalDepositsInTransit: string;
+  outstandingPayments: ReportOutstandingItem[];
+  totalOutstandingPayments: string;
+  adjustedBankBalance: string;
+  glBalance: string;
+  difference: string;
+  isBalanced: boolean;
 }
 
 interface ReconciliationSummary {
@@ -329,6 +364,246 @@ function ImportStatementDialog({ organisationId, bankAccountId, onSuccess }: { o
   );
 }
 
+// ─── MatchToExistingDialog ────────────────────────────────────────────────────
+
+function MatchToExistingDialog({ organisationId, bankAccountId, line, onSuccess }: {
+  organisationId: string; bankAccountId: string; line: BankStatementLine; onSuccess: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [amountFilter, setAmountFilter] = useState('');
+  const isDebit = Number(line.debitAmount) > 0;
+  const lineAmount = isDebit ? line.debitAmount : line.creditAmount;
+
+  const { data: entries, isLoading } = useQuery({
+    queryKey: ['unmatched-entries', organisationId, bankAccountId, amountFilter],
+    queryFn: () => {
+      const params: Record<string, string> = { take: '100' };
+      if (amountFilter) params.amount = amountFilter;
+      return api.get(`/organisations/${organisationId}/bank/accounts/${bankAccountId}/unmatched-entries`, { params })
+        .then((r) => r.data.data as UnmatchedLedgerEntry[]);
+    },
+    enabled: open,
+  });
+
+  const match = useMutation({
+    mutationFn: (ledgerEntryId: string) => api.post(`/organisations/${organisationId}/bank/match`, {
+      statementLineId: line.id,
+      ledgerEntryId,
+    }).then((r) => r.data.data),
+    onSuccess: () => { onSuccess(); setOpen(false); },
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button size="sm" variant="outline" className="h-7 text-xs px-2"><Link2 size={12} /> Match Existing</Button>
+      </DialogTrigger>
+      <DialogContent title="Match to Existing GL Entry" description={`Bank line: ${line.description} · ${isDebit ? 'Debit' : 'Credit'} ${fmt(lineAmount)}`}>
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Input
+              type="number" step="0.01" placeholder={`Filter by amount (e.g. ${fmt(lineAmount)})`}
+              value={amountFilter} onChange={(e) => setAmountFilter(e.target.value)}
+              className="h-8 text-xs flex-1"
+            />
+            {amountFilter && <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={() => setAmountFilter('')}>Clear</Button>}
+          </div>
+
+          <div className="border rounded-md overflow-auto max-h-64">
+            {isLoading ? (
+              <div className="p-4 space-y-2">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}</div>
+            ) : (entries ?? []).length === 0 ? (
+              <div className="py-8 text-center text-xs text-muted-foreground">No unmatched GL entries found{amountFilter ? ' for that amount' : ''}.</div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-xs">Date</TableHead>
+                    <TableHead className="text-xs">Description</TableHead>
+                    <TableHead className="text-xs">Journal</TableHead>
+                    <TableHead className="text-xs text-right">Debit</TableHead>
+                    <TableHead className="text-xs text-right">Credit</TableHead>
+                    <TableHead></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(entries ?? []).map((e) => (
+                    <TableRow key={e.id} className="hover:bg-muted/50">
+                      <TableCell className="text-xs">{new Date(e.transactionDate).toLocaleDateString()}</TableCell>
+                      <TableCell className="text-xs max-w-[140px] truncate">{e.description ?? e.journalEntry.description ?? '—'}</TableCell>
+                      <TableCell className="text-xs font-mono text-muted-foreground">{e.journalEntry.journalNumber}</TableCell>
+                      <TableCell className="text-xs text-right">{Number(e.debitAmount) > 0 ? fmt(e.debitAmount) : '—'}</TableCell>
+                      <TableCell className="text-xs text-right">{Number(e.creditAmount) > 0 ? fmt(e.creditAmount) : '—'}</TableCell>
+                      <TableCell>
+                        <Button size="sm" className="h-6 text-xs px-2" disabled={match.isPending} onClick={() => match.mutate(e.id)}>
+                          Match
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </div>
+
+          {match.isError && <p className="text-xs text-destructive">{(match.error as any)?.response?.data?.message ?? 'Error matching'}</p>}
+          <div className="flex justify-end">
+            <DialogClose asChild><Button variant="outline" size="sm">Close</Button></DialogClose>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── UnlockDialog ─────────────────────────────────────────────────────────────
+
+function UnlockDialog({ organisationId, statementId, onSuccess }: { organisationId: string; statementId: string; onSuccess: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState('');
+
+  const mutation = useMutation({
+    mutationFn: () => api.post(`/organisations/${organisationId}/bank/statements/${statementId}/unlock`, { reason }).then((r) => r.data.data),
+    onSuccess: () => { onSuccess(); setOpen(false); setReason(''); },
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm"><LockOpen size={14} /> Unlock</Button>
+      </DialogTrigger>
+      <DialogContent title="Unlock Reconciliation" description="This will remove the lock so lines can be modified. Provide a reason for the audit trail.">
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs font-medium mb-1 block">Reason *</label>
+            <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Correction needed for mis-posted line" className="h-8 text-xs" />
+          </div>
+          {mutation.isError && <p className="text-xs text-destructive">{(mutation.error as any)?.response?.data?.message ?? 'Error unlocking'}</p>}
+          <div className="flex justify-end gap-2">
+            <DialogClose asChild><Button variant="outline" size="sm">Cancel</Button></DialogClose>
+            <Button size="sm" variant="destructive" disabled={!reason.trim() || mutation.isPending} onClick={() => mutation.mutate()}>
+              {mutation.isPending ? 'Unlocking…' : 'Unlock Statement'}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── ReconciliationReportModal ────────────────────────────────────────────────
+
+function ReconciliationReportModal({ organisationId, statementId }: { organisationId: string; statementId: string }) {
+  const [open, setOpen] = useState(false);
+
+  const { data: report, isLoading } = useQuery({
+    queryKey: ['bank-recon-report', organisationId, statementId],
+    queryFn: () => api.get(`/organisations/${organisationId}/bank/statements/${statementId}/report`).then((r) => r.data.data as ReconciliationReport),
+    enabled: open,
+  });
+
+  function handlePrint() {
+    window.print();
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm"><BarChart2 size={14} /> Recon Report</Button>
+      </DialogTrigger>
+      <DialogContent title="Bank Reconciliation Statement" description={report ? `${report.bankAccount.bankName} · ${new Date(report.statementDate).toLocaleDateString()}` : 'Loading…'}>
+        {isLoading ? (
+          <div className="space-y-2">{[...Array(6)].map((_, i) => <Skeleton key={i} className="h-6 w-full" />)}</div>
+        ) : report ? (
+          <div className="space-y-4 text-sm" id="recon-report-print">
+            {/* Header */}
+            <div className="text-center space-y-0.5 border-b pb-3">
+              <p className="font-semibold text-base">Bank Reconciliation Statement</p>
+              <p className="text-xs text-muted-foreground">{report.bankAccount.bankName} — Ac/c {report.bankAccount.accountNumber}</p>
+              <p className="text-xs text-muted-foreground">GL: {report.bankAccount.account.code} — {report.bankAccount.account.name}</p>
+              <p className="text-xs font-medium">As at {new Date(report.statementDate).toLocaleDateString()}</p>
+            </div>
+
+            {/* Bank side */}
+            <div className="space-y-1">
+              <div className="flex justify-between font-medium">
+                <span>Balance per Bank Statement</span>
+                <span className="font-mono">{fmt(report.bankStatementBalance)}</span>
+              </div>
+
+              {report.depositsInTransit.length > 0 && (
+                <div className="pl-4 space-y-0.5">
+                  <p className="text-xs text-muted-foreground font-medium mt-1">Add: Deposits in Transit</p>
+                  {report.depositsInTransit.map((d, i) => (
+                    <div key={i} className="flex justify-between text-xs">
+                      <span className="text-muted-foreground">{new Date(d.date).toLocaleDateString()} · {d.description ?? d.journalNumber}</span>
+                      <span className="font-mono text-green-700 dark:text-green-400">+{fmt(d.amount)}</span>
+                    </div>
+                  ))}
+                  <div className="flex justify-between text-xs font-medium pt-0.5 border-t">
+                    <span>Total Deposits in Transit</span>
+                    <span className="font-mono text-green-700 dark:text-green-400">+{fmt(report.totalDepositsInTransit)}</span>
+                  </div>
+                </div>
+              )}
+
+              {report.outstandingPayments.length > 0 && (
+                <div className="pl-4 space-y-0.5">
+                  <p className="text-xs text-muted-foreground font-medium mt-1">Less: Outstanding Payments</p>
+                  {report.outstandingPayments.map((p, i) => (
+                    <div key={i} className="flex justify-between text-xs">
+                      <span className="text-muted-foreground">{new Date(p.date).toLocaleDateString()} · {p.description ?? p.journalNumber}</span>
+                      <span className="font-mono text-red-700 dark:text-red-400">({fmt(p.amount)})</span>
+                    </div>
+                  ))}
+                  <div className="flex justify-between text-xs font-medium pt-0.5 border-t">
+                    <span>Total Outstanding Payments</span>
+                    <span className="font-mono text-red-700 dark:text-red-400">({fmt(report.totalOutstandingPayments)})</span>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-between font-semibold border-t pt-1 mt-1">
+                <span>Adjusted Bank Balance</span>
+                <span className="font-mono">{fmt(report.adjustedBankBalance)}</span>
+              </div>
+            </div>
+
+            {/* Book side */}
+            <div className="border-t pt-3 space-y-1">
+              <div className="flex justify-between font-semibold">
+                <span>Balance per Books (GL)</span>
+                <span className="font-mono">{fmt(report.glBalance)}</span>
+              </div>
+            </div>
+
+            {/* Difference */}
+            <div className={cn('rounded-md p-3 flex justify-between font-bold border', report.isBalanced ? 'bg-green-50 dark:bg-green-950/20 border-green-200 text-green-800 dark:text-green-300' : 'bg-red-50 dark:bg-red-950/20 border-red-200 text-destructive')}>
+              <span>Difference</span>
+              <span className="font-mono">{fmt(report.difference)}</span>
+            </div>
+
+            {report.isBalanced && (
+              <p className="text-xs text-center text-green-700 dark:text-green-400 flex items-center justify-center gap-1">
+                <CheckCircle size={12} /> Reconciliation balances — books agree with bank statement
+              </p>
+            )}
+
+            {report.isLocked && report.reconciledAt && (
+              <p className="text-xs text-center text-muted-foreground">Confirmed &amp; locked on {new Date(report.reconciledAt).toLocaleString()} by {report.reconciledBy}</p>
+            )}
+          </div>
+        ) : null}
+
+        <div className="flex justify-between pt-2">
+          <Button variant="outline" size="sm" onClick={handlePrint}><Printer size={14} /> Print</Button>
+          <DialogClose asChild><Button variant="outline" size="sm">Close</Button></DialogClose>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─── CreateJournalDialog ──────────────────────────────────────────────────────
 
 function CreateJournalDialog({ organisationId, line, onSuccess }: { organisationId: string; line: BankStatementLine; onSuccess: () => void }) {
@@ -476,8 +751,9 @@ function ConfirmReconciliationButton({ organisationId, statementId, unmatchedLin
 
 // ─── StatementDetailView ──────────────────────────────────────────────────────
 
-function StatementDetailView({ organisationId, statement, onBack }: { organisationId: string; statement: BankStatement; onBack: () => void }) {
+function StatementDetailView({ organisationId, bankAccountId, statement, onBack }: { organisationId: string; bankAccountId: string; statement: BankStatement; onBack: () => void }) {
   const qc = useQueryClient();
+  const [lineFilter, setLineFilter] = useState<'all' | 'unmatched' | 'matched'>('all');
 
   const { data: summary, isLoading: summaryLoading } = useQuery({
     queryKey: ['bank-recon-summary', organisationId, statement.id],
@@ -489,7 +765,10 @@ function StatementDetailView({ organisationId, statement, onBack }: { organisati
     queryFn: () => api.get(`/organisations/${organisationId}/bank/statements/${statement.id}`).then((r) => r.data.data),
   });
 
-  const lines: BankStatementLine[] = stmtDetail?.lines ?? [];
+  const allLines: BankStatementLine[] = stmtDetail?.lines ?? [];
+  const lines = lineFilter === 'unmatched' ? allLines.filter((l) => !l.isMatched)
+    : lineFilter === 'matched' ? allLines.filter((l) => l.isMatched)
+    : allLines;
 
   const autoMatch = useMutation({
     mutationFn: () => api.post(`/organisations/${organisationId}/bank/statements/${statement.id}/auto-match`).then((r) => r.data.data),
@@ -518,11 +797,19 @@ function StatementDetailView({ organisationId, statement, onBack }: { organisati
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="sm" onClick={onBack}><ChevronLeft size={14} /> Back to Statements</Button>
-        <span className="text-sm font-semibold">{statement.bankAccount.bankName} — {new Date(statement.statementDate).toLocaleDateString()}</span>
-        {isLocked && <Badge variant="secondary" className="gap-1"><Lock size={10} /> Locked</Badge>}
-        {summary?.isReconciled && !isLocked && <Badge variant="success"><CheckCircle size={10} /> Reconciled</Badge>}
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="sm" onClick={onBack}><ChevronLeft size={14} /> Back to Statements</Button>
+          <span className="text-sm font-semibold">{statement.bankAccount.bankName} — {new Date(statement.statementDate).toLocaleDateString()}</span>
+          {isLocked && <Badge variant="secondary" className="gap-1"><Lock size={10} /> Locked</Badge>}
+          {summary?.isReconciled && !isLocked && <Badge variant="success"><CheckCircle size={10} /> Reconciled</Badge>}
+        </div>
+        <div className="flex items-center gap-2">
+          <ReconciliationReportModal organisationId={organisationId} statementId={statement.id} />
+          {isLocked && (
+            <UnlockDialog organisationId={organisationId} statementId={statement.id} onSuccess={refreshAll} />
+          )}
+        </div>
       </div>
 
       {summaryLoading ? (
@@ -558,8 +845,20 @@ function StatementDetailView({ organisationId, statement, onBack }: { organisati
       )}
 
       <Card>
-        <CardHeader className="pb-2 flex flex-row items-center justify-between">
-          <p className="text-sm font-medium">Statement Lines</p>
+        <CardHeader className="pb-2 flex flex-row items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-medium">Statement Lines</p>
+            <div className="flex rounded-md border overflow-hidden text-xs">
+              {(['all', 'unmatched', 'matched'] as const).map((f) => (
+                <button key={f} onClick={() => setLineFilter(f)}
+                  className={cn('px-2.5 py-1 capitalize', lineFilter === f ? 'bg-primary text-primary-foreground' : 'hover:bg-muted')}>
+                  {f}
+                  {f === 'unmatched' && summary ? ` (${summary.unmatchedLines})` : ''}
+                  {f === 'matched' && summary ? ` (${summary.matchedLines})` : ''}
+                </button>
+              ))}
+            </div>
+          </div>
           {!isLocked && (
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" disabled={autoMatch.isPending} onClick={() => autoMatch.mutate()}>
@@ -619,14 +918,26 @@ function StatementDetailView({ organisationId, statement, onBack }: { organisati
                             Unmatch
                           </Button>
                         ) : (
-                          <CreateJournalDialog
-                            organisationId={organisationId}
-                            line={line}
-                            onSuccess={() => {
-                              void qc.invalidateQueries({ queryKey: ['bank-statement-lines', statement.id] });
-                              void qc.invalidateQueries({ queryKey: ['bank-recon-summary', organisationId, statement.id] });
-                            }}
-                          />
+                          <div className="flex items-center gap-1">
+                            <MatchToExistingDialog
+                              organisationId={organisationId}
+                              bankAccountId={bankAccountId}
+                              line={line}
+                              onSuccess={() => {
+                                void qc.invalidateQueries({ queryKey: ['bank-statement-lines', statement.id] });
+                                void qc.invalidateQueries({ queryKey: ['bank-recon-summary', organisationId, statement.id] });
+                                void qc.invalidateQueries({ queryKey: ['unmatched-entries', organisationId, bankAccountId] });
+                              }}
+                            />
+                            <CreateJournalDialog
+                              organisationId={organisationId}
+                              line={line}
+                              onSuccess={() => {
+                                void qc.invalidateQueries({ queryKey: ['bank-statement-lines', statement.id] });
+                                void qc.invalidateQueries({ queryKey: ['bank-recon-summary', organisationId, statement.id] });
+                              }}
+                            />
+                          </div>
                         )}
                       </TableCell>
                     )}
@@ -658,6 +969,7 @@ function StatementsView({ organisationId, bankAccount, onBack }: { organisationI
     return (
       <StatementDetailView
         organisationId={organisationId}
+        bankAccountId={bankAccount.id}
         statement={selectedStatement}
         onBack={() => { setSelectedStatement(null); void qc.invalidateQueries({ queryKey: ['bank-statements', organisationId, bankAccount.id] }); }}
       />

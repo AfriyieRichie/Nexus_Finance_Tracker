@@ -44,9 +44,22 @@ export const createJournalFromLineSchema = z.object({
   note: z.string().optional(),
 });
 
+export const unlockReconciliationSchema = z.object({
+  reason: z.string().min(1).max(500),
+});
+
+export const getUnmatchedEntriesSchema = z.object({
+  amount: z.coerce.number().positive().optional(),
+  dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  take: z.coerce.number().int().positive().max(200).default(100),
+});
+
 export type CreateBankAccountInput = z.infer<typeof createBankAccountSchema>;
 export type ImportStatementInput = z.infer<typeof importStatementSchema>;
 export type MatchLineInput = z.infer<typeof matchLineSchema>;
 export type ListStatementsQuery = z.infer<typeof listStatementsSchema>;
 export type ConfirmReconciliationInput = z.infer<typeof confirmReconciliationSchema>;
 export type CreateJournalFromLineInput = z.infer<typeof createJournalFromLineSchema>;
+export type UnlockReconciliationInput = z.infer<typeof unlockReconciliationSchema>;
+export type GetUnmatchedEntriesQuery = z.infer<typeof getUnmatchedEntriesSchema>;

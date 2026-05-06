@@ -1,7 +1,11 @@
 import { Request, Response } from 'express';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { sendSuccess, sendCreated, sendPaginated, buildPagination } from '../../utils/response';
-import { createBankAccountSchema, importStatementSchema, matchLineSchema, listStatementsSchema, confirmReconciliationSchema, createJournalFromLineSchema } from './bank.schemas';
+import {
+  createBankAccountSchema, importStatementSchema, matchLineSchema, listStatementsSchema,
+  confirmReconciliationSchema, createJournalFromLineSchema,
+  unlockReconciliationSchema, getUnmatchedEntriesSchema,
+} from './bank.schemas';
 import * as svc from './bank.service';
 
 export const createBankAccount = asyncHandler(async (req: Request, res: Response) => {
@@ -55,4 +59,23 @@ export const createJournalFromLine = asyncHandler(async (req: Request, res: Resp
   const input = createJournalFromLineSchema.parse(req.body);
   const userId = (req as any).user?.id ?? 'system';
   return sendCreated(res, await svc.createJournalFromLine(req.params.organisationId, req.params.lineId, userId, input), 'Journal created and line matched');
+});
+
+// ─── Phase 2 ─────────────────────────────────────────────────────────────────
+
+export const getUnmatchedLedgerEntries = asyncHandler(async (req: Request, res: Response) => {
+  const query = getUnmatchedEntriesSchema.parse(req.query);
+  return sendSuccess(res, await svc.getUnmatchedLedgerEntries(req.params.organisationId, req.params.bankAccountId, query));
+});
+
+export const unlockReconciliation = asyncHandler(async (req: Request, res: Response) => {
+  const input = unlockReconciliationSchema.parse(req.body);
+  const userId = (req as any).user?.id ?? 'system';
+  return sendSuccess(res, await svc.unlockReconciliation(req.params.organisationId, req.params.statementId, userId, input), 'Reconciliation unlocked');
+});
+
+// ─── Phase 3 ─────────────────────────────────────────────────────────────────
+
+export const getReconciliationReport = asyncHandler(async (req: Request, res: Response) => {
+  return sendSuccess(res, await svc.getReconciliationReport(req.params.organisationId, req.params.statementId));
 });
