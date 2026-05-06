@@ -131,6 +131,7 @@ enum CostMethod {
 
 enum AssetStatus {
   ACTIVE
+  INACTIVE
   DISPOSED
   FULLY_DEPRECIATED
 }

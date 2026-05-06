@@ -88,6 +88,11 @@ export const createCategorySchema = z.object({
 
 export const updateCategorySchema = createCategorySchema.partial();
 
+export const setAssetStatusSchema = z.object({
+  status: z.enum(['ACTIVE', 'INACTIVE']),
+  reason: z.string().optional(),
+});
+
 export const bulkCreateAssetsSchema = z.object({
   assets: z
     .array(
@@ -108,3 +113,4 @@ export type ImpairAssetInput = z.infer<typeof impairAssetSchema>;
 export type CreateCategoryInput = z.infer<typeof createCategorySchema>;
 export type UpdateCategoryInput = z.infer<typeof updateCategorySchema>;
 export type BulkCreateAssetsInput = z.infer<typeof bulkCreateAssetsSchema>;
+export type SetAssetStatusInput = z.infer<typeof setAssetStatusSchema>;

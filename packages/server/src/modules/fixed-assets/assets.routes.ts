@@ -24,5 +24,6 @@ router.put('/:assetId', ctrl.updateAsset);
 router.post('/:assetId/dispose', ctrl.disposeAsset);
 router.post('/:assetId/revalue', ctrl.revalueAsset);
 router.post('/:assetId/impair', ctrl.impairAsset);
+router.patch('/:assetId/status', ctrl.setAssetStatus);
 
 export { router as assetsRouter };

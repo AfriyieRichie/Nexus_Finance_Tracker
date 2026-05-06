@@ -7,6 +7,7 @@ import type {
   RunDepreciationInput, ReverseDepreciationInput,
   DisposeAssetInput, RevalueAssetInput, ImpairAssetInput,
   CreateCategoryInput, UpdateCategoryInput, BulkCreateAssetsInput,
+  SetAssetStatusInput,
 } from './assets.schemas';
 
 // ─── Depreciation Formulas ───────────────────────────────────────────────────
@@ -50,6 +51,23 @@ function computeMonthlyDeprn(
     default:
       return depreciableAmount.dividedBy(usefulLifeMonths);
   }
+}
+
+// ─── Status Toggle ───────────────────────────────────────────────────────────
+
+export async function setAssetStatus(organisationId: string, assetId: string, input: SetAssetStatusInput) {
+  const asset = await prisma.fixedAsset.findFirst({
+    where: { id: assetId, organisationId, isDeleted: false },
+  });
+  if (!asset) throw new NotFoundError('Asset not found');
+  if (asset.status === 'DISPOSED') throw new ValidationError('A disposed asset cannot be reactivated');
+  if (asset.status === 'FULLY_DEPRECIATED' && input.status === 'ACTIVE') throw new ValidationError('A fully depreciated asset cannot be reactivated — it has no remaining depreciable value');
+  if (asset.status === input.status) throw new ValidationError(`Asset is already ${input.status}`);
+
+  return prisma.fixedAsset.update({
+    where: { id: assetId },
+    data: { status: input.status as 'ACTIVE' | 'DISPOSED' | 'FULLY_DEPRECIATED' },
+  });
 }
 
 // ─── Bulk Import ─────────────────────────────────────────────────────────────

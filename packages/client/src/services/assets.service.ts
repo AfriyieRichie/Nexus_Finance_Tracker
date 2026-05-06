@@ -49,7 +49,7 @@ export interface FixedAsset {
   accumulatedDeprn: string;
   impairmentLoss: string;
   carryingValue: string;
-  status: string;
+  status: 'ACTIVE' | 'INACTIVE' | 'DISPOSED' | 'FULLY_DEPRECIATED';
   lastDeprnDate: string | null;
   assetCategory?: AssetCategory;
   revaluations?: AssetRevaluation[];
@@ -148,6 +148,11 @@ export async function impairAsset(organisationId: string, assetId: string, data:
 }) {
   const res = await api.post(`/organisations/${organisationId}/assets/${assetId}/impair`, data);
   return res.data.data;
+}
+
+export async function setAssetStatus(organisationId: string, assetId: string, data: { status: 'ACTIVE' | 'INACTIVE'; reason?: string }) {
+  const res = await api.patch(`/organisations/${organisationId}/assets/${assetId}/status`, data);
+  return res.data.data as FixedAsset;
 }
 
 export async function bulkCreateAssets(organisationId: string, assets: Array<{

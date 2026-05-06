@@ -6,6 +6,7 @@ import {
   runDepreciationSchema, reverseDepreciationSchema,
   disposeAssetSchema, revalueAssetSchema, impairAssetSchema,
   createCategorySchema, updateCategorySchema, bulkCreateAssetsSchema,
+  setAssetStatusSchema,
 } from './assets.schemas';
 import * as svc from './assets.service';
 
@@ -72,6 +73,13 @@ export const revalueAsset = asyncHandler(async (req: Request, res: Response) => 
 export const impairAsset = asyncHandler(async (req: Request, res: Response) => {
   const input = impairAssetSchema.parse(req.body);
   return sendSuccess(res, await svc.impairAsset(req.params.organisationId, req.params.assetId, req.user!.sub, input), 'Asset impairment recorded');
+});
+
+export const setAssetStatus = asyncHandler(async (req: Request, res: Response) => {
+  const input = setAssetStatusSchema.parse(req.body);
+  const asset = await svc.setAssetStatus(req.params.organisationId, req.params.assetId, input);
+  const message = input.status === 'INACTIVE' ? 'Asset marked inactive — depreciation suspended' : 'Asset reactivated — depreciation will resume on next run';
+  return sendSuccess(res, asset, message);
 });
 
 export const bulkCreateAssets = asyncHandler(async (req: Request, res: Response) => {

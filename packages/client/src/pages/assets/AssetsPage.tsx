@@ -24,7 +24,8 @@ const ASSET_CATEGORIES = [
 
 const STATUS_VARIANT: Record<string, 'success' | 'warning' | 'secondary' | 'destructive'> = {
   ACTIVE: 'success',
-  FULLY_DEPRECIATED: 'warning',
+  INACTIVE: 'warning',
+  FULLY_DEPRECIATED: 'secondary',
   DISPOSED: 'secondary',
 };
 
@@ -272,6 +273,12 @@ function AssetDetailPanel({ organisationId, assetId, onClose }: { organisationId
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['asset', assetId] }); void qc.invalidateQueries({ queryKey: ['assets'] }); setTab('info'); },
   });
 
+  // Status toggle
+  const statusMutation = useMutation({
+    mutationFn: (newStatus: 'ACTIVE' | 'INACTIVE') => assetSvc.setAssetStatus(organisationId, assetId, { status: newStatus }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['asset', assetId] }); void qc.invalidateQueries({ queryKey: ['assets'] }); },
+  });
+
   // Dispose form
   const [disposeForm, setDisposeForm] = useState({ disposalDate: new Date().toISOString().split('T')[0], disposalProceeds: '0', bankAccountId: '' });
   const disposeMutation = useMutation({
@@ -360,6 +367,31 @@ function AssetDetailPanel({ organisationId, assetId, onClose }: { organisationId
                 <div key={String(k)}><span className="text-muted-foreground">{k}: </span><span className="font-medium">{String(v)}</span></div>
               ))}
             </div>
+
+            {/* Status toggle — only for ACTIVE / INACTIVE assets */}
+            {(asset.status === 'ACTIVE' || asset.status === 'INACTIVE') && (
+              <div className={`rounded-lg border p-3 text-xs space-y-2 ${asset.status === 'INACTIVE' ? 'border-warning/40 bg-warning/5' : 'border-border'}`}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium">{asset.status === 'ACTIVE' ? 'Mark as Inactive' : 'Reactivate Asset'}</p>
+                    <p className="text-muted-foreground mt-0.5">
+                      {asset.status === 'ACTIVE'
+                        ? 'Suspends depreciation. Use when asset is damaged, under repair, or temporarily out of service.'
+                        : 'Resumes depreciation on the next run. Use when the asset is returned to service.'}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant={asset.status === 'ACTIVE' ? 'outline' : 'default'}
+                    disabled={statusMutation.isPending}
+                    onClick={() => statusMutation.mutate(asset.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE')}
+                  >
+                    {statusMutation.isPending ? '…' : asset.status === 'ACTIVE' ? 'Deactivate' : 'Reactivate'}
+                  </Button>
+                </div>
+                {statusMutation.isError && <p className="text-destructive">{errMsg(statusMutation.error)}</p>}
+              </div>
+            )}
           </>
         )}
 
