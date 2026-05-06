@@ -143,6 +143,19 @@ enum CostCentreLevel {
   TEAM
 }
 
+enum CommitmentType {
+  PURCHASE_ORDER
+  REQUISITION
+  CONTRACT
+}
+
+enum CommitmentStatus {
+  OPEN
+  PARTIALLY_INVOICED
+  FULLY_INVOICED
+  CANCELLED
+}
+
 enum MovementType {
   RECEIPT
   ISSUE
@@ -288,8 +301,9 @@ model Organisation {
   inventoryLots        InventoryLot[]
   stocktakeSessions    StocktakeSession[]
   budgets              Budget[]
-  costCentres        CostCentre[]
-  departments        Department[]
+  costCentres          CostCentre[]
+  departments          Department[]
+  budgetCommitments    BudgetCommitment[]
   taxCodes           TaxCode[]
   exchangeRates      ExchangeRate[]
   invoices           Invoice[]
@@ -348,8 +362,9 @@ model Account {
   children      Account[]    @relation("AccountHierarchy")
   journalLines  JournalLine[]
   ledgerEntries LedgerEntry[]
-  budgetLines   BudgetLine[]
-  bankAccount   BankAccount?
+  budgetLines       BudgetLine[]
+  budgetCommitments BudgetCommitment[]
+  bankAccount       BankAccount?
 
   @@unique([organisationId, code])
   @@index([organisationId, class])
@@ -1161,23 +1176,25 @@ model StocktakeCount {
 // ============================================================
 
 model Budget {
-  id             String     @id @default(uuid())
-  organisationId String
-  name           String
-  fiscalYear     Int
-  budgetType     BudgetType @default(ORIGINAL)
-  version        Int        @default(1)
-  parentBudgetId String?
-  isApproved     Boolean    @default(false)
-  approvedBy     String?
-  approvedAt     DateTime?
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  id                String     @id @default(uuid())
+  organisationId    String
+  name              String
+  fiscalYear        Int
+  budgetType        BudgetType @default(ORIGINAL)
+  version           Int        @default(1)
+  parentBudgetId    String?
+  alertThresholdPct Decimal?   @db.Decimal(5, 2)
+  isApproved        Boolean    @default(false)
+  approvedBy        String?
+  approvedAt        DateTime?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
 
-  organisation Organisation @relation(fields: [organisationId], references: [id])
-  parentBudget Budget?      @relation("BudgetRevisions", fields: [parentBudgetId], references: [id])
-  revisions    Budget[]     @relation("BudgetRevisions")
+  organisation Organisation      @relation(fields: [organisationId], references: [id])
+  parentBudget Budget?           @relation("BudgetRevisions", fields: [parentBudgetId], references: [id])
+  revisions    Budget[]          @relation("BudgetRevisions")
   lines        BudgetLine[]
+  commitments  BudgetCommitment[]
 
   @@unique([organisationId, fiscalYear, name, version])
   @@index([organisationId])
@@ -1206,22 +1223,24 @@ model BudgetLine {
 // ============================================================
 
 model CostCentre {
-  id             String          @id @default(uuid())
-  organisationId String
-  code           String
-  name           String
-  description    String?
-  level          CostCentreLevel @default(DEPARTMENT)
-  parentId       String?
-  isActive       Boolean         @default(true)
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  id                  String          @id @default(uuid())
+  organisationId      String
+  code                String
+  name                String
+  description         String?
+  level               CostCentreLevel @default(DEPARTMENT)
+  parentId            String?
+  isReportableSegment Boolean         @default(false)
+  isActive            Boolean         @default(true)
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
 
-  organisation Organisation @relation(fields: [organisationId], references: [id])
-  parent       CostCentre?  @relation("CostCentreHierarchy", fields: [parentId], references: [id])
-  children     CostCentre[] @relation("CostCentreHierarchy")
-  journalLines JournalLine[]
-  budgetLines  BudgetLine[]
+  organisation  Organisation       @relation(fields: [organisationId], references: [id])
+  parent        CostCentre?        @relation("CostCentreHierarchy", fields: [parentId], references: [id])
+  children      CostCentre[]       @relation("CostCentreHierarchy")
+  journalLines  JournalLine[]
+  budgetLines   BudgetLine[]
+  commitments   BudgetCommitment[]
 
   @@unique([organisationId, code])
   @@index([organisationId])
@@ -1244,6 +1263,35 @@ model Department {
   @@unique([organisationId, code])
   @@index([organisationId])
   @@map("departments")
+}
+
+model BudgetCommitment {
+  id              String           @id @default(uuid())
+  organisationId  String
+  budgetId        String
+  accountId       String
+  costCentreId    String?
+  periodNumber    Int
+  amount          Decimal          @db.Decimal(20, 4)
+  invoicedAmount  Decimal          @default(0) @db.Decimal(20, 4)
+  referenceType   CommitmentType
+  reference       String?
+  description     String?
+  status          CommitmentStatus @default(OPEN)
+  raisedDate      DateTime         @db.Date
+  raisedBy        String?
+  closedAt        DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  organisation Organisation @relation(fields: [organisationId], references: [id])
+  budget       Budget       @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  account      Account      @relation(fields: [accountId], references: [id])
+  costCentre   CostCentre?  @relation(fields: [costCentreId], references: [id])
+
+  @@index([organisationId, budgetId])
+  @@index([organisationId, status])
+  @@map("budget_commitments")
 }
 
 // ============================================================
