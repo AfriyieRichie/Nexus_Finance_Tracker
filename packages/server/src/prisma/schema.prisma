@@ -127,6 +127,34 @@ enum DepreciationRunStatus {
 enum CostMethod {
   FIFO
   WEIGHTED_AVERAGE
+  STANDARD
+}
+
+enum MovementType {
+  RECEIPT
+  ISSUE
+  ADJUSTMENT_IN
+  ADJUSTMENT_OUT
+  TRANSFER_IN
+  TRANSFER_OUT
+  STOCKTAKE_IN
+  STOCKTAKE_OUT
+  OPENING
+}
+
+enum MovementStatus {
+  PENDING
+  APPROVED
+  POSTED
+  REJECTED
+}
+
+enum StocktakeStatus {
+  OPEN
+  COUNTING
+  REVIEWING
+  POSTED
+  CANCELLED
 }
 
 enum AssetStatus {
@@ -239,8 +267,14 @@ model Organisation {
   assetRevaluations  AssetRevaluation[]
   assetImpairments   AssetImpairment[]
   bankAccounts       BankAccount[]
-  inventoryItems     InventoryItem[]
-  budgets            Budget[]
+  inventoryItems       InventoryItem[]
+  inventoryCategories  InventoryCategory[]
+  inventoryLocations   InventoryLocation[]
+  stockBalances        StockBalance[]
+  inventoryMovements   InventoryMovement[]
+  inventoryLots        InventoryLot[]
+  stocktakeSessions    StocktakeSession[]
+  budgets              Budget[]
   costCentres        CostCentre[]
   departments        Department[]
   taxCodes           TaxCode[]
@@ -932,11 +966,14 @@ model InventoryItem {
   name               String
   description        String?
   category           String?
+  categoryId         String?
   unit               String     @default("unit")
   costMethod         CostMethod @default(WEIGHTED_AVERAGE)
   unitCost           Decimal    @default(0) @db.Decimal(20, 4)
+  standardCost       Decimal?   @db.Decimal(20, 4)
   quantityOnHand     Decimal    @default(0) @db.Decimal(20, 4)
   reorderLevel       Decimal?   @db.Decimal(20, 4)
+  reorderQuantity    Decimal?   @db.Decimal(20, 4)
   inventoryAccountId String?
   cogsAccountId      String?
   isActive           Boolean    @default(true)
@@ -944,11 +981,166 @@ model InventoryItem {
   createdAt          DateTime   @default(now())
   updatedAt          DateTime   @updatedAt
 
-  organisation Organisation @relation(fields: [organisationId], references: [id])
+  organisation      Organisation       @relation(fields: [organisationId], references: [id])
+  inventoryCategory InventoryCategory? @relation(fields: [categoryId], references: [id])
+  movements         InventoryMovement[]
+  lots              InventoryLot[]
+  stockBalances     StockBalance[]
+  stocktakeCounts   StocktakeCount[]
 
   @@unique([organisationId, code])
   @@index([organisationId])
   @@map("inventory_items")
+}
+
+model InventoryCategory {
+  id             String   @id @default(uuid())
+  organisationId String
+  name           String
+  description    String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  organisation Organisation  @relation(fields: [organisationId], references: [id])
+  items        InventoryItem[]
+
+  @@unique([organisationId, name])
+  @@index([organisationId])
+  @@map("inventory_categories")
+}
+
+model InventoryLocation {
+  id             String   @id @default(uuid())
+  organisationId String
+  name           String
+  description    String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  organisation      Organisation       @relation(fields: [organisationId], references: [id])
+  movements         InventoryMovement[]
+  stockBalances     StockBalance[]
+  stocktakeSessions StocktakeSession[]
+  stocktakeCounts   StocktakeCount[]
+
+  @@unique([organisationId, name])
+  @@index([organisationId])
+  @@map("inventory_locations")
+}
+
+model StockBalance {
+  id             String   @id @default(uuid())
+  organisationId String
+  itemId         String
+  locationId     String?
+  quantityOnHand Decimal  @default(0) @db.Decimal(20, 4)
+  averageCost    Decimal  @default(0) @db.Decimal(20, 4)
+  totalValue     Decimal  @default(0) @db.Decimal(20, 4)
+  updatedAt      DateTime @updatedAt
+
+  organisation Organisation       @relation(fields: [organisationId], references: [id])
+  item         InventoryItem      @relation(fields: [itemId], references: [id])
+  location     InventoryLocation? @relation(fields: [locationId], references: [id])
+
+  @@unique([itemId, locationId])
+  @@index([organisationId])
+  @@map("stock_balances")
+}
+
+model InventoryMovement {
+  id              String        @id @default(uuid())
+  organisationId  String
+  itemId          String
+  locationId      String?
+  movementType    MovementType
+  quantity        Decimal       @db.Decimal(20, 4)
+  unitCost        Decimal       @default(0) @db.Decimal(20, 4)
+  totalCost       Decimal       @default(0) @db.Decimal(20, 4)
+  contraAccountId String?
+  reference       String?
+  description     String?
+  reasonCode      String?
+  status          MovementStatus @default(PENDING)
+  journalEntryId  String?
+  periodId        String?
+  transactionDate DateTime      @db.Date
+  requestedBy     String?
+  approvedBy      String?
+  approvedAt      DateTime?
+  createdAt       DateTime      @default(now())
+
+  organisation Organisation       @relation(fields: [organisationId], references: [id])
+  item         InventoryItem      @relation(fields: [itemId], references: [id])
+  location     InventoryLocation? @relation(fields: [locationId], references: [id])
+
+  @@index([organisationId, itemId])
+  @@index([organisationId, transactionDate])
+  @@index([organisationId, status])
+  @@map("inventory_movements")
+}
+
+model InventoryLot {
+  id                String   @id @default(uuid())
+  organisationId    String
+  itemId            String
+  locationId        String?
+  receivedDate      DateTime @db.Date
+  originalQuantity  Decimal  @db.Decimal(20, 4)
+  remainingQuantity Decimal  @db.Decimal(20, 4)
+  unitCost          Decimal  @db.Decimal(20, 4)
+  reference         String?
+  movementId        String?
+  isClosed          Boolean  @default(false)
+  createdAt         DateTime @default(now())
+
+  organisation Organisation @relation(fields: [organisationId], references: [id])
+  item         InventoryItem @relation(fields: [itemId], references: [id])
+
+  @@index([itemId, isClosed, receivedDate])
+  @@index([organisationId])
+  @@map("inventory_lots")
+}
+
+model StocktakeSession {
+  id             String          @id @default(uuid())
+  organisationId String
+  locationId     String?
+  name           String
+  sessionDate    DateTime        @db.Date
+  status         StocktakeStatus @default(OPEN)
+  notes          String?
+  createdBy      String
+  postedBy       String?
+  postedAt       DateTime?
+  createdAt      DateTime        @default(now())
+
+  organisation Organisation       @relation(fields: [organisationId], references: [id])
+  location     InventoryLocation? @relation(fields: [locationId], references: [id])
+  counts       StocktakeCount[]
+
+  @@index([organisationId])
+  @@map("stocktake_sessions")
+}
+
+model StocktakeCount {
+  id               String   @id @default(uuid())
+  sessionId        String
+  itemId           String
+  locationId       String?
+  systemQuantity   Decimal  @db.Decimal(20, 4)
+  countedQuantity  Decimal? @db.Decimal(20, 4)
+  varianceQuantity Decimal? @db.Decimal(20, 4)
+  unitCost         Decimal  @default(0) @db.Decimal(20, 4)
+  varianceValue    Decimal? @db.Decimal(20, 4)
+  notes            String?
+
+  session  StocktakeSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  item     InventoryItem      @relation(fields: [itemId], references: [id])
+  location InventoryLocation? @relation(fields: [locationId], references: [id])
+
+  @@unique([sessionId, itemId])
+  @@index([sessionId])
+  @@map("stocktake_counts")
 }
 
 // ============================================================

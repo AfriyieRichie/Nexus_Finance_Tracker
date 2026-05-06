@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { MovementType } from '@prisma/client';
 import { asyncHandler } from '../../utils/asyncHandler';
 import {
   sendSuccess,
@@ -9,14 +10,55 @@ import {
 } from '../../utils/response';
 import * as inventoryService from './inventory.service';
 
-// ─── List items ───────────────────────────────────────────────────────────────
+// ─── Categories ───────────────────────────────────────────────────────────────
+
+export const listCategories = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId } = req.params;
+  const categories = await inventoryService.listCategories(organisationId);
+  return sendSuccess(res, categories);
+});
+
+export const createCategory = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId } = req.params;
+  const category = await inventoryService.createCategory(organisationId, req.body);
+  return sendCreated(res, category, 'Category created');
+});
+
+export const updateCategory = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId, categoryId } = req.params;
+  const category = await inventoryService.updateCategory(organisationId, categoryId, req.body);
+  return sendSuccess(res, category, 'Category updated');
+});
+
+// ─── Locations ────────────────────────────────────────────────────────────────
+
+export const listLocations = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId } = req.params;
+  const locations = await inventoryService.listLocations(organisationId);
+  return sendSuccess(res, locations);
+});
+
+export const createLocation = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId } = req.params;
+  const location = await inventoryService.createLocation(organisationId, req.body);
+  return sendCreated(res, location, 'Location created');
+});
+
+export const updateLocation = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId, locationId } = req.params;
+  const location = await inventoryService.updateLocation(organisationId, locationId, req.body);
+  return sendSuccess(res, location, 'Location updated');
+});
+
+// ─── Items ────────────────────────────────────────────────────────────────────
 
 export const listItems = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId } = req.params;
   const {
     search,
-    category,
+    categoryId,
     isActive,
+    isLowStock,
     page,
     pageSize,
   } = req.query as Record<string, string | undefined>;
@@ -25,8 +67,9 @@ export const listItems = asyncHandler(async (req: Request, res: Response) => {
     organisationId,
     {
       search,
-      category,
+      categoryId,
       isActive: isActive !== undefined ? isActive === 'true' : undefined,
+      isLowStock: isLowStock === 'true',
       page: page ? parseInt(page, 10) : undefined,
       pageSize: pageSize ? parseInt(pageSize, 10) : undefined,
     },
@@ -35,24 +78,11 @@ export const listItems = asyncHandler(async (req: Request, res: Response) => {
   return sendPaginated(res, items, buildPagination(pg, ps, total));
 });
 
-// ─── Valuation report ─────────────────────────────────────────────────────────
-// Declared before getItem so the /valuation path is matched before /:itemId
-
-export const getValuationReport = asyncHandler(async (req: Request, res: Response) => {
-  const { organisationId } = req.params;
-  const report = await inventoryService.getValuationReport(organisationId);
-  return sendSuccess(res, report, 'Inventory valuation report');
-});
-
-// ─── Get single item ──────────────────────────────────────────────────────────
-
 export const getItem = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId, itemId } = req.params;
   const item = await inventoryService.getItem(organisationId, itemId);
   return sendSuccess(res, item);
 });
-
-// ─── Create item ──────────────────────────────────────────────────────────────
 
 export const createItem = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId } = req.params;
@@ -60,15 +90,11 @@ export const createItem = asyncHandler(async (req: Request, res: Response) => {
   return sendCreated(res, item, 'Inventory item created');
 });
 
-// ─── Update item ──────────────────────────────────────────────────────────────
-
 export const updateItem = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId, itemId } = req.params;
   const item = await inventoryService.updateItem(organisationId, itemId, req.body);
   return sendSuccess(res, item, 'Inventory item updated');
 });
-
-// ─── Delete item ──────────────────────────────────────────────────────────────
 
 export const deleteItem = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId, itemId } = req.params;
@@ -76,33 +102,162 @@ export const deleteItem = asyncHandler(async (req: Request, res: Response) => {
   return sendNoContent(res);
 });
 
-// ─── Receive stock ────────────────────────────────────────────────────────────
+// ─── Movements ────────────────────────────────────────────────────────────────
+
+export const listMovements = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId } = req.params;
+  const { itemId, movementType, status, page, pageSize } =
+    req.query as Record<string, string | undefined>;
+
+  const { movements, total, page: pg, pageSize: ps } = await inventoryService.listMovements(
+    organisationId,
+    {
+      itemId,
+      movementType: movementType as MovementType | undefined,
+      status: status as inventoryService.ListMovementsParams['status'],
+      page: page ? parseInt(page, 10) : undefined,
+      pageSize: pageSize ? parseInt(pageSize, 10) : undefined,
+    },
+  );
+
+  return sendPaginated(res, movements, buildPagination(pg, ps, total));
+});
+
+export const createMovement = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId } = req.params;
+  const userId: string = (req as Request & { user?: { id: string } }).user?.id ?? '';
+  const movement = await inventoryService.createMovement(organisationId, userId, req.body);
+  return sendCreated(res, movement, 'Movement created');
+});
+
+export const approveMovement = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId, movementId } = req.params;
+  const userId: string = (req as Request & { user?: { id: string } }).user?.id ?? '';
+  const movement = await inventoryService.approveMovement(organisationId, movementId, userId);
+  return sendSuccess(res, movement, 'Movement approved');
+});
+
+export const rejectMovement = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId, movementId } = req.params;
+  const userId: string = (req as Request & { user?: { id: string } }).user?.id ?? '';
+  const movement = await inventoryService.rejectMovement(organisationId, movementId, userId);
+  return sendSuccess(res, movement, 'Movement rejected');
+});
+
+// ─── Stocktake ────────────────────────────────────────────────────────────────
+
+export const listStocktakeSessions = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId } = req.params;
+  const sessions = await inventoryService.listStocktakeSessions(organisationId);
+  return sendSuccess(res, sessions);
+});
+
+export const createStocktakeSession = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId } = req.params;
+  const userId: string = (req as Request & { user?: { id: string } }).user?.id ?? '';
+  const session = await inventoryService.createStocktakeSession(organisationId, userId, req.body);
+  return sendCreated(res, session, 'Stocktake session created');
+});
+
+export const getStocktakeSession = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId, sessionId } = req.params;
+  const session = await inventoryService.getStocktakeSession(organisationId, sessionId);
+  return sendSuccess(res, session);
+});
+
+export const updateStocktakeCount = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId, sessionId, itemId } = req.params;
+  const { countedQuantity, notes } = req.body as { countedQuantity: number; notes?: string };
+  const count = await inventoryService.updateStocktakeCount(
+    organisationId,
+    sessionId,
+    itemId,
+    Number(countedQuantity),
+    notes,
+  );
+  return sendSuccess(res, count, 'Count updated');
+});
+
+export const postStocktakeVariances = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId, sessionId } = req.params;
+  const userId: string = (req as Request & { user?: { id: string } }).user?.id ?? '';
+  const { periodId } = req.body as { periodId: string };
+  const session = await inventoryService.postStocktakeVariances(
+    organisationId,
+    sessionId,
+    userId,
+    periodId,
+  );
+  return sendSuccess(res, session, 'Stocktake variances posted');
+});
+
+export const cancelStocktakeSession = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId, sessionId } = req.params;
+  const session = await inventoryService.cancelStocktakeSession(organisationId, sessionId);
+  return sendSuccess(res, session, 'Stocktake session cancelled');
+});
+
+// ─── Valuation ────────────────────────────────────────────────────────────────
+// Declared before getItem so the /valuation path is matched before /:itemId
+
+export const getValuationReport = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId } = req.params;
+  const { asAt } = req.query as { asAt?: string };
+  const report = await inventoryService.getValuationReport(organisationId, asAt);
+  return sendSuccess(res, report, 'Inventory valuation report');
+});
+
+export const getStockBalance = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId, itemId } = req.params;
+  const balance = await inventoryService.getStockBalance(organisationId, itemId);
+  return sendSuccess(res, balance);
+});
+
+// ─── Legacy compatibility shims ───────────────────────────────────────────────
+// receiveStock and issueStock are now routed through createMovement.
+// These exports are kept so any existing route registration that already
+// wires up the old names does not break at the JS level.
 
 export const receiveStock = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId, itemId } = req.params;
-  const { quantity, unitCost, notes } = req.body as {
+  const userId: string = (req as Request & { user?: { id: string } }).user?.id ?? '';
+  const { quantity, unitCost, periodId, contraAccountId, reference } = req.body as {
     quantity: number;
     unitCost: number;
-    notes?: string;
+    periodId?: string;
+    contraAccountId?: string;
+    reference?: string;
   };
-  const item = await inventoryService.receiveStock(organisationId, {
+  const movement = await inventoryService.createMovement(organisationId, userId, {
     itemId,
+    movementType: MovementType.RECEIPT,
     quantity: Number(quantity),
     unitCost: Number(unitCost),
-    notes,
+    periodId,
+    contraAccountId,
+    reference,
+    transactionDate: new Date().toISOString().slice(0, 10),
   });
-  return sendSuccess(res, item, 'Stock received');
+  return sendSuccess(res, movement, 'Stock received');
 });
-
-// ─── Issue stock ──────────────────────────────────────────────────────────────
 
 export const issueStock = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId, itemId } = req.params;
-  const { quantity, notes } = req.body as { quantity: number; notes?: string };
-  const item = await inventoryService.issueStock(organisationId, {
+  const userId: string = (req as Request & { user?: { id: string } }).user?.id ?? '';
+  const { quantity, periodId, contraAccountId, reference } = req.body as {
+    quantity: number;
+    periodId?: string;
+    contraAccountId?: string;
+    reference?: string;
+  };
+  const movement = await inventoryService.createMovement(organisationId, userId, {
     itemId,
+    movementType: MovementType.ISSUE,
     quantity: Number(quantity),
-    notes,
+    periodId,
+    contraAccountId,
+    reference,
+    transactionDate: new Date().toISOString().slice(0, 10),
   });
-  return sendSuccess(res, item, 'Stock issued');
+  return sendSuccess(res, movement, 'Stock issued');
 });

@@ -1,13 +1,25 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, MovementType, MovementStatus, StocktakeStatus } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { NotFoundError, ValidationError, ConflictError } from '../../utils/errors';
+import * as journalService from '../journals/journal.service';
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const INBOUND_TYPES: MovementType[] = [
+  MovementType.RECEIPT,
+  MovementType.ADJUSTMENT_IN,
+  MovementType.OPENING,
+  MovementType.TRANSFER_IN,
+  MovementType.STOCKTAKE_IN,
+];
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface ListItemsParams {
   search?: string;
-  category?: string;
+  categoryId?: string;
   isActive?: boolean;
+  isLowStock?: boolean;
   page?: number;
   pageSize?: number;
 }
@@ -17,30 +29,136 @@ export interface CreateItemInput {
   name: string;
   description?: string;
   category?: string;
+  categoryId?: string;
   unit?: string;
-  costMethod?: 'FIFO' | 'WEIGHTED_AVERAGE';
+  costMethod?: 'FIFO' | 'WEIGHTED_AVERAGE' | 'STANDARD';
   unitCost?: number;
+  standardCost?: number;
   reorderLevel?: number;
+  reorderQuantity?: number;
   inventoryAccountId?: string;
   cogsAccountId?: string;
 }
 
 export type UpdateItemInput = Partial<CreateItemInput>;
 
-export interface ReceiveStockInput {
+export interface CreateMovementInput {
   itemId: string;
+  locationId?: string;
+  movementType: MovementType;
   quantity: number;
-  unitCost: number;
-  notes?: string;
+  unitCost?: number;
+  contraAccountId?: string;
+  periodId?: string;
+  reference?: string;
+  description?: string;
+  reasonCode?: string;
+  transactionDate: string; // YYYY-MM-DD
 }
 
-export interface IssueStockInput {
-  itemId: string;
-  quantity: number;
-  notes?: string;
+export interface ListMovementsParams {
+  itemId?: string;
+  movementType?: MovementType;
+  status?: MovementStatus;
+  page?: number;
+  pageSize?: number;
 }
 
-// ─── List ─────────────────────────────────────────────────────────────────────
+// ─── Categories ───────────────────────────────────────────────────────────────
+
+export async function listCategories(organisationId: string) {
+  return prisma.inventoryCategory.findMany({
+    where: { organisationId, isActive: true },
+    orderBy: { name: 'asc' },
+  });
+}
+
+export async function createCategory(
+  organisationId: string,
+  input: { name: string; description?: string },
+) {
+  const existing = await prisma.inventoryCategory.findFirst({
+    where: { organisationId, name: input.name },
+  });
+  if (existing) throw new ConflictError(`Category '${input.name}' already exists`);
+
+  return prisma.inventoryCategory.create({
+    data: {
+      organisationId,
+      name: input.name,
+      description: input.description ?? null,
+    },
+  });
+}
+
+export async function updateCategory(
+  organisationId: string,
+  categoryId: string,
+  input: { name?: string; description?: string; isActive?: boolean },
+) {
+  const cat = await prisma.inventoryCategory.findFirst({
+    where: { id: categoryId, organisationId },
+  });
+  if (!cat) throw new NotFoundError('Inventory category');
+
+  return prisma.inventoryCategory.update({
+    where: { id: categoryId },
+    data: {
+      ...(input.name !== undefined && { name: input.name }),
+      ...(input.description !== undefined && { description: input.description }),
+      ...(input.isActive !== undefined && { isActive: input.isActive }),
+    },
+  });
+}
+
+// ─── Locations ────────────────────────────────────────────────────────────────
+
+export async function listLocations(organisationId: string) {
+  return prisma.inventoryLocation.findMany({
+    where: { organisationId, isActive: true },
+    orderBy: { name: 'asc' },
+  });
+}
+
+export async function createLocation(
+  organisationId: string,
+  input: { name: string; description?: string },
+) {
+  const existing = await prisma.inventoryLocation.findFirst({
+    where: { organisationId, name: input.name },
+  });
+  if (existing) throw new ConflictError(`Location '${input.name}' already exists`);
+
+  return prisma.inventoryLocation.create({
+    data: {
+      organisationId,
+      name: input.name,
+      description: input.description ?? null,
+    },
+  });
+}
+
+export async function updateLocation(
+  organisationId: string,
+  locationId: string,
+  input: { name?: string; description?: string; isActive?: boolean },
+) {
+  const loc = await prisma.inventoryLocation.findFirst({
+    where: { id: locationId, organisationId },
+  });
+  if (!loc) throw new NotFoundError('Inventory location');
+
+  return prisma.inventoryLocation.update({
+    where: { id: locationId },
+    data: {
+      ...(input.name !== undefined && { name: input.name }),
+      ...(input.description !== undefined && { description: input.description }),
+      ...(input.isActive !== undefined && { isActive: input.isActive }),
+    },
+  });
+}
+
+// ─── Items ────────────────────────────────────────────────────────────────────
 
 export async function listItems(organisationId: string, params: ListItemsParams) {
   const page = params.page ?? 1;
@@ -49,8 +167,14 @@ export async function listItems(organisationId: string, params: ListItemsParams)
   const where: Prisma.InventoryItemWhereInput = {
     organisationId,
     isDeleted: false,
-    ...(params.category && { category: params.category }),
+    ...(params.categoryId && { categoryId: params.categoryId }),
     ...(params.isActive !== undefined && { isActive: params.isActive }),
+    ...(params.isLowStock && {
+      reorderLevel: { not: null },
+      // quantityOnHand <= reorderLevel — Prisma doesn't support column comparison directly,
+      // so we do a raw filter below; here we just fetch all and filter in-memory if needed.
+      // For now, rely on quantityOnHand < reorderLevel via a workaround.
+    }),
     ...(params.search && {
       OR: [
         { name: { contains: params.search, mode: 'insensitive' } },
@@ -60,36 +184,68 @@ export async function listItems(organisationId: string, params: ListItemsParams)
     }),
   };
 
-  const [total, items] = await Promise.all([
+  const [total, rawItems] = await Promise.all([
     prisma.inventoryItem.count({ where }),
     prisma.inventoryItem.findMany({
       where,
       orderBy: [{ code: 'asc' }],
       skip: (page - 1) * pageSize,
       take: pageSize,
+      include: {
+        inventoryCategory: { select: { id: true, name: true } },
+        stockBalances: {
+          select: {
+            id: true,
+            locationId: true,
+            quantityOnHand: true,
+            averageCost: true,
+            totalValue: true,
+          },
+        },
+      },
     }),
   ]);
+
+  // Apply in-memory low-stock filter when reorderLevel is set
+  let items = rawItems;
+  if (params.isLowStock) {
+    items = rawItems.filter((item) => {
+      if (item.reorderLevel === null) return false;
+      return new Prisma.Decimal(item.quantityOnHand).lte(new Prisma.Decimal(item.reorderLevel));
+    });
+  }
 
   return { items, total, page, pageSize };
 }
 
-// ─── Get single ───────────────────────────────────────────────────────────────
-
 export async function getItem(organisationId: string, itemId: string) {
   const item = await prisma.inventoryItem.findFirst({
     where: { id: itemId, organisationId, isDeleted: false },
+    include: {
+      inventoryCategory: { select: { id: true, name: true } },
+      stockBalances: {
+        include: {
+          location: { select: { id: true, name: true } },
+        },
+      },
+    },
   });
   if (!item) throw new NotFoundError('Inventory item');
   return item;
 }
-
-// ─── Create ───────────────────────────────────────────────────────────────────
 
 export async function createItem(organisationId: string, input: CreateItemInput) {
   const existing = await prisma.inventoryItem.findFirst({
     where: { organisationId, code: input.code, isDeleted: false },
   });
   if (existing) throw new ConflictError(`Inventory item code '${input.code}' already exists`);
+
+  if (input.categoryId) {
+    const cat = await prisma.inventoryCategory.findFirst({
+      where: { id: input.categoryId, organisationId },
+    });
+    if (!cat) throw new NotFoundError('Inventory category');
+  }
 
   return prisma.inventoryItem.create({
     data: {
@@ -98,17 +254,24 @@ export async function createItem(organisationId: string, input: CreateItemInput)
       name: input.name,
       description: input.description ?? null,
       category: input.category ?? null,
+      categoryId: input.categoryId ?? null,
       unit: input.unit ?? 'unit',
       costMethod: input.costMethod ?? 'WEIGHTED_AVERAGE',
       unitCost: input.unitCost != null ? new Prisma.Decimal(input.unitCost) : new Prisma.Decimal(0),
-      reorderLevel: input.reorderLevel != null ? new Prisma.Decimal(input.reorderLevel) : null,
+      standardCost:
+        input.standardCost != null ? new Prisma.Decimal(input.standardCost) : null,
+      reorderLevel:
+        input.reorderLevel != null ? new Prisma.Decimal(input.reorderLevel) : null,
+      reorderQuantity:
+        input.reorderQuantity != null ? new Prisma.Decimal(input.reorderQuantity) : null,
       inventoryAccountId: input.inventoryAccountId ?? null,
       cogsAccountId: input.cogsAccountId ?? null,
     },
+    include: {
+      inventoryCategory: { select: { id: true, name: true } },
+    },
   });
 }
-
-// ─── Update ───────────────────────────────────────────────────────────────────
 
 export async function updateItem(
   organisationId: string,
@@ -120,6 +283,25 @@ export async function updateItem(
   });
   if (!item) throw new NotFoundError('Inventory item');
 
+  // Block costMethod change if movements exist
+  if (input.costMethod !== undefined && input.costMethod !== item.costMethod) {
+    const movementCount = await prisma.inventoryMovement.count({
+      where: { itemId, organisationId },
+    });
+    if (movementCount > 0) {
+      throw new ValidationError(
+        'Cannot change cost method after movements have been recorded. Perform a stocktake adjustment instead.',
+      );
+    }
+  }
+
+  if (input.categoryId) {
+    const cat = await prisma.inventoryCategory.findFirst({
+      where: { id: input.categoryId, organisationId },
+    });
+    if (!cat) throw new NotFoundError('Inventory category');
+  }
+
   return prisma.inventoryItem.update({
     where: { id: itemId },
     data: {
@@ -127,21 +309,36 @@ export async function updateItem(
       ...(input.name !== undefined && { name: input.name }),
       ...(input.description !== undefined && { description: input.description }),
       ...(input.category !== undefined && { category: input.category }),
+      ...(input.categoryId !== undefined && { categoryId: input.categoryId }),
       ...(input.unit !== undefined && { unit: input.unit }),
       ...(input.costMethod !== undefined && { costMethod: input.costMethod }),
-      ...(input.unitCost !== undefined && { unitCost: new Prisma.Decimal(input.unitCost) }),
+      ...(input.unitCost !== undefined && {
+        unitCost: new Prisma.Decimal(input.unitCost),
+      }),
+      ...(input.standardCost !== undefined && {
+        standardCost:
+          input.standardCost !== null ? new Prisma.Decimal(input.standardCost) : null,
+      }),
       ...(input.reorderLevel !== undefined && {
-        reorderLevel: input.reorderLevel !== null ? new Prisma.Decimal(input.reorderLevel) : null,
+        reorderLevel:
+          input.reorderLevel !== null ? new Prisma.Decimal(input.reorderLevel) : null,
+      }),
+      ...(input.reorderQuantity !== undefined && {
+        reorderQuantity:
+          input.reorderQuantity !== null
+            ? new Prisma.Decimal(input.reorderQuantity)
+            : null,
       }),
       ...(input.inventoryAccountId !== undefined && {
         inventoryAccountId: input.inventoryAccountId,
       }),
       ...(input.cogsAccountId !== undefined && { cogsAccountId: input.cogsAccountId }),
     },
+    include: {
+      inventoryCategory: { select: { id: true, name: true } },
+    },
   });
 }
-
-// ─── Delete (soft) ────────────────────────────────────────────────────────────
 
 export async function deleteItem(organisationId: string, itemId: string) {
   const item = await prisma.inventoryItem.findFirst({
@@ -149,109 +346,927 @@ export async function deleteItem(organisationId: string, itemId: string) {
   });
   if (!item) throw new NotFoundError('Inventory item');
 
+  if (new Prisma.Decimal(item.quantityOnHand).greaterThan(0)) {
+    throw new ValidationError(
+      `Cannot delete item '${item.code}' — stock on hand is ${item.quantityOnHand}. Write off stock before deleting.`,
+    );
+  }
+
   return prisma.inventoryItem.update({
     where: { id: itemId },
     data: { isDeleted: true, isActive: false },
   });
 }
 
-// ─── Receive stock ────────────────────────────────────────────────────────────
+// ─── StockBalance helper ──────────────────────────────────────────────────────
+// Prisma unique constraints on nullable columns behave unexpectedly:
+// upsert with { itemId_locationId: { itemId, locationId: null } } causes issues
+// because NULL != NULL in SQL. Use findFirst + create/update pattern instead.
 
-export async function receiveStock(organisationId: string, input: ReceiveStockInput) {
-  const item = await prisma.inventoryItem.findFirst({
-    where: { id: input.itemId, organisationId, isDeleted: false },
+async function upsertStockBalance(
+  tx: Prisma.TransactionClient,
+  organisationId: string,
+  itemId: string,
+  locationId: string | null,
+  updater: (current: { quantityOnHand: Prisma.Decimal; averageCost: Prisma.Decimal; totalValue: Prisma.Decimal } | null) => {
+    quantityOnHand: Prisma.Decimal;
+    averageCost: Prisma.Decimal;
+    totalValue: Prisma.Decimal;
+  },
+) {
+  const existing = await tx.stockBalance.findFirst({
+    where: {
+      itemId,
+      organisationId,
+      locationId: locationId ?? null,
+    },
   });
-  if (!item) throw new NotFoundError('Inventory item');
 
-  if (input.quantity <= 0) {
-    throw new ValidationError('Quantity to receive must be greater than zero');
+  const updated = updater(
+    existing
+      ? {
+          quantityOnHand: new Prisma.Decimal(existing.quantityOnHand),
+          averageCost: new Prisma.Decimal(existing.averageCost),
+          totalValue: new Prisma.Decimal(existing.totalValue),
+        }
+      : null,
+  );
+
+  if (existing) {
+    return tx.stockBalance.update({
+      where: { id: existing.id },
+      data: {
+        quantityOnHand: updated.quantityOnHand,
+        averageCost: updated.averageCost,
+        totalValue: updated.totalValue,
+      },
+    });
+  } else {
+    return tx.stockBalance.create({
+      data: {
+        organisationId,
+        itemId,
+        locationId: locationId ?? null,
+        quantityOnHand: updated.quantityOnHand,
+        averageCost: updated.averageCost,
+        totalValue: updated.totalValue,
+      },
+    });
   }
-  if (input.unitCost < 0) {
-    throw new ValidationError('Unit cost cannot be negative');
+}
+
+// ─── Item cache update ────────────────────────────────────────────────────────
+// Aggregates all StockBalances for an item and writes back to InventoryItem.
+
+async function updateItemCache(
+  tx: Prisma.TransactionClient,
+  itemId: string,
+) {
+  const balances = await tx.stockBalance.findMany({ where: { itemId } });
+
+  let totalQty = new Prisma.Decimal(0);
+  let totalValue = new Prisma.Decimal(0);
+
+  for (const b of balances) {
+    totalQty = totalQty.add(new Prisma.Decimal(b.quantityOnHand));
+    totalValue = totalValue.add(new Prisma.Decimal(b.totalValue));
   }
 
-  const existingQty = Number(item.quantityOnHand);
-  const existingCost = Number(item.unitCost);
-  const newQty = input.quantity;
-  const newCost = input.unitCost;
-
-  const totalQty = existingQty + newQty;
-
-  // Weighted average: (existing qty * existing cost + new qty * new cost) / total qty
   const newUnitCost =
-    totalQty > 0
-      ? (existingQty * existingCost + newQty * newCost) / totalQty
-      : newCost;
+    totalQty.greaterThan(0) ? totalValue.div(totalQty) : new Prisma.Decimal(0);
 
-  return prisma.inventoryItem.update({
-    where: { id: input.itemId },
+  await tx.inventoryItem.update({
+    where: { id: itemId },
     data: {
-      quantityOnHand: new Prisma.Decimal(totalQty),
-      unitCost: new Prisma.Decimal(newUnitCost),
+      quantityOnHand: totalQty,
+      unitCost: newUnitCost,
     },
   });
 }
 
-// ─── Issue stock ──────────────────────────────────────────────────────────────
+// ─── FIFO lot consumption ─────────────────────────────────────────────────────
 
-export async function issueStock(organisationId: string, input: IssueStockInput) {
-  const item = await prisma.inventoryItem.findFirst({
-    where: { id: input.itemId, organisationId, isDeleted: false },
+async function consumeFIFOLots(
+  tx: Prisma.TransactionClient,
+  itemId: string,
+  organisationId: string,
+  locationId: string | null,
+  qtyNeeded: Prisma.Decimal,
+): Promise<Prisma.Decimal> {
+  const lots = await tx.inventoryLot.findMany({
+    where: {
+      itemId,
+      organisationId,
+      locationId: locationId ?? null,
+      isClosed: false,
+      remainingQuantity: { gt: 0 },
+    },
+    orderBy: { receivedDate: 'asc' },
   });
-  if (!item) throw new NotFoundError('Inventory item');
 
-  if (input.quantity <= 0) {
-    throw new ValidationError('Quantity to issue must be greater than zero');
+  let remaining = qtyNeeded;
+  let totalCost = new Prisma.Decimal(0);
+
+  for (const lot of lots) {
+    if (remaining.lte(0)) break;
+
+    const lotQty = new Prisma.Decimal(lot.remainingQuantity);
+    const lotCost = new Prisma.Decimal(lot.unitCost);
+    const consumed = remaining.lte(lotQty) ? remaining : lotQty;
+
+    totalCost = totalCost.add(consumed.mul(lotCost));
+    remaining = remaining.sub(consumed);
+
+    const newRemaining = lotQty.sub(consumed);
+    await tx.inventoryLot.update({
+      where: { id: lot.id },
+      data: {
+        remainingQuantity: newRemaining,
+        isClosed: newRemaining.lte(0),
+      },
+    });
   }
 
-  const currentQty = Number(item.quantityOnHand);
-  if (input.quantity > currentQty) {
+  if (remaining.greaterThan(0)) {
     throw new ValidationError(
-      `Insufficient stock. Available: ${currentQty}, requested: ${input.quantity}`,
+      `Insufficient FIFO lots to fulfil issue of ${qtyNeeded.toFixed(4)}. Remaining shortfall: ${remaining.toFixed(4)}.`,
     );
   }
 
-  const remainingQty = currentQty - input.quantity;
+  return totalCost.div(qtyNeeded);
+}
 
-  return prisma.inventoryItem.update({
-    where: { id: input.itemId },
+// ─── Core movement processor ──────────────────────────────────────────────────
+// Two-phase approach:
+//   Phase 1 — single Prisma interactive transaction: cost computation, lot
+//             management, StockBalance update, item cache, movement status=POSTED.
+//   Phase 2 — outside the transaction: GL journal via createAndPostSystemEntry
+//             (which opens its own transaction). If GL posting fails we patch
+//             the movement's journalEntryId in a lightweight follow-up write.
+//
+// This avoids nested-transaction issues in Prisma 5 interactive transactions.
+
+async function processMovement(movementId: string, userId: string): Promise<void> {
+  // Fetch movement with related data
+  const movement = await prisma.inventoryMovement.findFirst({
+    where: { id: movementId },
+    include: { item: true },
+  });
+  if (!movement) throw new NotFoundError('Inventory movement');
+
+  const item = movement.item;
+  const locationId = movement.locationId ?? null;
+  const qty = new Prisma.Decimal(movement.quantity);
+  const isInbound = INBOUND_TYPES.includes(movement.movementType);
+
+  if (qty.lte(0)) {
+    throw new ValidationError('Movement quantity must be greater than zero');
+  }
+
+  // ── Phase 1: balance + lot updates (atomic) ────────────────────────────────
+
+  // We capture effectiveUnitCost + totalCost from inside the tx so we can use
+  // them for GL posting afterwards.
+  let capturedEffectiveUnitCost = new Prisma.Decimal(0);
+  let capturedTotalCost = new Prisma.Decimal(0);
+
+  await prisma.$transaction(async (tx) => {
+    let effectiveUnitCost: Prisma.Decimal;
+    let newAverageCost: Prisma.Decimal | null = null;
+
+    if (item.costMethod === 'WEIGHTED_AVERAGE') {
+      if (isInbound) {
+        const currentBalance = await tx.stockBalance.findFirst({
+          where: { itemId: item.id, organisationId: item.organisationId, locationId },
+        });
+
+        const currentQty = currentBalance
+          ? new Prisma.Decimal(currentBalance.quantityOnHand)
+          : new Prisma.Decimal(0);
+        const currentAvg = currentBalance
+          ? new Prisma.Decimal(currentBalance.averageCost)
+          : new Prisma.Decimal(0);
+        const incomingCost = movement.unitCost != null
+          ? new Prisma.Decimal(movement.unitCost)
+          : new Prisma.Decimal(0);
+
+        const totalQtyAfter = currentQty.add(qty);
+        newAverageCost = totalQtyAfter.greaterThan(0)
+          ? currentQty.mul(currentAvg).add(qty.mul(incomingCost)).div(totalQtyAfter)
+          : incomingCost;
+        effectiveUnitCost = incomingCost;
+      } else {
+        // Issue: use current AVCO
+        const currentBalance = await tx.stockBalance.findFirst({
+          where: { itemId: item.id, organisationId: item.organisationId, locationId },
+        });
+        effectiveUnitCost = currentBalance
+          ? new Prisma.Decimal(currentBalance.averageCost)
+          : new Prisma.Decimal(0);
+      }
+    } else if (item.costMethod === 'FIFO') {
+      if (isInbound) {
+        const incomingCost = movement.unitCost != null
+          ? new Prisma.Decimal(movement.unitCost)
+          : new Prisma.Decimal(0);
+        effectiveUnitCost = incomingCost;
+
+        await tx.inventoryLot.create({
+          data: {
+            organisationId: item.organisationId,
+            itemId: item.id,
+            locationId,
+            receivedDate: movement.transactionDate,
+            originalQuantity: qty,
+            remainingQuantity: qty,
+            unitCost: incomingCost,
+            reference: movement.reference ?? null,
+            movementId: movement.id,
+            isClosed: false,
+          },
+        });
+      } else {
+        effectiveUnitCost = await consumeFIFOLots(
+          tx,
+          item.id,
+          item.organisationId,
+          locationId,
+          qty,
+        );
+      }
+    } else {
+      // STANDARD cost
+      effectiveUnitCost = item.standardCost != null
+        ? new Prisma.Decimal(item.standardCost)
+        : new Prisma.Decimal(0);
+      // PPV noted but not posted as separate journal per spec
+    }
+
+    const totalCost = qty.mul(effectiveUnitCost);
+    capturedEffectiveUnitCost = effectiveUnitCost;
+    capturedTotalCost = totalCost;
+
+    // ── Update StockBalance ──────────────────────────────────────────────
+
+    if (isInbound) {
+      await upsertStockBalance(
+        tx,
+        item.organisationId,
+        item.id,
+        locationId,
+        (current) => {
+          const currentQty = current?.quantityOnHand ?? new Prisma.Decimal(0);
+          const newQty = currentQty.add(qty);
+          const avgForBalance = newAverageCost !== null ? newAverageCost : effectiveUnitCost;
+          // FIFO: totalValue accumulates at actual lot cost
+          const newTotalValue =
+            item.costMethod === 'FIFO'
+              ? (current?.totalValue ?? new Prisma.Decimal(0)).add(totalCost)
+              : newQty.mul(avgForBalance); // AVCO + STANDARD: qty × avg
+          return { quantityOnHand: newQty, averageCost: avgForBalance, totalValue: newTotalValue };
+        },
+      );
+    } else {
+      const currentBalance = await tx.stockBalance.findFirst({
+        where: { itemId: item.id, organisationId: item.organisationId, locationId },
+      });
+      const available = currentBalance
+        ? new Prisma.Decimal(currentBalance.quantityOnHand)
+        : new Prisma.Decimal(0);
+
+      if (available.lt(qty)) {
+        throw new ValidationError(
+          `Insufficient stock for item '${item.code}'. Available: ${available.toFixed(4)}, requested: ${qty.toFixed(4)}.`,
+        );
+      }
+
+      await upsertStockBalance(
+        tx,
+        item.organisationId,
+        item.id,
+        locationId,
+        (current) => {
+          const currentQty = current?.quantityOnHand ?? new Prisma.Decimal(0);
+          const currentAvg = current?.averageCost ?? new Prisma.Decimal(0);
+          const newQty = currentQty.sub(qty);
+          const newTotalValue = newQty.greaterThan(0)
+            ? newQty.mul(currentAvg)
+            : new Prisma.Decimal(0);
+          return { quantityOnHand: newQty, averageCost: currentAvg, totalValue: newTotalValue };
+        },
+      );
+    }
+
+    // ── Update item cache ────────────────────────────────────────────────
+    await updateItemCache(tx, item.id);
+
+    // ── Mark movement as POSTED (journalEntryId patched in Phase 2) ─────
+    await tx.inventoryMovement.update({
+      where: { id: movementId },
+      data: { status: MovementStatus.POSTED },
+    });
+  });
+
+  // ── Phase 2: GL journal (outside the Prisma interactive transaction) ───────
+
+  const canPostGL =
+    item.inventoryAccountId != null &&
+    movement.periodId != null &&
+    movement.contraAccountId != null;
+
+  if (!canPostGL) return;
+
+  const org = await prisma.organisation.findUnique({
+    where: { id: item.organisationId },
+    select: { baseCurrency: true },
+  });
+  const currency = org?.baseCurrency ?? 'USD';
+  const transactionDateStr = movement.transactionDate.toISOString().slice(0, 10);
+
+  let debitAccountId: string;
+  let creditAccountId: string;
+  let lineDescription: string;
+
+  if (isInbound) {
+    debitAccountId = item.inventoryAccountId!;
+    creditAccountId = movement.contraAccountId!;
+    lineDescription =
+      movement.description ??
+      `Inventory receipt: ${item.code} x${qty.toFixed(4)} @ ${capturedEffectiveUnitCost.toFixed(4)}`;
+  } else if (movement.movementType === MovementType.ISSUE) {
+    debitAccountId = item.cogsAccountId ?? movement.contraAccountId!;
+    creditAccountId = item.inventoryAccountId!;
+    lineDescription =
+      movement.description ??
+      `Inventory issue: ${item.code} x${qty.toFixed(4)} @ ${capturedEffectiveUnitCost.toFixed(4)}`;
+  } else {
+    debitAccountId = movement.contraAccountId!;
+    creditAccountId = item.inventoryAccountId!;
+    lineDescription =
+      movement.description ??
+      `Inventory ${movement.movementType.toLowerCase().replace(/_/g, ' ')}: ${item.code} x${qty.toFixed(4)}`;
+  }
+
+  const totalCostNum = capturedTotalCost.toNumber();
+
+  const journalInput = {
+    type: 'ADJUSTMENT' as const,
+    reference: movement.reference ?? undefined,
+    description: movement.description ?? `INV: ${movement.movementType} – ${item.code}`,
+    entryDate: transactionDateStr,
+    periodId: movement.periodId!,
+    currency,
+    exchangeRate: 1,
+    lines: [
+      {
+        accountId: debitAccountId,
+        description: lineDescription,
+        debitAmount: totalCostNum,
+        creditAmount: 0,
+        exchangeRate: 1,
+      },
+      {
+        accountId: creditAccountId,
+        description: lineDescription,
+        debitAmount: 0,
+        creditAmount: totalCostNum,
+        exchangeRate: 1,
+      },
+    ],
+  };
+
+  const postedEntry = await journalService.createAndPostSystemEntry(
+    item.organisationId,
+    journalInput,
+    userId,
+  );
+
+  // Patch journalEntryId back onto the movement
+  await prisma.inventoryMovement.update({
+    where: { id: movementId },
+    data: { journalEntryId: postedEntry.id },
+  });
+}
+
+// ─── Movements ────────────────────────────────────────────────────────────────
+
+export async function createMovement(
+  organisationId: string,
+  userId: string,
+  input: CreateMovementInput,
+) {
+  // Validate
+  if (input.quantity <= 0) {
+    throw new ValidationError('Movement quantity must be greater than zero');
+  }
+
+  const isInbound = INBOUND_TYPES.includes(input.movementType);
+
+  if (isInbound && input.unitCost !== undefined && input.unitCost < 0) {
+    throw new ValidationError('Unit cost cannot be negative');
+  }
+
+  // Resolve item
+  const item = await prisma.inventoryItem.findFirst({
+    where: { id: input.itemId, organisationId, isDeleted: false },
+  });
+  if (!item) throw new NotFoundError('Inventory item');
+
+  // Validate location if provided
+  if (input.locationId) {
+    const loc = await prisma.inventoryLocation.findFirst({
+      where: { id: input.locationId, organisationId },
+    });
+    if (!loc) throw new NotFoundError('Inventory location');
+  }
+
+  // RECEIPT, OPENING, ISSUE, STOCKTAKE_IN/OUT → auto-post immediately after creation.
+  // ADJUSTMENT_IN/OUT, TRANSFER_IN/OUT → start as PENDING, require explicit approval.
+  const autoPost =
+    input.movementType === MovementType.RECEIPT ||
+    input.movementType === MovementType.OPENING ||
+    input.movementType === MovementType.ISSUE ||
+    input.movementType === MovementType.STOCKTAKE_IN ||
+    input.movementType === MovementType.STOCKTAKE_OUT;
+
+  const transactionDate = new Date(input.transactionDate + 'T00:00:00Z');
+
+  const movement = await prisma.inventoryMovement.create({
     data: {
-      quantityOnHand: new Prisma.Decimal(remainingQty),
+      organisationId,
+      itemId: input.itemId,
+      locationId: input.locationId ?? null,
+      movementType: input.movementType,
+      quantity: new Prisma.Decimal(input.quantity),
+      unitCost:
+        input.unitCost != null ? new Prisma.Decimal(input.unitCost) : new Prisma.Decimal(0),
+      totalCost:
+        input.unitCost != null
+          ? new Prisma.Decimal(input.quantity).mul(new Prisma.Decimal(input.unitCost))
+          : new Prisma.Decimal(0),
+      contraAccountId: input.contraAccountId ?? null,
+      reference: input.reference ?? null,
+      description: input.description ?? null,
+      reasonCode: input.reasonCode ?? null,
+      status: MovementStatus.PENDING,
+      periodId: input.periodId ?? null,
+      transactionDate,
+      requestedBy: userId,
+    },
+    include: {
+      item: { select: { code: true, name: true } },
+    },
+  });
+
+  // Auto-post for RECEIPT, OPENING, ISSUE, STOCKTAKE_IN, STOCKTAKE_OUT
+  if (autoPost) {
+    await processMovement(movement.id, userId);
+    // Re-fetch to return the updated status
+    const updated = await prisma.inventoryMovement.findFirst({
+      where: { id: movement.id },
+      include: { item: { select: { code: true, name: true } } },
+    });
+    return updated!;
+  }
+
+  return movement;
+}
+
+export async function listMovements(organisationId: string, params: ListMovementsParams) {
+  const page = params.page ?? 1;
+  const pageSize = params.pageSize ?? 20;
+
+  const where: Prisma.InventoryMovementWhereInput = {
+    organisationId,
+    ...(params.itemId && { itemId: params.itemId }),
+    ...(params.movementType && { movementType: params.movementType }),
+    ...(params.status && { status: params.status }),
+  };
+
+  const [total, movements] = await Promise.all([
+    prisma.inventoryMovement.count({ where }),
+    prisma.inventoryMovement.findMany({
+      where,
+      orderBy: [{ transactionDate: 'desc' }, { createdAt: 'desc' }],
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+      include: {
+        item: { select: { code: true, name: true } },
+        location: { select: { id: true, name: true } },
+      },
+    }),
+  ]);
+
+  return { movements, total, page, pageSize };
+}
+
+export async function approveMovement(
+  organisationId: string,
+  movementId: string,
+  userId: string,
+) {
+  const movement = await prisma.inventoryMovement.findFirst({
+    where: { id: movementId, organisationId },
+  });
+  if (!movement) throw new NotFoundError('Inventory movement');
+
+  if (movement.status !== MovementStatus.PENDING) {
+    throw new ValidationError(
+      `Movement is ${movement.status} — only PENDING movements can be approved`,
+    );
+  }
+
+  // Transition to APPROVED
+  await prisma.inventoryMovement.update({
+    where: { id: movementId },
+    data: {
+      status: MovementStatus.APPROVED,
+      approvedBy: userId,
+      approvedAt: new Date(),
+    },
+  });
+
+  // Process (will transition to POSTED)
+  await processMovement(movementId, userId);
+
+  return prisma.inventoryMovement.findFirst({
+    where: { id: movementId },
+    include: { item: { select: { code: true, name: true } } },
+  });
+}
+
+export async function rejectMovement(
+  organisationId: string,
+  movementId: string,
+  userId: string,
+) {
+  const movement = await prisma.inventoryMovement.findFirst({
+    where: { id: movementId, organisationId },
+  });
+  if (!movement) throw new NotFoundError('Inventory movement');
+
+  if (movement.status !== MovementStatus.PENDING) {
+    throw new ValidationError(
+      `Movement is ${movement.status} — only PENDING movements can be rejected`,
+    );
+  }
+
+  return prisma.inventoryMovement.update({
+    where: { id: movementId },
+    data: {
+      status: MovementStatus.REJECTED,
+      approvedBy: userId,
+      approvedAt: new Date(),
     },
   });
 }
 
-// ─── Valuation report ─────────────────────────────────────────────────────────
+// ─── Stocktake ────────────────────────────────────────────────────────────────
 
-export async function getValuationReport(organisationId: string) {
-  const items = await prisma.inventoryItem.findMany({
-    where: { organisationId, isDeleted: false, isActive: true },
-    orderBy: [{ code: 'asc' }],
+export async function createStocktakeSession(
+  organisationId: string,
+  userId: string,
+  input: {
+    name: string;
+    locationId?: string;
+    sessionDate: string;
+    notes?: string;
+  },
+) {
+  if (input.locationId) {
+    const loc = await prisma.inventoryLocation.findFirst({
+      where: { id: input.locationId, organisationId },
+    });
+    if (!loc) throw new NotFoundError('Inventory location');
+  }
+
+  const sessionDate = new Date(input.sessionDate + 'T00:00:00Z');
+
+  // Snapshot StockBalance for items in scope
+  const balanceWhere: Prisma.StockBalanceWhereInput = {
+    organisationId,
+    ...(input.locationId && { locationId: input.locationId }),
+  };
+
+  const balances = await prisma.stockBalance.findMany({
+    where: balanceWhere,
+    include: {
+      item: { select: { id: true, isDeleted: true } },
+    },
+  });
+
+  // Filter out deleted items
+  const activeBalances = balances.filter((b) => !b.item.isDeleted);
+
+  const session = await prisma.stocktakeSession.create({
+    data: {
+      organisationId,
+      locationId: input.locationId ?? null,
+      name: input.name,
+      sessionDate,
+      status: StocktakeStatus.OPEN,
+      notes: input.notes ?? null,
+      createdBy: userId,
+      counts: {
+        create: activeBalances.map((b) => ({
+          itemId: b.itemId,
+          locationId: b.locationId ?? null,
+          systemQuantity: new Prisma.Decimal(b.quantityOnHand),
+          countedQuantity: null,
+          varianceQuantity: null,
+          unitCost: new Prisma.Decimal(b.averageCost),
+          varianceValue: null,
+        })),
+      },
+    },
+    include: {
+      _count: { select: { counts: true } },
+    },
+  });
+
+  return session;
+}
+
+export async function listStocktakeSessions(organisationId: string) {
+  return prisma.stocktakeSession.findMany({
+    where: { organisationId },
+    orderBy: { sessionDate: 'desc' },
+    include: {
+      _count: { select: { counts: true } },
+    },
+  });
+}
+
+export async function getStocktakeSession(organisationId: string, sessionId: string) {
+  const session = await prisma.stocktakeSession.findFirst({
+    where: { id: sessionId, organisationId },
+    include: {
+      counts: {
+        include: {
+          item: { select: { id: true, code: true, name: true, unit: true } },
+        },
+        orderBy: { item: { code: 'asc' } },
+      },
+      _count: { select: { counts: true } },
+    },
+  });
+  if (!session) throw new NotFoundError('Stocktake session');
+  return session;
+}
+
+export async function updateStocktakeCount(
+  organisationId: string,
+  sessionId: string,
+  itemId: string,
+  countedQuantity: number,
+  notes?: string,
+) {
+  const session = await prisma.stocktakeSession.findFirst({
+    where: { id: sessionId, organisationId },
+  });
+  if (!session) throw new NotFoundError('Stocktake session');
+
+  if (
+    session.status === StocktakeStatus.POSTED ||
+    session.status === StocktakeStatus.CANCELLED
+  ) {
+    throw new ValidationError(
+      `Cannot update counts on a ${session.status} stocktake session`,
+    );
+  }
+
+  const count = await prisma.stocktakeCount.findFirst({
+    where: { sessionId, itemId },
+  });
+  if (!count) throw new NotFoundError('Stocktake count line');
+
+  const counted = new Prisma.Decimal(countedQuantity);
+  const system = new Prisma.Decimal(count.systemQuantity);
+  const unitCost = new Prisma.Decimal(count.unitCost);
+  const variance = counted.sub(system);
+  const varianceValue = variance.mul(unitCost);
+
+  const updated = await prisma.stocktakeCount.update({
+    where: { id: count.id },
+    data: {
+      countedQuantity: counted,
+      varianceQuantity: variance,
+      varianceValue,
+      ...(notes !== undefined && { notes }),
+    },
+  });
+
+  // Advance session to COUNTING if still OPEN
+  if (session.status === StocktakeStatus.OPEN) {
+    await prisma.stocktakeSession.update({
+      where: { id: sessionId },
+      data: { status: StocktakeStatus.COUNTING },
+    });
+  }
+
+  return updated;
+}
+
+export async function postStocktakeVariances(
+  organisationId: string,
+  sessionId: string,
+  userId: string,
+  periodId: string,
+) {
+  const session = await prisma.stocktakeSession.findFirst({
+    where: { id: sessionId, organisationId },
+    include: { counts: true },
+  });
+  if (!session) throw new NotFoundError('Stocktake session');
+
+  if (session.status === StocktakeStatus.POSTED) {
+    throw new ConflictError('Stocktake session has already been posted');
+  }
+  if (session.status === StocktakeStatus.CANCELLED) {
+    throw new ValidationError('Cannot post a cancelled stocktake session');
+  }
+
+  // Ensure all counts have been entered
+  const uncounted = session.counts.filter((c) => c.countedQuantity === null);
+  if (uncounted.length > 0) {
+    throw new ValidationError(
+      `${uncounted.length} item(s) have not been counted yet. Enter all counts before posting.`,
+    );
+  }
+
+  // Post a movement for each non-zero variance
+  const variantCounts = session.counts.filter(
+    (c) => c.varianceQuantity !== null && !new Prisma.Decimal(c.varianceQuantity!).isZero(),
+  );
+
+  for (const count of variantCounts) {
+    const variance = new Prisma.Decimal(count.varianceQuantity!);
+    const movementType = variance.greaterThan(0)
+      ? MovementType.STOCKTAKE_IN
+      : MovementType.STOCKTAKE_OUT;
+    const absQty = variance.abs();
+
+    const transactionDateStr = session.sessionDate.toISOString().slice(0, 10);
+
+    await createMovement(organisationId, userId, {
+      itemId: count.itemId,
+      locationId: count.locationId ?? undefined,
+      movementType,
+      quantity: absQty.toNumber(),
+      unitCost: new Prisma.Decimal(count.unitCost).toNumber(),
+      periodId,
+      reference: `STOCKTAKE-${session.name}`,
+      description: `Stocktake variance: session '${session.name}'`,
+      transactionDate: transactionDateStr,
+    });
+  }
+
+  return prisma.stocktakeSession.update({
+    where: { id: sessionId },
+    data: {
+      status: StocktakeStatus.POSTED,
+      postedBy: userId,
+      postedAt: new Date(),
+    },
+  });
+}
+
+export async function cancelStocktakeSession(
+  organisationId: string,
+  sessionId: string,
+) {
+  const session = await prisma.stocktakeSession.findFirst({
+    where: { id: sessionId, organisationId },
+  });
+  if (!session) throw new NotFoundError('Stocktake session');
+
+  if (session.status !== StocktakeStatus.OPEN) {
+    throw new ValidationError(
+      `Only OPEN sessions can be cancelled (current status: ${session.status})`,
+    );
+  }
+
+  return prisma.stocktakeSession.update({
+    where: { id: sessionId },
+    data: { status: StocktakeStatus.CANCELLED },
+  });
+}
+
+// ─── Valuation ────────────────────────────────────────────────────────────────
+
+export async function getValuationReport(organisationId: string, asAt?: string) {
+  // asAt is accepted for future extension (historical point-in-time valuation).
+  // Current implementation reads live StockBalance data.
+  void asAt; // reserved
+
+  const balances = await prisma.stockBalance.findMany({
+    where: { organisationId },
+    include: {
+      item: {
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          category: true,
+          categoryId: true,
+          unit: true,
+          costMethod: true,
+          isDeleted: true,
+        },
+      },
+    },
+    orderBy: { item: { code: 'asc' } },
+  });
+
+  // Aggregate per item (sum across locations)
+  const itemMap = new Map<
+    string,
+    {
+      itemId: string;
+      code: string;
+      name: string;
+      category: string | null;
+      unit: string;
+      costMethod: string;
+      quantityOnHand: Prisma.Decimal;
+      totalValue: Prisma.Decimal;
+    }
+  >();
+
+  for (const b of balances) {
+    if (b.item.isDeleted) continue;
+
+    const existing = itemMap.get(b.itemId);
+    if (existing) {
+      existing.quantityOnHand = existing.quantityOnHand.add(
+        new Prisma.Decimal(b.quantityOnHand),
+      );
+      existing.totalValue = existing.totalValue.add(new Prisma.Decimal(b.totalValue));
+    } else {
+      itemMap.set(b.itemId, {
+        itemId: b.itemId,
+        code: b.item.code,
+        name: b.item.name,
+        category: b.item.category,
+        unit: b.item.unit,
+        costMethod: b.item.costMethod,
+        quantityOnHand: new Prisma.Decimal(b.quantityOnHand),
+        totalValue: new Prisma.Decimal(b.totalValue),
+      });
+    }
+  }
+
+  const items = Array.from(itemMap.values()).map((row) => ({
+    itemId: row.itemId,
+    code: row.code,
+    name: row.name,
+    category: row.category,
+    unit: row.unit,
+    costMethod: row.costMethod,
+    quantityOnHand: row.quantityOnHand,
+    unitCost: row.quantityOnHand.greaterThan(0)
+      ? row.totalValue.div(row.quantityOnHand)
+      : new Prisma.Decimal(0),
+    totalValue: row.totalValue,
+  }));
+
+  const grandTotal = items.reduce(
+    (acc, item) => acc.add(item.totalValue),
+    new Prisma.Decimal(0),
+  );
+
+  return { items, grandTotal };
+}
+
+export async function getStockBalance(organisationId: string, itemId: string) {
+  const item = await prisma.inventoryItem.findFirst({
+    where: { id: itemId, organisationId, isDeleted: false },
     select: {
       id: true,
       code: true,
       name: true,
-      category: true,
-      unit: true,
       costMethod: true,
-      unitCost: true,
       quantityOnHand: true,
+      unitCost: true,
+    },
+  });
+  if (!item) throw new NotFoundError('Inventory item');
+
+  const balances = await prisma.stockBalance.findMany({
+    where: { itemId, organisationId },
+    include: {
+      location: { select: { id: true, name: true } },
     },
   });
 
-  return items.map((item) => {
-    const unitCost = Number(item.unitCost);
-    const qty = Number(item.quantityOnHand);
-    return {
-      id: item.id,
-      code: item.code,
-      name: item.name,
-      category: item.category,
-      unit: item.unit,
-      costMethod: item.costMethod,
-      unitCost: item.unitCost,
-      quantityOnHand: item.quantityOnHand,
-      totalValue: new Prisma.Decimal(unitCost * qty),
-    };
-  });
+  // For FIFO: also return open lots
+  let lots: Awaited<ReturnType<typeof prisma.inventoryLot.findMany>> = [];
+  if (item.costMethod === 'FIFO') {
+    lots = await prisma.inventoryLot.findMany({
+      where: { itemId, organisationId, isClosed: false },
+      orderBy: { receivedDate: 'asc' },
+    });
+  }
+
+  return { item, balances, lots };
 }
