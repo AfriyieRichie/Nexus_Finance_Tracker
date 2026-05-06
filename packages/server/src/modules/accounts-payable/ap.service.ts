@@ -157,7 +157,8 @@ export async function postSupplierInvoice(
   const expenseLines = invoice.lines.filter((l) => l.accountId);
   if (expenseLines.length === 0) {
     const expenseAccount = await prisma.account.findFirst({
-      where: { organisationId, class: 'EXPENSE', isActive: true, isDeleted: false },
+      where: { organisationId, class: 'EXPENSE', isActive: true, isDeleted: false, isControlAccount: false },
+      orderBy: { code: 'asc' },
     });
     if (!expenseAccount) throw new ValidationError('No expense account found. Assign account IDs to invoice lines.');
     expenseLines.push({ ...invoice.lines[0], accountId: expenseAccount.id, lineTotal: invoice.totalAmount });

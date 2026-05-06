@@ -143,11 +143,13 @@ export async function runDepreciation(
 
   // Find default depreciation accounts
   const defaultDeprnExp = await prisma.account.findFirst({
-    where: { organisationId, type: 'EXPENSE_ACCOUNT', isActive: true, isDeleted: false },
+    where: { organisationId, type: 'EXPENSE_ACCOUNT', isActive: true, isDeleted: false, isControlAccount: false },
+    orderBy: { code: 'asc' },
     select: { id: true },
   });
   const defaultAccDeprn = await prisma.account.findFirst({
-    where: { organisationId, type: 'FIXED_ASSET', isActive: true, isDeleted: false },
+    where: { organisationId, type: 'FIXED_ASSET', isActive: true, isDeleted: false, isControlAccount: false },
+    orderBy: { code: 'asc' },
     select: { id: true },
   });
 

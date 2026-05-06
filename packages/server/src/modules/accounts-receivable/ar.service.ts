@@ -189,9 +189,10 @@ export async function postInvoice(organisationId: string, invoiceId: string, per
   const revenueLines = invoice.lines.filter((l) => l.accountId);
   if (revenueLines.length === 0) {
     const revenueAccount = await prisma.account.findFirst({
-      where: { organisationId, class: 'REVENUE', isActive: true, isDeleted: false },
+      where: { organisationId, class: 'REVENUE', isActive: true, isDeleted: false, isControlAccount: false },
+      orderBy: { code: 'asc' },
     });
-    if (!revenueAccount) throw new ValidationError('No revenue account found. Assign account IDs to invoice lines.');
+    if (!revenueAccount) throw new ValidationError('No revenue account found. Assign a non-control revenue account to invoice lines.');
     revenueLines.push({ ...invoice.lines[0], accountId: revenueAccount.id, lineTotal: invoice.totalAmount });
   }
 
@@ -460,7 +461,8 @@ export async function createCreditNote(organisationId: string, userId: string, i
       revenueAccountId = lineWithAccount.accountId;
     } else {
       const revenueAccount = await prisma.account.findFirst({
-        where: { organisationId, class: 'REVENUE', isActive: true, isDeleted: false },
+        where: { organisationId, class: 'REVENUE', isActive: true, isDeleted: false, isControlAccount: false },
+        orderBy: { code: 'asc' },
       });
       if (!revenueAccount) throw new ValidationError('No revenue account found');
       revenueAccountId = revenueAccount.id;
@@ -538,13 +540,14 @@ export async function writeBadDebt(organisationId: string, userId: string, input
   let expenseAccountId = input.expenseAccountId;
   if (!expenseAccountId) {
     const badDebtAccount = await prisma.account.findFirst({
-      where: { organisationId, class: 'EXPENSE', isActive: true, isDeleted: false, name: { contains: 'bad debt', mode: 'insensitive' } },
+      where: { organisationId, class: 'EXPENSE', isActive: true, isDeleted: false, isControlAccount: false, name: { contains: 'bad debt', mode: 'insensitive' } },
     });
     if (badDebtAccount) {
       expenseAccountId = badDebtAccount.id;
     } else {
       const fallbackExpense = await prisma.account.findFirst({
-        where: { organisationId, class: 'EXPENSE', isActive: true, isDeleted: false },
+        where: { organisationId, class: 'EXPENSE', isActive: true, isDeleted: false, isControlAccount: false },
+        orderBy: { code: 'asc' },
       });
       if (!fallbackExpense) throw new ValidationError('No expense account found. Specify an expense account for write-off.');
       expenseAccountId = fallbackExpense.id;
