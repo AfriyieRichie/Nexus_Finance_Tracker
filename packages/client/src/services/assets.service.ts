@@ -149,3 +149,14 @@ export async function impairAsset(organisationId: string, assetId: string, data:
   const res = await api.post(`/organisations/${organisationId}/assets/${assetId}/impair`, data);
   return res.data.data;
 }
+
+export async function bulkCreateAssets(organisationId: string, assets: Array<{
+  code: string; name: string; category: string; categoryId?: string;
+  serialNumber?: string; location?: string;
+  acquisitionDate: string; acquisitionCost: number;
+  residualValue?: number; usefulLifeMonths: number;
+  depreciationMethod?: string; unitsOfProductionTotal?: number;
+}>) {
+  const res = await api.post(`/organisations/${organisationId}/assets/bulk`, { assets });
+  return res.data.data as { created: number; codes: string[] };
+}

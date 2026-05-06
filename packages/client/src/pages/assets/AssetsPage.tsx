@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Package, Plus, Play, Eye, ChevronRight, RotateCcw, Trash2, TrendingUp, AlertTriangle, Settings } from 'lucide-react';
+import { Package, Plus, Play, Eye, ChevronRight, RotateCcw, Trash2, TrendingUp, AlertTriangle, Settings, Download, Upload } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import * as assetSvc from '@/services/assets.service';
 import { listPeriods } from '@/services/periods.service';
@@ -688,6 +688,208 @@ function DepreciationRunsTab({ organisationId }: { organisationId: string }) {
 
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
+// ─── CSV helpers ─────────────────────────────────────────────────────────────
+
+const CSV_HEADERS = [
+  'Code', 'Name', 'Category', 'Serial Number', 'Location',
+  'Acquisition Date', 'Cost', 'Residual Value', 'Useful Life (months)',
+  'Depreciation Method', 'Total Production Units',
+  'Accumulated Deprn', 'Carrying Value', 'Status',
+];
+
+function downloadCSV(assets: assetSvc.FixedAsset[]) {
+  const esc = (v: string | number) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const rows = assets.map((a) => [
+    a.code, a.name, a.category,
+    a.serialNumber ?? '', a.location ?? '',
+    new Date(a.acquisitionDate).toISOString().split('T')[0],
+    a.acquisitionCost, a.residualValue, a.usefulLifeMonths,
+    a.depreciationMethod, a.unitsOfProductionTotal ?? '',
+    a.accumulatedDeprn, a.carryingValue, a.status,
+  ]);
+  const csv = [CSV_HEADERS, ...rows].map((r) => r.map(esc).join(',')).join('\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `fixed-assets-${new Date().toISOString().split('T')[0]}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function parseCSVLine(line: string): string[] {
+  const result: string[] = [];
+  let cur = '';
+  let inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    if (line[i] === '"') {
+      if (inQ && line[i + 1] === '"') { cur += '"'; i++; }
+      else inQ = !inQ;
+    } else if (line[i] === ',' && !inQ) { result.push(cur); cur = ''; }
+    else cur += line[i];
+  }
+  result.push(cur);
+  return result;
+}
+
+type ImportRow = {
+  code: string; name: string; category: string;
+  serialNumber?: string; location?: string;
+  acquisitionDate: string; acquisitionCost: number;
+  residualValue: number; usefulLifeMonths: number;
+  depreciationMethod: string; unitsOfProductionTotal?: number;
+  _rowError?: string;
+};
+
+const VALID_METHODS = ['STRAIGHT_LINE', 'REDUCING_BALANCE', 'SUM_OF_YEARS_DIGITS', 'UNITS_OF_PRODUCTION'];
+
+function parseAssetsCSV(text: string): { rows: ImportRow[]; errors: string[] } {
+  const lines = text.trim().split(/\r?\n/);
+  if (lines.length < 2) return { rows: [], errors: ['File has no data rows'] };
+  const headers = parseCSVLine(lines[0]).map((h) => h.replace(/^"|"$/g, '').trim().toLowerCase());
+  const get = (vals: string[], header: string) => {
+    const idx = headers.indexOf(header);
+    return idx >= 0 ? (vals[idx] ?? '').trim() : '';
+  };
+
+  const rows: ImportRow[] = [];
+  const errors: string[] = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    if (!lines[i].trim()) continue;
+    const vals = parseCSVLine(lines[i]);
+    const rowErrors: string[] = [];
+
+    const code = get(vals, 'code');
+    const name = get(vals, 'name');
+    const category = get(vals, 'category');
+    const acqDate = get(vals, 'acquisition date');
+    const costStr = get(vals, 'cost');
+    const residualStr = get(vals, 'residual value') || '0';
+    const lifeStr = get(vals, 'useful life (months)');
+    const methodRaw = get(vals, 'depreciation method').toUpperCase().replace(/ /g, '_') || 'STRAIGHT_LINE';
+    const unitsStr = get(vals, 'total production units');
+
+    if (!code) rowErrors.push('Code required');
+    if (!name) rowErrors.push('Name required');
+    if (!category) rowErrors.push('Category required');
+    if (!acqDate || !/^\d{4}-\d{2}-\d{2}$/.test(acqDate)) rowErrors.push('Acquisition Date must be YYYY-MM-DD');
+    const cost = Number(costStr);
+    if (!costStr || isNaN(cost) || cost <= 0) rowErrors.push('Cost must be a positive number');
+    const life = parseInt(lifeStr);
+    if (!lifeStr || isNaN(life) || life <= 0) rowErrors.push('Useful Life must be a positive integer');
+    const method = VALID_METHODS.includes(methodRaw) ? methodRaw : null;
+    if (!method) rowErrors.push(`Unknown method "${methodRaw}"`);
+
+    const row: ImportRow = {
+      code, name, category,
+      serialNumber: get(vals, 'serial number') || undefined,
+      location: get(vals, 'location') || undefined,
+      acquisitionDate: acqDate,
+      acquisitionCost: cost,
+      residualValue: Number(residualStr) || 0,
+      usefulLifeMonths: life,
+      depreciationMethod: method ?? 'STRAIGHT_LINE',
+      unitsOfProductionTotal: unitsStr ? Number(unitsStr) : undefined,
+      _rowError: rowErrors.length > 0 ? rowErrors.join('; ') : undefined,
+    };
+    rows.push(row);
+    if (rowErrors.length > 0) errors.push(`Row ${i}: ${rowErrors.join(', ')}`);
+  }
+  return { rows, errors };
+}
+
+// ─── Import Dialog ───────────────────────────────────────────────────────────
+
+function ImportAssetsDialog({ organisationId }: { organisationId: string }) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [step, setStep] = useState<'upload' | 'preview'>('upload');
+  const [rows, setRows] = useState<ImportRow[]>([]);
+  const [parseErrors, setParseErrors] = useState<string[]>([]);
+
+  const reset = () => { setStep('upload'); setRows([]); setParseErrors([]); };
+
+  const handleFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const { rows: r, errors: errs } = parseAssetsCSV(e.target?.result as string);
+      setRows(r);
+      setParseErrors(errs);
+      setStep('preview');
+    };
+    reader.readAsText(file);
+  };
+
+  const mutation = useMutation({
+    mutationFn: () => assetSvc.bulkCreateAssets(organisationId, rows.filter((r) => !r._rowError)),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['assets'] }); setOpen(false); reset(); },
+  });
+
+  const hasErrors = parseErrors.length > 0;
+  const validCount = rows.filter((r) => !r._rowError).length;
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) reset(); }}>
+      <DialogTrigger asChild><Button variant="outline" size="sm"><Upload size={14} /> Import</Button></DialogTrigger>
+      <DialogContent title="Import Fixed Assets" description="Upload a CSV to bulk-import assets. Use Export to download a template.">
+        {step === 'upload' ? (
+          <div className="space-y-3">
+            <div className="text-xs text-muted-foreground space-y-1">
+              <p>Required columns: <strong>Code, Name, Category, Acquisition Date (YYYY-MM-DD), Cost, Useful Life (months)</strong></p>
+              <p>Optional: Serial Number, Location, Residual Value, Depreciation Method, Total Production Units</p>
+              <p>Methods: STRAIGHT_LINE · REDUCING_BALANCE · SUM_OF_YEARS_DIGITS · UNITS_OF_PRODUCTION</p>
+            </div>
+            <input type="file" accept=".csv"
+              className="text-xs block w-full border rounded p-2 cursor-pointer"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-xs">
+              {rows.length} rows parsed ·{' '}
+              <span className="text-green-600 font-medium">{validCount} valid</span> ·{' '}
+              <span className={hasErrors ? 'text-destructive font-medium' : ''}>{parseErrors.length} errors</span>
+            </p>
+            {hasErrors && (
+              <div className="text-xs text-destructive bg-destructive/10 rounded p-2 max-h-20 overflow-y-auto space-y-0.5">
+                {parseErrors.map((e, i) => <p key={i}>{e}</p>)}
+              </div>
+            )}
+            <div className="max-h-52 overflow-y-auto border rounded text-xs">
+              <table className="w-full">
+                <thead className="bg-muted/50 sticky top-0">
+                  <tr><th className="px-2 py-1.5 text-left">Code</th><th className="px-2 py-1.5 text-left">Name</th><th className="px-2 py-1.5 text-left">Category</th><th className="px-2 py-1.5 text-right">Cost</th><th className="px-2 py-1.5 text-left">Result</th></tr>
+                </thead>
+                <tbody>
+                  {rows.map((r, i) => (
+                    <tr key={i} className={`border-t ${r._rowError ? 'bg-destructive/5' : ''}`}>
+                      <td className="px-2 py-1.5 font-mono">{r.code}</td>
+                      <td className="px-2 py-1.5">{r.name}</td>
+                      <td className="px-2 py-1.5 text-muted-foreground">{r.category}</td>
+                      <td className="px-2 py-1.5 text-right">{fmt(r.acquisitionCost)}</td>
+                      <td className="px-2 py-1.5">{r._rowError ? <span className="text-destructive">{r._rowError}</span> : <span className="text-green-600">OK</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {mutation.isError && <p className="text-xs text-destructive">{errMsg(mutation.error)}</p>}
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => setStep('upload')}>Back</Button>
+              <Button size="sm" disabled={hasErrors || validCount === 0 || mutation.isPending} onClick={() => mutation.mutate()}>
+                {mutation.isPending ? 'Importing…' : `Import ${validCount} Assets`}
+              </Button>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Main Page ───────────────────────────────────────────────────────────────
+
 export function AssetsPage() {
   const activeOrganisationId = useAuthStore((s) => s.activeOrganisationId);
   const [search, setSearch] = useState('');
@@ -718,6 +920,10 @@ export function AssetsPage() {
           <p className="text-sm text-muted-foreground mt-0.5">{data?.total ?? 0} assets</p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => downloadCSV(assets)} disabled={assets.length === 0}>
+            <Download size={14} /> Export
+          </Button>
+          {activeOrganisationId && <ImportAssetsDialog organisationId={activeOrganisationId} />}
           {activeOrganisationId && <DepreciationRunDialog organisationId={activeOrganisationId} />}
           {activeOrganisationId && <NewAssetDialog organisationId={activeOrganisationId} />}
         </div>
@@ -774,6 +980,7 @@ export function AssetsPage() {
                     <TableHead className="w-24">Code</TableHead>
                     <TableHead>Name</TableHead>
                     <TableHead>Category</TableHead>
+                    <TableHead>Location</TableHead>
                     <TableHead>Method</TableHead>
                     <TableHead className="text-right">Cost</TableHead>
                     <TableHead className="text-right">Accum. Deprn</TableHead>
@@ -787,6 +994,7 @@ export function AssetsPage() {
                         <TableCell className="font-mono text-xs font-medium text-muted-foreground">{a.code}</TableCell>
                         <TableCell className="text-sm font-medium">{a.name}</TableCell>
                         <TableCell className="text-xs text-muted-foreground">{a.category}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{a.location ?? '—'}</TableCell>
                         <TableCell className="text-xs text-muted-foreground">{a.depreciationMethod.replace(/_/g, ' ')}</TableCell>
                         <TableCell className="text-right text-xs">{fmt(a.acquisitionCost)}</TableCell>
                         <TableCell className="text-right text-xs text-muted-foreground">{fmt(a.accumulatedDeprn)}</TableCell>

@@ -88,6 +88,15 @@ export const createCategorySchema = z.object({
 
 export const updateCategorySchema = createCategorySchema.partial();
 
+export const bulkCreateAssetsSchema = z.object({
+  assets: z
+    .array(
+      createAssetSchema.omit({ assetAccountId: true, deprnAccountId: true, accDeprnAccountId: true }),
+    )
+    .min(1)
+    .max(500),
+});
+
 export type CreateAssetInput = z.infer<typeof createAssetSchema>;
 export type UpdateAssetInput = z.infer<typeof updateAssetSchema>;
 export type ListAssetsQuery = z.infer<typeof listAssetsSchema>;
@@ -98,3 +107,4 @@ export type RevalueAssetInput = z.infer<typeof revalueAssetSchema>;
 export type ImpairAssetInput = z.infer<typeof impairAssetSchema>;
 export type CreateCategoryInput = z.infer<typeof createCategorySchema>;
 export type UpdateCategoryInput = z.infer<typeof updateCategorySchema>;
+export type BulkCreateAssetsInput = z.infer<typeof bulkCreateAssetsSchema>;

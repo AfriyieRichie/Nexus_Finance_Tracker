@@ -18,6 +18,7 @@ router.get('/depreciation/runs', ctrl.listDepreciationRuns);
 // Assets
 router.get('/', ctrl.listAssets);
 router.post('/', ctrl.createAsset);
+router.post('/bulk', ctrl.bulkCreateAssets);
 router.get('/:assetId', ctrl.getAsset);
 router.put('/:assetId', ctrl.updateAsset);
 router.post('/:assetId/dispose', ctrl.disposeAsset);

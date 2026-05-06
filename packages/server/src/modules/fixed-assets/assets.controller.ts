@@ -5,7 +5,7 @@ import {
   createAssetSchema, updateAssetSchema, listAssetsSchema,
   runDepreciationSchema, reverseDepreciationSchema,
   disposeAssetSchema, revalueAssetSchema, impairAssetSchema,
-  createCategorySchema, updateCategorySchema,
+  createCategorySchema, updateCategorySchema, bulkCreateAssetsSchema,
 } from './assets.schemas';
 import * as svc from './assets.service';
 
@@ -72,4 +72,10 @@ export const revalueAsset = asyncHandler(async (req: Request, res: Response) => 
 export const impairAsset = asyncHandler(async (req: Request, res: Response) => {
   const input = impairAssetSchema.parse(req.body);
   return sendSuccess(res, await svc.impairAsset(req.params.organisationId, req.params.assetId, req.user!.sub, input), 'Asset impairment recorded');
+});
+
+export const bulkCreateAssets = asyncHandler(async (req: Request, res: Response) => {
+  const input = bulkCreateAssetsSchema.parse(req.body);
+  const result = await svc.bulkCreateAssets(req.params.organisationId, input);
+  return sendCreated(res, result, `${result.created} assets imported successfully`);
 });

@@ -6,7 +6,7 @@ import type {
   CreateAssetInput, UpdateAssetInput, ListAssetsQuery,
   RunDepreciationInput, ReverseDepreciationInput,
   DisposeAssetInput, RevalueAssetInput, ImpairAssetInput,
-  CreateCategoryInput, UpdateCategoryInput,
+  CreateCategoryInput, UpdateCategoryInput, BulkCreateAssetsInput,
 } from './assets.schemas';
 
 // ─── Depreciation Formulas ───────────────────────────────────────────────────
@@ -50,6 +50,48 @@ function computeMonthlyDeprn(
     default:
       return depreciableAmount.dividedBy(usefulLifeMonths);
   }
+}
+
+// ─── Bulk Import ─────────────────────────────────────────────────────────────
+
+export async function bulkCreateAssets(organisationId: string, input: BulkCreateAssetsInput) {
+  const codes = input.assets.map((a) => a.code);
+
+  const existing = await prisma.fixedAsset.findMany({
+    where: { organisationId, code: { in: codes }, isDeleted: false },
+    select: { code: true },
+  });
+  if (existing.length > 0) {
+    throw new ConflictError(`Duplicate asset codes already exist: ${existing.map((e) => e.code).join(', ')}`);
+  }
+
+  const created = await prisma.$transaction(
+    input.assets.map((asset) => {
+      const method = asset.depreciationMethod === 'DECLINING_BALANCE' ? 'REDUCING_BALANCE' : asset.depreciationMethod;
+      const cost = new Prisma.Decimal(asset.acquisitionCost);
+      return prisma.fixedAsset.create({
+        data: {
+          organisationId,
+          code: asset.code,
+          name: asset.name,
+          description: asset.description,
+          category: asset.category,
+          categoryId: asset.categoryId,
+          serialNumber: asset.serialNumber,
+          location: asset.location,
+          acquisitionDate: new Date(asset.acquisitionDate),
+          acquisitionCost: cost,
+          residualValue: new Prisma.Decimal(asset.residualValue),
+          usefulLifeMonths: asset.usefulLifeMonths,
+          depreciationMethod: method as 'STRAIGHT_LINE' | 'REDUCING_BALANCE' | 'UNITS_OF_PRODUCTION' | 'SUM_OF_YEARS_DIGITS',
+          unitsOfProductionTotal: asset.unitsOfProductionTotal,
+          carryingValue: cost,
+        },
+      });
+    }),
+  );
+
+  return { created: created.length, codes: created.map((c) => c.code) };
 }
 
 // ─── Asset Categories ────────────────────────────────────────────────────────
