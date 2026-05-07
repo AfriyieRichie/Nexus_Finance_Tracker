@@ -26,28 +26,3 @@ organisationsRouter.patch(
   requireRole(UserRole.ORG_ADMIN),
   orgController.update,
 );
-
-// User management within organisation
-organisationsRouter.get(
-  '/:organisationId/users',
-  requireRole(UserRole.FINANCE_MANAGER),
-  orgController.listUsers,
-);
-
-organisationsRouter.post(
-  '/:organisationId/users',
-  requireRole(UserRole.ORG_ADMIN),
-  orgController.inviteUser,
-);
-
-organisationsRouter.patch(
-  '/:organisationId/users/:userId/role',
-  requireRole(UserRole.ORG_ADMIN),
-  orgController.updateUserRole,
-);
-
-organisationsRouter.delete(
-  '/:organisationId/users/:userId',
-  requireRole(UserRole.ORG_ADMIN),
-  orgController.removeUser,
-);
