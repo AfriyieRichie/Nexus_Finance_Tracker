@@ -10,13 +10,23 @@ const BCRYPT_ROUNDS = 12;
 export async function listOrgUsers(organisationId: string) {
   const orgUsers = await prisma.organisationUser.findMany({
     where: { organisationId },
-    include: {
+    select: {
+      role: true,
+      isActive: true,
+      joinedAt: true,
       user: {
         select: {
-          id: true, email: true, firstName: true, lastName: true,
-          jobTitle: true, isActive: true, isSuperAdmin: true,
-          mustChangePassword: true, lockedAt: true,
-          lastLoginAt: true, createdAt: true,
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          jobTitle: true,
+          isActive: true,
+          isSuperAdmin: true,
+          mustChangePassword: true,
+          lockedAt: true,
+          lastLoginAt: true,
+          createdAt: true,
         },
       },
     },
