@@ -112,6 +112,14 @@ enum ApprovalDecisionType {
   DELEGATED
 }
 
+enum NotificationType {
+  APPROVAL_REQUESTED
+  APPROVAL_APPROVED
+  APPROVAL_REJECTED
+  APPROVAL_ESCALATED
+  APPROVAL_DELEGATED
+}
+
 enum DepreciationMethod {
   STRAIGHT_LINE
   REDUCING_BALANCE
@@ -297,6 +305,9 @@ model User {
   approvalDecisions   ApprovalDecision[]
   approvalRequests    ApprovalRequest[]   @relation("ApprovalRequestedBy")
   approvalLevelUsers  ApprovalLevelUser[]
+  delegationsFrom     ApprovalDelegation[] @relation("DelegationFrom")
+  delegationsTo       ApprovalDelegation[] @relation("DelegationTo")
+  notifications       Notification[]
   auditLogs           AuditLog[]
 
   @@index([email])
@@ -379,6 +390,8 @@ model Organisation {
   payrollStatutoryConfigs PayrollStatutoryConfig[]
   invoices                Invoice[]
   supplierInvoices        SupplierInvoice[]
+  approvalDelegations     ApprovalDelegation[]
+  notifications           Notification[]
 
   @@map("organisations")
 }
@@ -647,6 +660,8 @@ model ApprovalRequest {
   currentLevel Int                   @default(1)
   comments     String?
   completedAt  DateTime?
+  slaDeadline  DateTime?
+  escalatedAt  DateTime?
 
   workflow  ApprovalWorkflow   @relation(fields: [workflowId], references: [id])
   requester User               @relation("ApprovalRequestedBy", fields: [requestedBy], references: [id])
@@ -673,6 +688,47 @@ model ApprovalDecision {
 
   @@index([approvalRequestId])
   @@map("approval_decisions")
+}
+
+model ApprovalDelegation {
+  id             String   @id @default(uuid())
+  organisationId String
+  workflowId     String?
+  delegatedBy    String
+  delegatedTo    String
+  validFrom      DateTime @db.Date
+  validTo        DateTime @db.Date
+  isActive       Boolean  @default(true)
+  reason         String?
+  createdAt      DateTime @default(now())
+
+  organisation Organisation @relation(fields: [organisationId], references: [id])
+  delegator    User         @relation("DelegationFrom", fields: [delegatedBy], references: [id])
+  delegatee    User         @relation("DelegationTo",   fields: [delegatedTo], references: [id])
+
+  @@index([organisationId, isActive])
+  @@index([delegatedTo, isActive])
+  @@map("approval_delegations")
+}
+
+model Notification {
+  id             String           @id @default(uuid())
+  userId         String
+  organisationId String
+  type           NotificationType
+  title          String
+  body           String
+  entityId       String?
+  entityType     String?
+  isRead         Boolean          @default(false)
+  createdAt      DateTime         @default(now())
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organisation Organisation @relation(fields: [organisationId], references: [id])
+
+  @@index([userId, isRead])
+  @@index([organisationId])
+  @@map("notifications")
 }
 
 // ============================================================

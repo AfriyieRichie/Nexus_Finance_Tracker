@@ -20,10 +20,13 @@ import {
   Receipt,
   CheckCircle,
   Shield,
+  Bell,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth.store';
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { getUnreadCount } from '@/services/approvals.service';
 
 interface NavItem {
   label: string;
@@ -98,6 +101,13 @@ export function Sidebar() {
 
   const activeOrg = user?.organisations.find((o) => o.organisationId === activeOrganisationId);
 
+  const { data: unreadCount = 0 } = useQuery({
+    queryKey: ['notifications-unread', activeOrganisationId],
+    queryFn: () => getUnreadCount(activeOrganisationId ?? ''),
+    enabled: !!activeOrganisationId,
+    refetchInterval: 30_000,
+  });
+
   function handleLogout() {
     logout();
     void navigate('/login');
@@ -110,7 +120,15 @@ export function Sidebar() {
         <div className="w-7 h-7 rounded-md bg-primary flex items-center justify-center">
           <BarChart3 size={14} className="text-primary-foreground" />
         </div>
-        <span className="font-semibold text-sm tracking-tight">Nexus Accounting</span>
+        <span className="font-semibold text-sm tracking-tight flex-1">Nexus Accounting</span>
+        <NavLink to="/approvals" className="relative p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground">
+          <Bell size={15} />
+          {unreadCount > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] rounded-full bg-destructive text-[9px] font-bold text-white flex items-center justify-center px-0.5">
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </span>
+          )}
+        </NavLink>
       </div>
 
       {/* Org switcher */}

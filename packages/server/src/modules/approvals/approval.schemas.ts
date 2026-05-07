@@ -20,6 +20,7 @@ export const createLevelSchema = z.object({
   amountThresholdMin: z.number().min(0).optional(),
   amountThresholdMax: z.number().min(0).optional(),
   escalationHours: z.number().int().min(1).optional(),
+  escalateTo: z.string().uuid().optional(),
 });
 
 export const addApproverSchema = z.object({

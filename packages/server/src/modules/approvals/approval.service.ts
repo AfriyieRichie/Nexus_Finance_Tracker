@@ -4,6 +4,7 @@ import {
   ApprovalType,
   ApprovalDecisionType,
   ApprovalRequestStatus,
+  NotificationType,
   EntryStatus,
 } from '@prisma/client';
 import { prisma } from '../../config/database';
@@ -20,6 +21,32 @@ import type {
   AddApproverInput,
   DecisionInput,
 } from './approval.schemas';
+
+// ─── Notification helper ──────────────────────────────────────────────────────
+
+async function notify(
+  userIds: string[],
+  organisationId: string,
+  type: NotificationType,
+  title: string,
+  body: string,
+  entityId?: string,
+  entityType?: string,
+) {
+  if (userIds.length === 0) return;
+  await prisma.notification.createMany({
+    data: userIds.map((userId) => ({
+      userId,
+      organisationId,
+      type,
+      title,
+      body,
+      entityId: entityId ?? null,
+      entityType: entityType ?? null,
+    })),
+    skipDuplicates: true,
+  });
+}
 
 // ─── Workflow CRUD ────────────────────────────────────────────────────────────
 
@@ -81,11 +108,7 @@ export async function updateWorkflow(
   await getWorkflow(organisationId, workflowId);
   return prisma.approvalWorkflow.update({
     where: { id: workflowId },
-    data: {
-      name: input.name,
-      description: input.description,
-      isActive: input.isActive,
-    },
+    data: { name: input.name, description: input.description, isActive: input.isActive },
   });
 }
 
@@ -112,33 +135,24 @@ export async function addLevel(
   const existing = await prisma.approvalLevel.findFirst({
     where: { workflowId, levelNumber: input.levelNumber },
   });
-  if (existing) {
-    throw new ConflictError(`Level ${input.levelNumber} already exists in this workflow`);
-  }
+  if (existing) throw new ConflictError(`Level ${input.levelNumber} already exists in this workflow`);
 
   return prisma.approvalLevel.create({
     data: {
       workflowId,
-      levelNumber: input.levelNumber,
-      name: input.name,
-      approvalType: input.approvalType,
-      amountThresholdMin: input.amountThresholdMin != null
-        ? new Prisma.Decimal(input.amountThresholdMin)
-        : null,
-      amountThresholdMax: input.amountThresholdMax != null
-        ? new Prisma.Decimal(input.amountThresholdMax)
-        : null,
-      escalationHours: input.escalationHours ?? null,
+      levelNumber:        input.levelNumber,
+      name:               input.name,
+      approvalType:       input.approvalType,
+      amountThresholdMin: input.amountThresholdMin != null ? new Prisma.Decimal(input.amountThresholdMin) : null,
+      amountThresholdMax: input.amountThresholdMax != null ? new Prisma.Decimal(input.amountThresholdMax) : null,
+      escalationHours:    input.escalationHours ?? null,
+      escalateTo:         input.escalateTo ?? null,
     },
     include: { approvers: true },
   });
 }
 
-export async function removeLevel(
-  organisationId: string,
-  workflowId: string,
-  levelId: string,
-) {
+export async function removeLevel(organisationId: string, workflowId: string, levelId: string) {
   await getWorkflow(organisationId, workflowId);
   const level = await prisma.approvalLevel.findFirst({ where: { id: levelId, workflowId } });
   if (!level) throw new NotFoundError('Approval level not found');
@@ -155,15 +169,12 @@ export async function addApprover(
   const level = await prisma.approvalLevel.findFirst({ where: { id: levelId, workflowId } });
   if (!level) throw new NotFoundError('Approval level not found');
 
-  // Verify user belongs to this org
   const orgUser = await prisma.organisationUser.findFirst({
     where: { organisationId, userId: input.userId, isActive: true },
   });
   if (!orgUser) throw new NotFoundError('User not found in this organisation');
 
-  const existing = await prisma.approvalLevelUser.findFirst({
-    where: { levelId, userId: input.userId },
-  });
+  const existing = await prisma.approvalLevelUser.findFirst({ where: { levelId, userId: input.userId } });
   if (existing) throw new ConflictError('User is already an approver for this level');
 
   return prisma.approvalLevelUser.create({
@@ -179,11 +190,146 @@ export async function removeApprover(
   userId: string,
 ) {
   await getWorkflow(organisationId, workflowId);
-  const entry = await prisma.approvalLevelUser.findFirst({
-    where: { levelId, userId },
-  });
+  const entry = await prisma.approvalLevelUser.findFirst({ where: { levelId, userId } });
   if (!entry) throw new NotFoundError('Approver not found in this level');
   await prisma.approvalLevelUser.delete({ where: { id: entry.id } });
+}
+
+// ─── Delegations ──────────────────────────────────────────────────────────────
+
+export async function createDelegation(
+  organisationId: string,
+  delegatedBy: string,
+  input: { delegatedTo: string; validFrom: string; validTo: string; workflowId?: string; reason?: string },
+) {
+  const orgUser = await prisma.organisationUser.findFirst({
+    where: { organisationId, userId: input.delegatedTo, isActive: true },
+  });
+  if (!orgUser) throw new NotFoundError('Delegate user not found in this organisation');
+
+  if (input.delegatedTo === delegatedBy) throw new ValidationError('Cannot delegate to yourself');
+
+  const from = new Date(input.validFrom);
+  const to   = new Date(input.validTo);
+  if (to <= from) throw new ValidationError('validTo must be after validFrom');
+
+  return prisma.approvalDelegation.create({
+    data: {
+      organisationId,
+      delegatedBy,
+      delegatedTo: input.delegatedTo,
+      validFrom:   from,
+      validTo:     to,
+      workflowId:  input.workflowId ?? null,
+      reason:      input.reason ?? null,
+      isActive:    true,
+    },
+    include: {
+      delegator: { select: { id: true, firstName: true, lastName: true } },
+      delegatee: { select: { id: true, firstName: true, lastName: true } },
+    },
+  });
+}
+
+export async function listDelegations(organisationId: string, userId?: string) {
+  return prisma.approvalDelegation.findMany({
+    where: {
+      organisationId,
+      ...(userId && { OR: [{ delegatedBy: userId }, { delegatedTo: userId }] }),
+    },
+    orderBy: { createdAt: 'desc' },
+    include: {
+      delegator: { select: { id: true, firstName: true, lastName: true } },
+      delegatee: { select: { id: true, firstName: true, lastName: true } },
+    },
+  });
+}
+
+export async function revokeDelegation(organisationId: string, id: string, userId: string) {
+  const delegation = await prisma.approvalDelegation.findFirst({
+    where: { id, organisationId },
+  });
+  if (!delegation) throw new NotFoundError('Delegation not found');
+  if (delegation.delegatedBy !== userId) throw new ForbiddenError('Only the delegator can revoke this delegation');
+
+  return prisma.approvalDelegation.update({
+    where: { id },
+    data:  { isActive: false },
+  });
+}
+
+// ─── Check if user can act via delegation ─────────────────────────────────────
+
+async function getEffectiveApproverIds(
+  levelApproverIds: string[],
+  workflowId: string,
+  organisationId: string,
+): Promise<Set<string>> {
+  const now = new Date();
+  const effectiveIds = new Set(levelApproverIds);
+
+  // Find active delegations pointing to any level approver, valid today
+  const delegations = await prisma.approvalDelegation.findMany({
+    where: {
+      organisationId,
+      isActive:    true,
+      validFrom:   { lte: now },
+      validTo:     { gte: now },
+      delegatedBy: { in: levelApproverIds },
+      OR: [{ workflowId }, { workflowId: null }],
+    },
+  });
+
+  for (const d of delegations) {
+    effectiveIds.add(d.delegatedTo);
+  }
+
+  return effectiveIds;
+}
+
+// ─── Escalation check ─────────────────────────────────────────────────────────
+
+async function checkAndEscalate(
+  request: {
+    id: string;
+    status: ApprovalRequestStatus;
+    slaDeadline: Date | null;
+    escalatedAt: Date | null;
+    currentLevel: number;
+    workflowId: string;
+    entityType: ApprovalEntityType;
+  },
+  organisationId: string,
+) {
+  if (request.status !== ApprovalRequestStatus.PENDING) return;
+  if (!request.slaDeadline || request.escalatedAt) return;
+  if (new Date() < request.slaDeadline) return;
+
+  const currentLevel = await prisma.approvalLevel.findFirst({
+    where:   { workflowId: request.workflowId, levelNumber: request.currentLevel },
+    include: { approvers: { include: { user: { select: { id: true } } } } },
+  });
+
+  await prisma.approvalRequest.update({
+    where: { id: request.id },
+    data:  { status: ApprovalRequestStatus.ESCALATED, escalatedAt: new Date() },
+  });
+
+  const notifyIds: string[] = [];
+  if (currentLevel?.escalateTo) notifyIds.push(currentLevel.escalateTo);
+  if (notifyIds.length === 0 && currentLevel) {
+    notifyIds.push(...currentLevel.approvers.map((a) => a.user.id));
+  }
+
+  await notify(
+    notifyIds,
+    organisationId,
+    NotificationType.APPROVAL_ESCALATED,
+    'Approval Request Escalated',
+    `Request for ${request.entityType.replace(/_/g, ' ')} has exceeded its SLA and been escalated to you.`,
+    request.id,
+    'APPROVAL_REQUEST',
+  );
 }
 
 // ─── Requests ─────────────────────────────────────────────────────────────────
@@ -191,22 +337,33 @@ export async function removeApprover(
 export async function listRequests(
   organisationId: string,
   status?: ApprovalRequestStatus,
+  userId?: string,
 ) {
-  return prisma.approvalRequest.findMany({
+  const requests = await prisma.approvalRequest.findMany({
     where: {
       workflow: { organisationId },
       ...(status && { status }),
+      ...(userId && { requestedBy: userId }),
     },
     orderBy: { requestedAt: 'desc' },
     include: {
       requester: { select: { id: true, firstName: true, lastName: true } },
-      workflow: { select: { name: true, entityType: true } },
+      workflow:  { select: { name: true, entityType: true } },
       decisions: {
         orderBy: { decidedAt: 'desc' },
         include: { decider: { select: { id: true, firstName: true, lastName: true } } },
       },
     },
   });
+
+  // Trigger escalation check on all pending requests
+  await Promise.all(
+    requests
+      .filter((r) => r.status === ApprovalRequestStatus.PENDING && r.slaDeadline && !r.escalatedAt)
+      .map((r) => checkAndEscalate(r as Parameters<typeof checkAndEscalate>[0], organisationId)),
+  );
+
+  return requests;
 }
 
 export async function getRequest(organisationId: string, requestId: string) {
@@ -224,15 +381,21 @@ export async function getRequest(organisationId: string, requestId: string) {
       requester: { select: { id: true, firstName: true, lastName: true } },
       decisions: {
         orderBy: { decidedAt: 'asc' },
-        include: { decider: { select: { id: true, firstName: true, lastName: true } } },
+        include: {
+          decider: { select: { id: true, firstName: true, lastName: true } },
+        },
       },
     },
   });
   if (!req) throw new NotFoundError('Approval request not found');
+
+  // Lazy escalation check
+  await checkAndEscalate(req, organisationId);
+
   return req;
 }
 
-// ─── Create Request (called from journal submit) ───────────────────────────────
+// ─── Create Request ───────────────────────────────────────────────────────────
 
 export async function createJournalApprovalRequest(
   organisationId: string,
@@ -241,23 +404,64 @@ export async function createJournalApprovalRequest(
 ): Promise<{ requestId: string; hasWorkflow: boolean }> {
   const workflow = await prisma.approvalWorkflow.findFirst({
     where: { organisationId, entityType: ApprovalEntityType.JOURNAL_ENTRY, isActive: true },
-    include: { levels: { orderBy: { levelNumber: 'asc' }, take: 1 } },
+    include: { levels: { orderBy: { levelNumber: 'asc' } } },
   });
 
   if (!workflow || workflow.levels.length === 0) {
     return { requestId: '', hasWorkflow: false };
   }
 
+  // Get journal amount for threshold evaluation
+  const journal = await prisma.journalEntry.findUnique({
+    where: { id: journalId },
+    include: { lines: { select: { debitAmount: true } } },
+  });
+  const amount = journal?.lines.reduce((s, l) => s + Number(l.debitAmount), 0) ?? 0;
+
+  // Find first applicable level (respecting amount thresholds)
+  const firstLevel = workflow.levels.find((l) => {
+    const min = l.amountThresholdMin ? Number(l.amountThresholdMin) : 0;
+    const max = l.amountThresholdMax ? Number(l.amountThresholdMax) : Infinity;
+    return amount >= min && amount <= max;
+  }) ?? workflow.levels[0];
+
+  // Compute SLA deadline from smallest escalationHours across applicable levels
+  const escalationHours = workflow.levels
+    .filter((l) => l.escalationHours != null)
+    .map((l) => l.escalationHours!)
+    .sort((a, b) => a - b)[0];
+  const slaDeadline = escalationHours
+    ? new Date(Date.now() + escalationHours * 60 * 60 * 1000)
+    : null;
+
   const request = await prisma.approvalRequest.create({
     data: {
-      workflowId: workflow.id,
-      entityType: ApprovalEntityType.JOURNAL_ENTRY,
-      entityId: journalId,
+      workflowId:   workflow.id,
+      entityType:   ApprovalEntityType.JOURNAL_ENTRY,
+      entityId:     journalId,
       requestedBy,
-      currentLevel: workflow.levels[0].levelNumber,
-      status: ApprovalRequestStatus.PENDING,
+      currentLevel: firstLevel.levelNumber,
+      status:       ApprovalRequestStatus.PENDING,
+      slaDeadline,
     },
   });
+
+  // Notify all level-1 approvers
+  const level1 = await prisma.approvalLevel.findFirst({
+    where: { workflowId: workflow.id, levelNumber: firstLevel.levelNumber },
+    include: { approvers: { select: { userId: true } } },
+  });
+  if (level1) {
+    await notify(
+      level1.approvers.map((a) => a.userId),
+      organisationId,
+      NotificationType.APPROVAL_REQUESTED,
+      'Approval Required',
+      `A journal entry has been submitted for your approval.`,
+      request.id,
+      'APPROVAL_REQUEST',
+    );
+  }
 
   return { requestId: request.id, hasWorkflow: true };
 }
@@ -276,15 +480,27 @@ export async function decide(
     throw new ForbiddenError(`Request is already ${request.status.toLowerCase()}`);
   }
 
-  // Find current level config
   const currentLevel = request.workflow.levels.find(
     (l) => l.levelNumber === request.currentLevel,
   );
   if (!currentLevel) throw new ValidationError('Current approval level not configured');
 
-  // Verify this user is an approver for this level
-  const isApprover = currentLevel.approvers.some((a) => a.user.id === userId);
-  if (!isApprover) {
+  // ── Segregation of Duties ──────────────────────────────────────────────────
+  if (userId === request.requestedBy) {
+    throw new ForbiddenError(
+      'Segregation of duties violation: the person who submitted this request cannot approve it.',
+    );
+  }
+
+  // Verify user is an approver at this level (direct or via active delegation)
+  const levelApproverIds = currentLevel.approvers.map((a) => a.user.id);
+  const effectiveApprovers = await getEffectiveApproverIds(
+    levelApproverIds,
+    request.workflowId,
+    organisationId,
+  );
+
+  if (!effectiveApprovers.has(userId)) {
     throw new ForbiddenError('You are not an approver for the current level of this request');
   }
 
@@ -292,68 +508,77 @@ export async function decide(
   const alreadyDecided = await prisma.approvalDecision.findFirst({
     where: { approvalRequestId: requestId, levelNumber: request.currentLevel, decidedBy: userId },
   });
-  if (alreadyDecided) {
-    throw new ConflictError('You have already submitted a decision for this level');
-  }
+  if (alreadyDecided) throw new ConflictError('You have already submitted a decision for this level');
 
   if (input.decision === ApprovalDecisionType.REJECTED) {
-    return handleRejection(request, userId, input.comments);
+    return handleRejection(request, userId, input.comments, organisationId);
   }
 
   if (input.decision === ApprovalDecisionType.DELEGATED) {
     if (!input.delegatedTo) throw new ValidationError('delegatedTo is required when delegating');
-    return handleDelegation(request, userId, input.delegatedTo, input.comments);
+    return handleDelegation(request, userId, input.delegatedTo, input.comments, organisationId);
   }
 
   // APPROVED — record decision and check if level is now satisfied
   await prisma.approvalDecision.create({
     data: {
       approvalRequestId: requestId,
-      levelNumber: request.currentLevel,
-      decidedBy: userId,
-      decision: ApprovalDecisionType.APPROVED,
-      comments: input.comments ?? null,
+      levelNumber:       request.currentLevel,
+      decidedBy:         userId,
+      decision:          ApprovalDecisionType.APPROVED,
+      comments:          input.comments ?? null,
     },
   });
 
-  return checkLevelSatisfied(request, currentLevel);
+  return checkLevelSatisfied(request, currentLevel, organisationId);
 }
 
 async function handleRejection(
   request: Awaited<ReturnType<typeof getRequest>>,
   userId: string,
-  comments?: string,
+  comments: string | undefined,
+  organisationId: string,
 ) {
   await prisma.approvalDecision.create({
     data: {
       approvalRequestId: request.id,
-      levelNumber: request.currentLevel,
-      decidedBy: userId,
-      decision: ApprovalDecisionType.REJECTED,
-      comments: comments ?? null,
+      levelNumber:       request.currentLevel,
+      decidedBy:         userId,
+      decision:          ApprovalDecisionType.REJECTED,
+      comments:          comments ?? null,
     },
   });
 
-  // Mark request rejected
   await prisma.approvalRequest.update({
     where: { id: request.id },
-    data: { status: ApprovalRequestStatus.REJECTED, completedAt: new Date() },
+    data:  { status: ApprovalRequestStatus.REJECTED, completedAt: new Date() },
   });
 
-  // Return journal to DRAFT
   if (request.entityType === ApprovalEntityType.JOURNAL_ENTRY) {
+    const existing = await prisma.journalEntry.findUnique({
+      where: { id: request.entityId },
+      select: { description: true },
+    });
     await prisma.journalEntry.update({
       where: { id: request.entityId },
       data: {
         status: EntryStatus.DRAFT,
-        description: {
-          set: comments
-            ? `[REJECTED by approver: ${comments}] ${(await prisma.journalEntry.findUnique({ where: { id: request.entityId }, select: { description: true } }))?.description ?? ''}`
-            : undefined,
-        },
+        ...(comments && {
+          description: `[REJECTED: ${comments}] ${existing?.description ?? ''}`.trim(),
+        }),
       },
     });
   }
+
+  await notify(
+    [request.requestedBy],
+    organisationId,
+    NotificationType.APPROVAL_REJECTED,
+    'Request Rejected',
+    `Your ${request.entityType.replace(/_/g, ' ')} approval request was rejected.${comments ? ` Reason: ${comments}` : ''}`,
+    request.id,
+    'APPROVAL_REQUEST',
+  );
 
   return { status: 'REJECTED', requestId: request.id };
 }
@@ -362,20 +587,21 @@ async function handleDelegation(
   request: Awaited<ReturnType<typeof getRequest>>,
   userId: string,
   delegatedTo: string,
-  comments?: string,
+  comments: string | undefined,
+  organisationId: string,
 ) {
   await prisma.approvalDecision.create({
     data: {
       approvalRequestId: request.id,
-      levelNumber: request.currentLevel,
-      decidedBy: userId,
-      decision: ApprovalDecisionType.DELEGATED,
-      comments: comments ?? null,
+      levelNumber:       request.currentLevel,
+      decidedBy:         userId,
+      decision:          ApprovalDecisionType.DELEGATED,
+      comments:          comments ?? null,
       delegatedTo,
     },
   });
 
-  // Add delegatee as approver for this level (so they can then decide)
+  // Add delegatee as approver for this level if not already
   const currentLevel = request.workflow.levels.find(
     (l) => l.levelNumber === request.currentLevel,
   );
@@ -388,66 +614,135 @@ async function handleDelegation(
     }
   }
 
+  await notify(
+    [delegatedTo],
+    organisationId,
+    NotificationType.APPROVAL_DELEGATED,
+    'Approval Delegated to You',
+    `An approval request has been delegated to you.`,
+    request.id,
+    'APPROVAL_REQUEST',
+  );
+
   return { status: 'DELEGATED', requestId: request.id };
 }
 
 async function checkLevelSatisfied(
   request: Awaited<ReturnType<typeof getRequest>>,
   currentLevel: Awaited<ReturnType<typeof getRequest>>['workflow']['levels'][0],
+  organisationId: string,
 ) {
   const decisions = await prisma.approvalDecision.findMany({
     where: {
       approvalRequestId: request.id,
-      levelNumber: request.currentLevel,
-      decision: ApprovalDecisionType.APPROVED,
+      levelNumber:       request.currentLevel,
+      decision:          ApprovalDecisionType.APPROVED,
     },
   });
 
-  const approvalCount = decisions.length;
+  const approvalCount    = decisions.length;
   const requiredApprovers = currentLevel.approvers.length;
   let satisfied = false;
 
   switch (currentLevel.approvalType) {
-    case ApprovalType.ANY_ONE:
-      satisfied = approvalCount >= 1;
-      break;
-    case ApprovalType.ALL_REQUIRED:
-      satisfied = approvalCount >= requiredApprovers;
-      break;
-    case ApprovalType.MAJORITY:
-      satisfied = requiredApprovers > 0 && approvalCount > requiredApprovers / 2;
-      break;
+    case ApprovalType.ANY_ONE:    satisfied = approvalCount >= 1; break;
+    case ApprovalType.ALL_REQUIRED: satisfied = approvalCount >= requiredApprovers; break;
+    case ApprovalType.MAJORITY:   satisfied = requiredApprovers > 0 && approvalCount > requiredApprovers / 2; break;
   }
 
   if (!satisfied) {
     return { status: 'PENDING', requestId: request.id, message: `${approvalCount}/${requiredApprovers} approvals recorded` };
   }
 
-  // Level satisfied — advance to next level or complete
+  // Level satisfied — advance to next or complete
   const nextLevel = request.workflow.levels.find(
     (l) => l.levelNumber > request.currentLevel,
   );
 
   if (nextLevel) {
+    // Recompute SLA deadline for next level
+    const slaDeadline = nextLevel.escalationHours
+      ? new Date(Date.now() + nextLevel.escalationHours * 60 * 60 * 1000)
+      : null;
+
     await prisma.approvalRequest.update({
       where: { id: request.id },
-      data: { currentLevel: nextLevel.levelNumber },
+      data:  { currentLevel: nextLevel.levelNumber, slaDeadline, escalatedAt: null },
     });
+
+    const nextLevelData = await prisma.approvalLevel.findFirst({
+      where: { workflowId: request.workflowId, levelNumber: nextLevel.levelNumber },
+      include: { approvers: { select: { userId: true } } },
+    });
+    if (nextLevelData) {
+      await notify(
+        nextLevelData.approvers.map((a) => a.userId),
+        organisationId,
+        NotificationType.APPROVAL_REQUESTED,
+        'Approval Required — Next Level',
+        `An approval request has advanced to level ${nextLevel.levelNumber} and requires your review.`,
+        request.id,
+        'APPROVAL_REQUEST',
+      );
+    }
+
     return { status: 'ADVANCED', requestId: request.id, nextLevel: nextLevel.levelNumber };
   }
 
-  // All levels complete — approve the entity
+  // All levels complete
   await prisma.approvalRequest.update({
     where: { id: request.id },
-    data: { status: ApprovalRequestStatus.APPROVED, completedAt: new Date() },
+    data:  { status: ApprovalRequestStatus.APPROVED, completedAt: new Date() },
   });
 
   if (request.entityType === ApprovalEntityType.JOURNAL_ENTRY) {
     await prisma.journalEntry.update({
       where: { id: request.entityId },
-      data: { status: EntryStatus.APPROVED, approvedAt: new Date() },
+      data:  { status: EntryStatus.APPROVED, approvedAt: new Date() },
     });
   }
 
+  await notify(
+    [request.requestedBy],
+    organisationId,
+    NotificationType.APPROVAL_APPROVED,
+    'Request Approved',
+    `Your ${request.entityType.replace(/_/g, ' ')} approval request has been fully approved.`,
+    request.id,
+    'APPROVAL_REQUEST',
+  );
+
   return { status: 'APPROVED', requestId: request.id };
+}
+
+// ─── Notifications ────────────────────────────────────────────────────────────
+
+export async function listNotifications(organisationId: string, userId: string, unreadOnly = false) {
+  return prisma.notification.findMany({
+    where: {
+      userId,
+      organisationId,
+      ...(unreadOnly && { isRead: false }),
+    },
+    orderBy: { createdAt: 'desc' },
+    take:    50,
+  });
+}
+
+export async function markNotificationsRead(organisationId: string, userId: string, ids?: string[]) {
+  await prisma.notification.updateMany({
+    where: {
+      userId,
+      organisationId,
+      isRead: false,
+      ...(ids && ids.length > 0 && { id: { in: ids } }),
+    },
+    data: { isRead: true },
+  });
+}
+
+export async function getUnreadCount(organisationId: string, userId: string) {
+  return prisma.notification.count({
+    where: { userId, organisationId, isRead: false },
+  });
 }
