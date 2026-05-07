@@ -14,13 +14,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogTrigger, DialogClose } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 
-const ASSET_CATEGORIES = [
-  'Land', 'Buildings & Structures', 'Leasehold Improvements', 'Plant & Machinery',
-  'Equipment', 'Office Equipment', 'Computer Hardware', 'Computer Software',
-  'Motor Vehicles', 'Furniture & Fittings', 'Tools & Instruments',
-  'Right-of-Use Assets (IFRS 16)', 'Investment Property', 'Biological Assets',
-  'Intangible Assets', 'Other Fixed Assets',
-];
 
 const STATUS_VARIANT: Record<string, 'success' | 'warning' | 'secondary' | 'destructive'> = {
   ACTIVE: 'success',
@@ -43,7 +36,7 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({
-    code: '', name: '', category: 'Equipment', categoryId: '',
+    code: '', name: '', category: '', categoryId: '',
     serialNumber: '', location: '',
     acquisitionDate: new Date().toISOString().split('T')[0],
     acquisitionCost: '', residualValue: '0',
@@ -55,7 +48,7 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
   const { data: categories = [] } = useQuery({
     queryKey: ['asset-categories', organisationId],
     queryFn: () => assetSvc.listCategories(organisationId),
-    enabled: open,
+    enabled: !!organisationId,
   });
 
   const onCategoryChange = (catId: string) => {
@@ -96,15 +89,12 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
             <div><label className="text-xs font-medium mb-1 block">Code *</label>
               <Input value={form.code} onChange={(e) => set('code', e.target.value)} placeholder="FA001" className="h-8 text-xs" /></div>
             <div><label className="text-xs font-medium mb-1 block">Category</label>
-              {categories.length > 0 ? (
-                <Select value={form.categoryId} onChange={(e) => onCategoryChange(e.target.value)} className="h-8 text-xs">
-                  <option value="">— Select category —</option>
-                  {categories.map((c) => <option key={c.id} value={c.id}>{c.code} · {c.name}</option>)}
-                </Select>
-              ) : (
-                <Select value={form.category} onChange={(e) => set('category', e.target.value)} className="h-8 text-xs">
-                  {ASSET_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                </Select>
+              <Select value={form.categoryId} onChange={(e) => onCategoryChange(e.target.value)} className="h-8 text-xs" disabled={categories.length === 0}>
+                <option value="">{categories.length === 0 ? '— Create a category first —' : '— Select category —'}</option>
+                {categories.map((c) => <option key={c.id} value={c.id}>{c.code} · {c.name}</option>)}
+              </Select>
+              {categories.length === 0 && (
+                <p className="text-[10px] text-amber-600 mt-1">No categories defined. Go to the Categories tab to create one with GL accounts before adding assets.</p>
               )}</div>
           </div>
           <div><label className="text-xs font-medium mb-1 block">Name *</label>
