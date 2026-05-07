@@ -278,9 +278,16 @@ export async function changePassword(
 
   const newHash = await bcrypt.hash(input.newPassword, BCRYPT_ROUNDS);
   await prisma.$transaction([
-    prisma.user.update({ where: { id: userId }, data: { passwordHash: newHash, mustChangePassword: false, failedLoginAttempts: 0, lockedAt: null } }),
+    prisma.user.update({ where: { id: userId }, data: { passwordHash: newHash } }),
     prisma.refreshToken.updateMany({ where: { userId }, data: { isRevoked: true } }),
   ]);
+  // Use raw SQL for newly-added columns so this works even if Prisma client
+  // was generated before the schema migration was applied on the server.
+  await prisma.$executeRaw`
+    UPDATE users
+    SET "mustChangePassword" = false, "failedLoginAttempts" = 0, "lockedAt" = NULL
+    WHERE id = ${userId}
+  `;
 
   auditLog({
     userId,

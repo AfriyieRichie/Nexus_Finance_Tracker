@@ -24,7 +24,8 @@ export function ForcePasswordChangePage() {
       void navigate('/dashboard', { replace: true });
     },
     onError: (err: unknown) => {
-      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      const data = (err as { response?: { data?: { error?: { message?: string }; message?: string } } })?.response?.data;
+      const msg = data?.error?.message ?? data?.message;
       setError(msg ?? 'Failed to change password. Please try again.');
     },
   });
