@@ -85,6 +85,102 @@ export interface DrilldownResult {
   entries: DrilldownEntry[];
 }
 
+// ─── Income Statement types (IAS 1 enhanced) ──────────────────────────────────
+
+export interface ISLine {
+  accountId: string;
+  code: string;
+  name: string;
+  type: string;
+  subClass: string | null;
+  current: string;
+  ytd: string;
+  priorPeriod: string | null;
+  priorYear: string | null;
+  pctOfRevenue: string | null;
+}
+
+export interface ISGroup {
+  label: string;
+  lines: ISLine[];
+  subtotal: string;
+  ytdSubtotal: string;
+  priorPeriodSubtotal: string | null;
+  priorYearSubtotal: string | null;
+  pctOfRevenue: string | null;
+}
+
+export interface ISSection {
+  label: string;
+  groups: ISGroup[];
+  subtotal: string;
+  ytdSubtotal: string;
+  priorPeriodSubtotal: string | null;
+  priorYearSubtotal: string | null;
+  pctOfRevenue: string | null;
+}
+
+export interface ISSubtotalLine {
+  label: string;
+  current: string;
+  ytd: string;
+  priorPeriod: string | null;
+  priorYear: string | null;
+  pctOfRevenue: string | null;
+}
+
+export interface IncomeStatementResult {
+  organisation: { id: string; name: string; currency: string };
+  period: {
+    fromDate: string;
+    toDate: string;
+    ytdFromDate: string;
+    priorPeriodFromDate: string | null;
+    priorPeriodToDate: string | null;
+    priorYearFromDate: string | null;
+    priorYearToDate: string | null;
+    comparisons: ('prior_period' | 'prior_year')[];
+  };
+  revenue: ISSection;
+  costOfSales: ISSection;
+  grossProfit: ISSubtotalLine;
+  grossMarginPct: { current: string; ytd: string };
+  operatingExpenses: ISSection;
+  depreciationAmortisation: ISSubtotalLine;
+  ebitda: ISSubtotalLine;
+  ebitdaMarginPct: { current: string; ytd: string };
+  operatingProfit: ISSubtotalLine;
+  operatingMarginPct: { current: string; ytd: string };
+  exceptionalItems: ISSection | null;
+  financeIncome: ISSection | null;
+  financeCosts: ISSection | null;
+  netFinanceItems: ISSubtotalLine;
+  profitBeforeTax: ISSubtotalLine;
+  taxExpense: ISSection | null;
+  profitForPeriodLine: ISSubtotalLine;
+  netMarginPct: { current: string; ytd: string };
+  profitForPeriod: string;
+}
+
+export interface ISDrilldownEntry {
+  id: string;
+  date: string;
+  journalId: string;
+  journalRef: string;
+  journalDescription: string;
+  debit: string;
+  credit: string;
+  runningBalance: string;
+}
+
+export interface ISDrilldownResult {
+  account: { id: string; code: string; name: string; type: string };
+  fromDate: string;
+  toDate: string;
+  total: string;
+  entries: ISDrilldownEntry[];
+}
+
 // ─── Legacy types (kept for other pages) ──────────────────────────────────────
 
 export interface StatementLine {
@@ -162,10 +258,28 @@ export async function getBalanceSheetDrilldown(
 
 export async function getIncomeStatement(
   organisationId: string,
-  params?: { fromDate?: string; toDate?: string; periodId?: string },
+  params?: {
+    fromDate?: string;
+    toDate?: string;
+    periodId?: string;
+    comparisons?: string;
+    showZero?: boolean;
+  },
 ) {
   const res = await api.get(`/organisations/${organisationId}/reports/income-statement`, { params });
-  return res.data.data as IncomeStatementData;
+  return res.data.data as IncomeStatementResult;
+}
+
+export async function getIncomeStatementDrilldown(
+  organisationId: string,
+  accountId: string,
+  fromDate?: string,
+  toDate?: string,
+) {
+  const res = await api.get(`/organisations/${organisationId}/reports/income-statement/drilldown`, {
+    params: { accountId, fromDate, toDate },
+  });
+  return res.data.data as ISDrilldownResult;
 }
 
 export async function getCashFlow(

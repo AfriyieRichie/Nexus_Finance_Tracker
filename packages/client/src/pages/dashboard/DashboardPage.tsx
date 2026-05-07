@@ -97,10 +97,10 @@ export function DashboardPage() {
   const expenses = Number(pnl?.costOfSales.subtotal ?? 0) + Number(pnl?.operatingExpenses.subtotal ?? 0);
   const profit = Number(pnl?.profitForPeriod ?? 0);
 
-  // Pie data: expense breakdown
+  // Pie data: expense breakdown (flatten groups → lines, use .current)
   const expensePieData = [
-    ...(pnl?.costOfSales.lines ?? []).map((l) => ({ name: l.name, value: Math.abs(Number(l.balance)) })),
-    ...(pnl?.operatingExpenses.lines ?? []).map((l) => ({ name: l.name, value: Math.abs(Number(l.balance)) })),
+    ...(pnl?.costOfSales.groups ?? []).flatMap((g) => g.lines).map((l) => ({ name: l.name, value: Math.abs(Number(l.current)) })),
+    ...(pnl?.operatingExpenses.groups ?? []).flatMap((g) => g.lines).map((l) => ({ name: l.name, value: Math.abs(Number(l.current)) })),
   ]
     .filter((d) => d.value > 0)
     .slice(0, 5);

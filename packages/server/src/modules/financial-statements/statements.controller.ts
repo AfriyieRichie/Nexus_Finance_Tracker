@@ -29,9 +29,33 @@ export const getBalanceSheetDrilldown = asyncHandler(async (req: Request, res: R
 
 export const getIncomeStatement = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId } = req.params;
-  const { fromDate, toDate, periodId } = req.query as Record<string, string | undefined>;
-  const data = await statementsService.getIncomeStatement(organisationId, { fromDate, toDate, periodId });
+  const { fromDate, toDate, periodId, comparisons, showZero } = req.query as Record<string, string | undefined>;
+  const parsedComparisons = comparisons
+    ? (comparisons.split(',').filter((c) => c === 'prior_period' || c === 'prior_year') as ('prior_period' | 'prior_year')[])
+    : undefined;
+  const data = await statementsService.getIncomeStatement(organisationId, {
+    fromDate, toDate, periodId,
+    comparisons: parsedComparisons,
+    showZero: showZero === 'true',
+  });
   return sendSuccess(res, data, 'Income statement generated');
+});
+
+export const getIncomeStatementDrilldown = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId } = req.params;
+  const { accountId, fromDate, toDate } = req.query as Record<string, string | undefined>;
+  if (!accountId) {
+    res.status(400).json({ success: false, error: 'accountId is required' });
+    return;
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  const data = await statementsService.getIncomeStatementDrilldown(
+    organisationId,
+    accountId as string,
+    fromDate ?? `${today.slice(0, 4)}-01-01`,
+    toDate   ?? today,
+  );
+  return sendSuccess(res, data, 'Drilldown loaded');
 });
 
 export const getCashFlowStatement = asyncHandler(async (req: Request, res: Response) => {

@@ -21,6 +21,12 @@ statementsRouter.get(
 );
 
 statementsRouter.get(
+  '/income-statement/drilldown',
+  requireRole(UserRole.REPORT_VIEWER),
+  statementsController.getIncomeStatementDrilldown,
+);
+
+statementsRouter.get(
   '/income-statement',
   requireRole(UserRole.REPORT_VIEWER),
   statementsController.getIncomeStatement,
