@@ -84,6 +84,10 @@ export const createCategorySchema = z.object({
   defaultDepreciationMethod: depreciationMethodEnum.default('STRAIGHT_LINE'),
   defaultUsefulLifeMonths: z.number().int().positive().optional(),
   capitalisationThreshold: z.number().nonnegative().optional(),
+  // GL accounts — inherited by all assets in this category
+  assetCostAccountId:               z.string().uuid().optional().nullable(),
+  depreciationExpenseAccountId:     z.string().uuid().optional().nullable(),
+  accumulatedDepreciationAccountId: z.string().uuid().optional().nullable(),
 });
 
 export const updateCategorySchema = createCategorySchema.partial();

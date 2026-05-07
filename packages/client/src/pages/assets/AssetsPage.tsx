@@ -4,7 +4,7 @@ import { Package, Plus, Play, Eye, ChevronRight, RotateCcw, Trash2, TrendingUp, 
 import { useAuthStore } from '@/stores/auth.store';
 import * as assetSvc from '@/services/assets.service';
 import { listPeriods } from '@/services/periods.service';
-import { listAccounts } from '@/services/accounts.service';
+import { listAccounts, Account } from '@/services/accounts.service';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -158,7 +158,11 @@ function DepreciationRunDialog({ organisationId }: { organisationId: string }) {
   const [open, setOpen] = useState(false);
   const [periodId, setPeriodId] = useState('');
   const [step, setStep] = useState<'form' | 'preview'>('form');
-  const [preview, setPreview] = useState<{ entries: Array<{ assetCode: string; assetName: string; amount: string }>; totalAmount: string } | null>(null);
+  const [preview, setPreview] = useState<{
+    entries: Array<{ assetCode: string; assetName: string; amount: string }>;
+    skipped?: Array<{ assetCode: string; assetName: string; reason: string }>;
+    totalAmount: string;
+  } | null>(null);
   const asOfDate = new Date().toISOString().split('T')[0];
 
   const { data: periods } = useQuery({
@@ -201,15 +205,34 @@ function DepreciationRunDialog({ organisationId }: { organisationId: string }) {
           </div>
         ) : (
           <div className="space-y-3">
-            <p className="text-xs text-muted-foreground">{preview?.entries.length ?? 0} assets · Total <strong>{fmt(preview?.totalAmount ?? 0)}</strong></p>
-            <div className="max-h-60 overflow-y-auto border rounded text-xs">
+            <p className="text-xs text-muted-foreground">{preview?.entries.length ?? 0} assets will be depreciated · Total <strong>{fmt(preview?.totalAmount ?? 0)}</strong></p>
+            <div className="max-h-48 overflow-y-auto border rounded text-xs">
               <table className="w-full">
                 <thead className="bg-muted/50 sticky top-0"><tr><th className="px-3 py-1.5 text-left">Code</th><th className="px-3 py-1.5 text-left">Name</th><th className="px-3 py-1.5 text-right">Amount</th></tr></thead>
-                <tbody>{(preview?.entries ?? []).map((e, i) => (
-                  <tr key={i} className="border-t"><td className="px-3 py-1.5 font-mono">{e.assetCode}</td><td className="px-3 py-1.5">{e.assetName}</td><td className="px-3 py-1.5 text-right">{fmt(e.amount)}</td></tr>
-                ))}</tbody>
+                <tbody>
+                  {(preview?.entries ?? []).length === 0
+                    ? <tr><td colSpan={3} className="px-3 py-3 text-center text-muted-foreground">No assets to depreciate</td></tr>
+                    : (preview?.entries ?? []).map((e, i) => (
+                        <tr key={i} className="border-t"><td className="px-3 py-1.5 font-mono">{e.assetCode}</td><td className="px-3 py-1.5">{e.assetName}</td><td className="px-3 py-1.5 text-right">{fmt(e.amount)}</td></tr>
+                      ))}
+                </tbody>
               </table>
             </div>
+            {(preview?.skipped ?? []).length > 0 && (
+              <div className="border border-amber-200 bg-amber-50 rounded p-2 space-y-1">
+                <p className="text-xs font-semibold text-amber-700 flex items-center gap-1">
+                  <AlertTriangle size={12} /> {preview!.skipped!.length} asset(s) skipped — GL accounts not configured
+                </p>
+                {preview!.skipped!.map((s, i) => (
+                  <p key={i} className="text-[11px] text-amber-600">
+                    <span className="font-mono">{s.assetCode}</span> · {s.assetName}: {s.reason}
+                  </p>
+                ))}
+                <p className="text-[10px] text-amber-500 mt-1">
+                  Fix: Set the Depreciation Expense and Accumulated Depreciation accounts on the asset or its category, then re-run.
+                </p>
+              </div>
+            )}
             {runMutation.isError && <p className="text-xs text-destructive">{errMsg(runMutation.error)}</p>}
             <div className="flex justify-end gap-2 pt-1">
               <Button variant="outline" size="sm" onClick={() => setStep('form')}>Back</Button>
@@ -534,13 +557,27 @@ function AssetDetailPanel({ organisationId, assetId, onClose }: { organisationId
 function CategoriesTab({ organisationId }: { organisationId: string }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ code: '', name: '', description: '', defaultDepreciationMethod: 'STRAIGHT_LINE', defaultUsefulLifeMonths: '60', capitalisationThreshold: '' });
+  const [form, setForm] = useState({
+    code: '', name: '', description: '',
+    defaultDepreciationMethod: 'STRAIGHT_LINE', defaultUsefulLifeMonths: '60', capitalisationThreshold: '',
+    assetCostAccountId: '', depreciationExpenseAccountId: '', accumulatedDepreciationAccountId: '',
+  });
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
   const { data: categories = [], isLoading } = useQuery({
     queryKey: ['asset-categories', organisationId],
     queryFn: () => assetSvc.listCategories(organisationId),
   });
+
+  const { data: accountsData } = useQuery({
+    queryKey: ['accounts', organisationId],
+    queryFn: () => listAccounts(organisationId),
+    enabled: open,
+  });
+  const allAccounts = accountsData?.accounts ?? [];
+
+  const fixedAssetAccounts  = allAccounts.filter((a: Account) => a.type === 'FIXED_ASSET' && !a.isControlAccount && a.isActive);
+  const expenseAccounts     = allAccounts.filter((a: Account) => a.class === 'EXPENSE' && !a.isControlAccount && a.isActive);
 
   const mutation = useMutation({
     mutationFn: () => assetSvc.createCategory(organisationId, {
@@ -549,6 +586,9 @@ function CategoriesTab({ organisationId }: { organisationId: string }) {
       defaultDepreciationMethod: form.defaultDepreciationMethod,
       defaultUsefulLifeMonths: form.defaultUsefulLifeMonths ? Number(form.defaultUsefulLifeMonths) : undefined,
       capitalisationThreshold: form.capitalisationThreshold ? Number(form.capitalisationThreshold) : undefined,
+      assetCostAccountId:               form.assetCostAccountId               || null,
+      depreciationExpenseAccountId:     form.depreciationExpenseAccountId     || null,
+      accumulatedDepreciationAccountId: form.accumulatedDepreciationAccountId || null,
     }),
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['asset-categories'] }); setOpen(false); },
   });
@@ -559,7 +599,7 @@ function CategoriesTab({ organisationId }: { organisationId: string }) {
         <p className="text-sm text-muted-foreground">{categories.length} categories defined</p>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild><Button size="sm"><Plus size={14} /> New Category</Button></DialogTrigger>
-          <DialogContent title="Add Asset Category" description="Define a category with default depreciation settings.">
+          <DialogContent title="Add Asset Category" description="Define a category with default depreciation settings and GL accounts.">
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="text-xs font-medium mb-1 block">Code *</label>
@@ -579,9 +619,39 @@ function CategoriesTab({ organisationId }: { organisationId: string }) {
                   </Select></div>
                 <div><label className="text-xs font-medium mb-1 block">Default Life (mo.)</label>
                   <Input type="number" value={form.defaultUsefulLifeMonths} onChange={(e) => set('defaultUsefulLifeMonths', e.target.value)} className="h-8 text-xs" /></div>
-                <div><label className="text-xs font-medium mb-1 block">Capitalisation Threshold</label>
+                <div><label className="text-xs font-medium mb-1 block">Cap. Threshold</label>
                   <Input type="number" value={form.capitalisationThreshold} onChange={(e) => set('capitalisationThreshold', e.target.value)} placeholder="0.00" className="h-8 text-xs" /></div>
               </div>
+
+              {/* GL Accounts — inherited by all assets in this category */}
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground pt-1">
+                GL Accounts (inherited by all assets in this category)
+              </p>
+              <div className="border border-amber-200 bg-amber-50 rounded p-2 text-[10px] text-amber-700 mb-1">
+                These accounts are used automatically when depreciation runs. Leaving them blank will cause the depreciation run to skip assets in this category.
+              </div>
+              <div>
+                <label className="text-xs font-medium mb-1 block">Asset Cost Account (FIXED_ASSET type) *</label>
+                <Select value={form.assetCostAccountId} onChange={(e) => set('assetCostAccountId', e.target.value)} className="h-8 text-xs w-full">
+                  <option value="">— Select account —</option>
+                  {fixedAssetAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} · {a.name}</option>)}
+                </Select>
+              </div>
+              <div>
+                <label className="text-xs font-medium mb-1 block">Accumulated Depreciation Account (FIXED_ASSET contra) *</label>
+                <Select value={form.accumulatedDepreciationAccountId} onChange={(e) => set('accumulatedDepreciationAccountId', e.target.value)} className="h-8 text-xs w-full">
+                  <option value="">— Select account —</option>
+                  {fixedAssetAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} · {a.name}</option>)}
+                </Select>
+              </div>
+              <div>
+                <label className="text-xs font-medium mb-1 block">Depreciation Expense Account (EXPENSE type) *</label>
+                <Select value={form.depreciationExpenseAccountId} onChange={(e) => set('depreciationExpenseAccountId', e.target.value)} className="h-8 text-xs w-full">
+                  <option value="">— Select account —</option>
+                  {expenseAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} · {a.name}</option>)}
+                </Select>
+              </div>
+
               {mutation.isError && <p className="text-xs text-destructive">{errMsg(mutation.error)}</p>}
               <div className="flex justify-end gap-2">
                 <DialogClose asChild><Button variant="outline" size="sm">Cancel</Button></DialogClose>
@@ -597,7 +667,8 @@ function CategoriesTab({ organisationId }: { organisationId: string }) {
         <Table>
           <TableHeader><TableRow>
             <TableHead>Code</TableHead><TableHead>Name</TableHead>
-            <TableHead>Default Method</TableHead><TableHead>Default Life</TableHead><TableHead>Cap. Threshold</TableHead>
+            <TableHead>Default Method</TableHead><TableHead>Default Life</TableHead>
+            <TableHead>GL Accounts</TableHead>
           </TableRow></TableHeader>
           <TableBody>
             {categories.length === 0 ? (
@@ -607,8 +678,12 @@ function CategoriesTab({ organisationId }: { organisationId: string }) {
                 <TableCell className="font-mono text-xs">{c.code}</TableCell>
                 <TableCell className="text-sm font-medium">{c.name}</TableCell>
                 <TableCell className="text-xs text-muted-foreground">{c.defaultDepreciationMethod.replace(/_/g, ' ')}</TableCell>
-                <TableCell className="text-xs text-muted-foreground">{c.defaultUsefulLifeMonths ? `${c.defaultUsefulLifeMonths} months` : '—'}</TableCell>
-                <TableCell className="text-xs text-muted-foreground">{c.capitalisationThreshold ? fmt(c.capitalisationThreshold) : '—'}</TableCell>
+                <TableCell className="text-xs text-muted-foreground">{c.defaultUsefulLifeMonths ? `${c.defaultUsefulLifeMonths} mo.` : '—'}</TableCell>
+                <TableCell className="text-xs">
+                  {c.depreciationExpenseAccountId && c.accumulatedDepreciationAccountId
+                    ? <span className="text-green-600">✓ Configured</span>
+                    : <span className="text-amber-500 flex items-center gap-1"><AlertTriangle size={11} /> Missing GL accounts</span>}
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>

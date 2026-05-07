@@ -8,6 +8,9 @@ export interface AssetCategory {
   defaultDepreciationMethod: string;
   defaultUsefulLifeMonths?: number;
   capitalisationThreshold?: string;
+  assetCostAccountId?: string | null;
+  depreciationExpenseAccountId?: string | null;
+  accumulatedDepreciationAccountId?: string | null;
 }
 
 export interface AssetRevaluation {
@@ -65,6 +68,9 @@ export async function createCategory(organisationId: string, data: {
   code: string; name: string; description?: string;
   defaultDepreciationMethod?: string; defaultUsefulLifeMonths?: number;
   capitalisationThreshold?: number;
+  assetCostAccountId?: string | null;
+  depreciationExpenseAccountId?: string | null;
+  accumulatedDepreciationAccountId?: string | null;
 }) {
   const res = await api.post(`/organisations/${organisationId}/assets/categories`, data);
   return res.data.data as AssetCategory;
@@ -73,6 +79,9 @@ export async function createCategory(organisationId: string, data: {
 export async function updateCategory(organisationId: string, categoryId: string, data: Partial<{
   name: string; description: string; defaultDepreciationMethod: string;
   defaultUsefulLifeMonths: number; capitalisationThreshold: number;
+  assetCostAccountId: string | null;
+  depreciationExpenseAccountId: string | null;
+  accumulatedDepreciationAccountId: string | null;
 }>) {
   const res = await api.put(`/organisations/${organisationId}/assets/categories/${categoryId}`, data);
   return res.data.data as AssetCategory;

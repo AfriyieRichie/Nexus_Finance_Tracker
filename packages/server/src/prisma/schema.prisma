@@ -969,6 +969,10 @@ model AssetCategory {
   defaultDepreciationMethod DepreciationMethod @default(STRAIGHT_LINE)
   defaultUsefulLifeMonths   Int?
   capitalisationThreshold   Decimal?           @db.Decimal(20, 4)
+  // GL accounts applied to all assets in this category by default
+  assetCostAccountId                String?
+  depreciationExpenseAccountId      String?
+  accumulatedDepreciationAccountId  String?
   isActive                  Boolean            @default(true)
   isDeleted                 Boolean            @default(false)
   createdAt                 DateTime           @default(now())

@@ -142,6 +142,9 @@ export async function createCategory(organisationId: string, input: CreateCatego
       capitalisationThreshold: input.capitalisationThreshold != null
         ? new Prisma.Decimal(input.capitalisationThreshold)
         : undefined,
+      assetCostAccountId:               input.assetCostAccountId               ?? null,
+      depreciationExpenseAccountId:     input.depreciationExpenseAccountId     ?? null,
+      accumulatedDepreciationAccountId: input.accumulatedDepreciationAccountId ?? null,
     },
   });
 }
@@ -166,6 +169,9 @@ export async function updateCategory(organisationId: string, categoryId: string,
       capitalisationThreshold: input.capitalisationThreshold != null
         ? new Prisma.Decimal(input.capitalisationThreshold)
         : undefined,
+      ...(input.assetCostAccountId               !== undefined && { assetCostAccountId:               input.assetCostAccountId }),
+      ...(input.depreciationExpenseAccountId     !== undefined && { depreciationExpenseAccountId:     input.depreciationExpenseAccountId }),
+      ...(input.accumulatedDepreciationAccountId !== undefined && { accumulatedDepreciationAccountId: input.accumulatedDepreciationAccountId }),
     },
   });
 }
@@ -184,6 +190,23 @@ export async function createAsset(organisationId: string, input: CreateAssetInpu
 
   const cost = new Prisma.Decimal(input.acquisitionCost);
 
+  // Inherit GL accounts from category when not explicitly provided
+  let assetAccountId   = input.assetAccountId   ?? null;
+  let deprnAccountId   = input.deprnAccountId   ?? null;
+  let accDeprnAccountId = input.accDeprnAccountId ?? null;
+
+  if (input.categoryId && (!assetAccountId || !deprnAccountId || !accDeprnAccountId)) {
+    const cat = await prisma.assetCategory.findFirst({
+      where: { id: input.categoryId, organisationId },
+      select: { assetCostAccountId: true, depreciationExpenseAccountId: true, accumulatedDepreciationAccountId: true },
+    });
+    if (cat) {
+      assetAccountId    = assetAccountId    ?? cat.assetCostAccountId;
+      deprnAccountId    = deprnAccountId    ?? cat.depreciationExpenseAccountId;
+      accDeprnAccountId = accDeprnAccountId ?? cat.accumulatedDepreciationAccountId;
+    }
+  }
+
   return prisma.fixedAsset.create({
     data: {
       organisationId,
@@ -201,9 +224,9 @@ export async function createAsset(organisationId: string, input: CreateAssetInpu
       depreciationMethod: method as 'STRAIGHT_LINE' | 'REDUCING_BALANCE' | 'UNITS_OF_PRODUCTION' | 'SUM_OF_YEARS_DIGITS',
       unitsOfProductionTotal: input.unitsOfProductionTotal,
       carryingValue: cost,
-      assetAccountId: input.assetAccountId,
-      deprnAccountId: input.deprnAccountId,
-      accDeprnAccountId: input.accDeprnAccountId,
+      assetAccountId,
+      deprnAccountId,
+      accDeprnAccountId,
     },
     include: { assetCategory: true },
   });
@@ -308,22 +331,19 @@ export async function runDepreciation(
       status: 'ACTIVE',
       OR: [{ lastDeprnDate: null }, { lastDeprnDate: { lt: asOfDate } }],
     },
+    include: {
+      assetCategory: {
+        select: {
+          depreciationExpenseAccountId: true,
+          accumulatedDepreciationAccountId: true,
+        },
+      },
+    },
   });
 
   if (assets.length === 0) {
     return { preview: input.preview, processed: 0, totalAmount: '0.00', entries: [], message: 'No assets require depreciation for this period' };
   }
-
-  const defaultDeprnExp = await prisma.account.findFirst({
-    where: { organisationId, type: 'EXPENSE_ACCOUNT', isActive: true, isDeleted: false, isControlAccount: false },
-    orderBy: { code: 'asc' },
-    select: { id: true },
-  });
-  const defaultAccDeprn = await prisma.account.findFirst({
-    where: { organisationId, type: 'FIXED_ASSET', isActive: true, isDeleted: false, isControlAccount: false },
-    orderBy: { code: 'asc' },
-    select: { id: true },
-  });
 
   const org = await prisma.organisation.findUnique({
     where: { id: organisationId },
@@ -335,7 +355,9 @@ export async function runDepreciation(
   const unitsMap = new Map((input.assetUnitsOverrides ?? []).map((o) => [o.assetId, o.units]));
 
   type PreviewEntry = { assetId: string; assetCode: string; assetName: string; amount: string };
+  type SkippedEntry = { assetId: string; assetCode: string; assetName: string; reason: string };
   const entries: PreviewEntry[] = [];
+  const skipped: SkippedEntry[] = [];
   let runTotal = new Prisma.Decimal(0);
 
   for (const asset of assets) {
@@ -365,9 +387,19 @@ export async function runDepreciation(
 
     if (deprnAmount === null || deprnAmount.lessThanOrEqualTo(0)) continue;
 
-    const deprnExpAccount = asset.deprnAccountId ?? defaultDeprnExp?.id;
-    const accDeprnAccount = asset.accDeprnAccountId ?? defaultAccDeprn?.id;
-    if (!deprnExpAccount || !accDeprnAccount) continue;
+    // Account resolution: asset → category → error (no arbitrary fallbacks)
+    const deprnExpAccount = asset.deprnAccountId ?? asset.assetCategory?.depreciationExpenseAccountId ?? null;
+    const accDeprnAccount = asset.accDeprnAccountId ?? asset.assetCategory?.accumulatedDepreciationAccountId ?? null;
+
+    if (!deprnExpAccount || !accDeprnAccount) {
+      skipped.push({
+        assetId: asset.id,
+        assetCode: asset.code,
+        assetName: asset.name,
+        reason: `GL accounts not configured — set Depreciation Expense and Accumulated Depreciation accounts on the asset (${asset.code}) or its category.`,
+      });
+      continue;
+    }
 
     entries.push({ assetId: asset.id, assetCode: asset.code, assetName: asset.name, amount: deprnAmount.toFixed(2) });
     runTotal = runTotal.plus(deprnAmount);
@@ -427,10 +459,10 @@ export async function runDepreciation(
         },
       },
     });
-    return { preview: false, processed: entries.length, totalAmount: runTotal.toFixed(2), runId: run.id, entries };
+    return { preview: false, processed: entries.length, totalAmount: runTotal.toFixed(2), runId: run.id, entries, skipped };
   }
 
-  return { preview: input.preview, processed: entries.length, totalAmount: runTotal.toFixed(2), entries };
+  return { preview: input.preview, processed: entries.length, totalAmount: runTotal.toFixed(2), entries, skipped };
 }
 
 export async function reverseDepreciation(
