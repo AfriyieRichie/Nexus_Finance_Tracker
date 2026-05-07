@@ -8,7 +8,12 @@ export const statementsRouter = Router({ mergeParams: true });
 
 statementsRouter.use(requireAuth);
 
-// All financial statements require at minimum REPORT_VIEWER role
+statementsRouter.get(
+  '/balance-sheet/drilldown',
+  requireRole(UserRole.REPORT_VIEWER),
+  statementsController.getBalanceSheetDrilldown,
+);
+
 statementsRouter.get(
   '/balance-sheet',
   requireRole(UserRole.REPORT_VIEWER),

@@ -5,9 +5,26 @@ import * as statementsService from './statements.service';
 
 export const getBalanceSheet = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId } = req.params;
-  const { asOfDate, periodId } = req.query as Record<string, string | undefined>;
-  const data = await statementsService.getBalanceSheet(organisationId, { asOfDate, periodId });
+  const { asOfDate, periodId, compareTo, showZero } = req.query as Record<string, string | undefined>;
+  const data = await statementsService.getBalanceSheet(organisationId, {
+    asOfDate,
+    periodId,
+    compareTo: compareTo as 'prior_period' | 'prior_year' | undefined,
+    showZero: showZero === 'true',
+  });
   return sendSuccess(res, data, 'Balance sheet generated');
+});
+
+export const getBalanceSheetDrilldown = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId } = req.params;
+  const { accountId, asOfDate } = req.query as Record<string, string | undefined>;
+  if (!accountId) {
+    res.status(400).json({ success: false, error: 'accountId is required' });
+    return;
+  }
+  const effectiveDate = asOfDate ?? new Date().toISOString().slice(0, 10);
+  const data = await statementsService.getBalanceSheetDrilldown(organisationId, accountId as string, effectiveDate);
+  return sendSuccess(res, data, 'Drilldown loaded');
 });
 
 export const getIncomeStatement = asyncHandler(async (req: Request, res: Response) => {
