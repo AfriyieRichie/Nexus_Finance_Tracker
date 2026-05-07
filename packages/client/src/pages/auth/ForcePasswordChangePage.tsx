@@ -3,7 +3,15 @@ import { useNavigate } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import { api } from '@/services/api';
 import { useAuthStore } from '@/stores/auth.store';
-import { BarChart3 } from 'lucide-react';
+import { BarChart3, Check, X } from 'lucide-react';
+
+const rules = [
+  { label: 'At least 8 characters', test: (p: string) => p.length >= 8 },
+  { label: 'One uppercase letter', test: (p: string) => /[A-Z]/.test(p) },
+  { label: 'One lowercase letter', test: (p: string) => /[a-z]/.test(p) },
+  { label: 'One number', test: (p: string) => /[0-9]/.test(p) },
+  { label: 'One special character', test: (p: string) => /[^A-Za-z0-9]/.test(p) },
+];
 
 export function ForcePasswordChangePage() {
   const navigate = useNavigate();
@@ -12,13 +20,16 @@ export function ForcePasswordChangePage() {
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
+  const [showRules, setShowRules] = useState(false);
+
+  const allRulesMet = rules.every((r) => r.test(next));
+  const passwordMatch = next === confirm;
 
   const mutation = useMutation({
     mutationFn: async () => {
       await api.post('/auth/change-password', { currentPassword: current, newPassword: next });
     },
     onSuccess: async () => {
-      // Refresh user profile so mustChangePassword becomes false
       const res = await api.get('/auth/me');
       setUser(res.data.data);
       void navigate('/dashboard', { replace: true });
@@ -33,8 +44,8 @@ export function ForcePasswordChangePage() {
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
-    if (next.length < 8) { setError('Password must be at least 8 characters.'); return; }
-    if (next !== confirm) { setError('Passwords do not match.'); return; }
+    if (!allRulesMet) { setError('Password does not meet all requirements.'); return; }
+    if (!passwordMatch) { setError('Passwords do not match.'); return; }
     mutation.mutate();
   }
 
@@ -77,11 +88,24 @@ export function ForcePasswordChangePage() {
             <input
               type="password"
               value={next}
-              onChange={(e) => setNext(e.target.value)}
+              onChange={(e) => { setNext(e.target.value); setShowRules(true); }}
               className="w-full h-9 rounded-md border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              placeholder="At least 8 characters"
+              placeholder="Create a strong password"
               required
             />
+            {showRules && (
+              <ul className="mt-2 space-y-1">
+                {rules.map((r) => {
+                  const ok = r.test(next);
+                  return (
+                    <li key={r.label} className={`flex items-center gap-1.5 text-xs ${ok ? 'text-green-600' : 'text-muted-foreground'}`}>
+                      {ok ? <Check size={11} /> : <X size={11} />}
+                      {r.label}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </div>
 
           <div className="space-y-1.5">
@@ -94,13 +118,16 @@ export function ForcePasswordChangePage() {
               placeholder="Repeat new password"
               required
             />
+            {confirm && !passwordMatch && (
+              <p className="text-xs text-destructive">Passwords do not match</p>
+            )}
           </div>
 
           {error && <p className="text-sm text-destructive">{error}</p>}
 
           <button
             type="submit"
-            disabled={mutation.isPending}
+            disabled={mutation.isPending || !allRulesMet || !passwordMatch || !current}
             className="w-full h-9 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
           >
             {mutation.isPending ? 'Saving…' : 'Set password & continue'}
