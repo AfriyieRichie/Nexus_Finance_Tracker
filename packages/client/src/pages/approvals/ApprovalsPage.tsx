@@ -8,7 +8,7 @@ import { useAuthStore } from '@/stores/auth.store';
 import * as appSvc from '@/services/approvals.service';
 import type { ApprovalRequest } from '@/services/approvals.service';
 import { getJournal } from '@/services/journals.service';
-import { listOrgUsers } from '@/services/organisations.service';
+import { listOrgUsers } from '@/services/users.service';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -184,7 +184,7 @@ function WorkflowDetailDialog({ organisationId, workflowId, onClose }: { organis
             {levels.map((level, idx) => {
               const isExpanded = expandedLevelId === level.id;
               const existingIds = new Set(level.approvers.map((a) => a.userId));
-              const available   = (orgUsers ?? []).filter((u) => !existingIds.has(u.userId));
+              const available   = (orgUsers ?? []).filter((u) => !existingIds.has(u.id));
               return (
                 <div key={level.id} className="border rounded-lg overflow-hidden">
                   <div className="flex items-center gap-3 px-4 py-3 bg-muted/30">
@@ -216,7 +216,7 @@ function WorkflowDetailDialog({ organisationId, workflowId, onClose }: { organis
                           <div className="flex flex-wrap gap-2">
                             {level.approvers.map((a) => (
                               <div key={a.userId} className="flex items-center gap-1.5 bg-accent rounded-full pl-3 pr-1.5 py-1">
-                                <span className="text-xs font-medium">{a.user.firstName} {a.user.lastName}</span>
+                                <span className="text-xs font-medium">{a.user?.firstName} {a.user?.lastName}</span>
                                 <button onClick={() => removeApproverMut.mutate({ levelId: level.id, userId: a.userId })} className="w-4 h-4 rounded-full flex items-center justify-center hover:bg-destructive/20 text-muted-foreground hover:text-destructive"><X size={10} /></button>
                               </div>
                             ))}
@@ -228,7 +228,7 @@ function WorkflowDetailDialog({ organisationId, workflowId, onClose }: { organis
                         <div className="flex gap-2 items-center">
                           <Select className="h-8 text-xs flex-1" value={selectedUserId} onChange={(e) => setSelectedUserId(e.target.value)}>
                             <option value="">Select a user…</option>
-                            {available.map((u) => <option key={u.userId} value={u.userId}>{u.user.firstName} {u.user.lastName} ({u.role.replace(/_/g, ' ')})</option>)}
+                            {available.map((u) => <option key={u.id} value={u.id}>{u.firstName} {u.lastName} ({u.role.replace(/_/g, ' ')})</option>)}
                           </Select>
                           <Button size="sm" disabled={!selectedUserId || addApproverMut.isPending} onClick={() => addApproverMut.mutate({ levelId: level.id, userId: selectedUserId })}>Add</Button>
                           <Button size="sm" variant="ghost" onClick={() => { setApproverPickerId(null); setSelectedUserId(''); }}>Cancel</Button>
@@ -458,7 +458,7 @@ function RequestDetailDialog({ organisationId, requestId, onClose }: { organisat
                   <label className="text-xs font-medium">Delegate to</label>
                   <Select value={delegateTo} onChange={(e) => setDelegateTo(e.target.value)} className="h-8 text-xs">
                     <option value="">Select user…</option>
-                    {(orgUsers ?? []).map((u) => <option key={u.userId} value={u.userId}>{u.user.firstName} {u.user.lastName}</option>)}
+                    {(orgUsers ?? []).map((u) => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>)}
                   </Select>
                   <Input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Reason for delegation (optional)…" className="h-8 text-xs" />
                   <div className="flex gap-2">
@@ -579,7 +579,7 @@ function DelegationsTab({ organisationId }: { organisationId: string }) {
             <div><label className="text-xs font-medium">Delegate To *</label>
               <Select value={form.delegatedTo} onChange={(e) => set('delegatedTo', e.target.value)} className="h-8 text-xs mt-1">
                 <option value="">Select user…</option>
-                {(orgUsers ?? []).map((u) => <option key={u.userId} value={u.userId}>{u.user.firstName} {u.user.lastName}</option>)}
+                {(orgUsers ?? []).map((u) => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>)}
               </Select>
             </div>
             <div className="grid grid-cols-2 gap-3">
