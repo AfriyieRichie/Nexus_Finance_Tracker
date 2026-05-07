@@ -282,12 +282,60 @@ export async function getIncomeStatementDrilldown(
   return res.data.data as ISDrilldownResult;
 }
 
+// ─── Cash Flow Statement types (IAS 7) ────────────────────────────────────────
+
+export interface CFSMultiPeriod {
+  current: string;
+  priorPeriod?: string;
+  priorYear?: string;
+}
+
+export interface CFSLine {
+  accountId: string;
+  code: string;
+  name: string;
+  label?: string;
+  amounts: CFSMultiPeriod;
+}
+
+export interface CFSSection {
+  label: string;
+  lines: CFSLine[];
+  subtotal: CFSMultiPeriod;
+}
+
+export interface CashFlowResult {
+  organisation: { id: string; name: string; currency: string };
+  fromDate: string;
+  toDate: string;
+  priorPeriod: { fromDate: string; toDate: string } | null;
+  priorYear: { fromDate: string; toDate: string } | null;
+  netProfit: CFSMultiPeriod;
+  nonCashAdjustments: CFSSection;
+  workingCapitalChanges: CFSSection;
+  netCashFromOperating: CFSMultiPeriod;
+  investingActivities: CFSSection;
+  netCashFromInvesting: CFSMultiPeriod;
+  financingActivities: CFSSection;
+  netCashFromFinancing: CFSMultiPeriod;
+  netChangeInCash: CFSMultiPeriod;
+  openingCash: CFSMultiPeriod;
+  closingCashCFS: CFSMultiPeriod;
+  closingCashBS: string;
+  reconciled: boolean;
+  disclosures: {
+    interestPaid: CFSMultiPeriod;
+    taxPaid: CFSMultiPeriod;
+    nonCashTransactions: string[];
+  };
+}
+
 export async function getCashFlow(
   organisationId: string,
-  params?: { fromDate?: string; toDate?: string; periodId?: string },
+  params?: { fromDate?: string; toDate?: string; periodId?: string; comparisons?: string },
 ) {
   const res = await api.get(`/organisations/${organisationId}/reports/cash-flow`, { params });
-  return res.data.data;
+  return res.data.data as CashFlowResult;
 }
 
 export async function getChangesInEquity(

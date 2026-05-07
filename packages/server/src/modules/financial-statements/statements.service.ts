@@ -433,6 +433,26 @@ async function verifyOrg(organisationId: string) {
 
 type AggMap = Map<string, { debit: Prisma.Decimal; credit: Prisma.Decimal }>;
 
+async function aggregateForCFS(
+  organisationId: string,
+  dateFilter: Prisma.LedgerEntryWhereInput,
+  accountIds?: string[],
+): Promise<AggMap> {
+  const aggs = await prisma.ledgerEntry.groupBy({
+    by: ['accountId'],
+    where: {
+      organisationId,
+      ...dateFilter,
+      ...(accountIds && accountIds.length > 0 ? { accountId: { in: accountIds } } : {}),
+    },
+    _sum: { debitAmount: true, creditAmount: true },
+  });
+  return new Map(aggs.map((a) => [a.accountId, {
+    debit:  a._sum.debitAmount  ?? new Prisma.Decimal(0),
+    credit: a._sum.creditAmount ?? new Prisma.Decimal(0),
+  }]));
+}
+
 async function aggregateByClass(
   organisationId: string,
   classes: AccountClass[],
@@ -1152,117 +1172,6 @@ export async function getIncomeStatementDrilldown(
 
 // ─── Cash Flow Statement (IAS 7 — Indirect Method) ───────────────────────────
 
-export interface CashFlowOptions {
-  fromDate?: string;
-  toDate?: string;
-  periodId?: string;
-}
-
-export async function getCashFlowStatement(organisationId: string, options: CashFlowOptions = {}) {
-  const org    = await verifyOrg(organisationId);
-  const periodFilter = buildPeriodFilter(options.fromDate, options.toDate, options.periodId);
-
-  const pnl       = await getIncomeStatement(organisationId, options);
-  const netProfit = new Prisma.Decimal(pnl.profitForPeriod);
-
-  const aggs = await prisma.ledgerEntry.groupBy({
-    by: ['accountId'],
-    where: { organisationId, ...periodFilter },
-    _sum: { debitAmount: true, creditAmount: true },
-  });
-
-  const accountIds = aggs.map((a) => a.accountId);
-  const accounts   = accountIds.length ? await prisma.account.findMany({
-    where: { id: { in: accountIds }, organisationId, isDeleted: false },
-    select: { id: true, code: true, name: true, class: true, subClass: true, type: true },
-  }) : [];
-
-  const aggMap: AggMap = new Map(
-    aggs.map((a) => [a.accountId, {
-      debit:  a._sum.debitAmount  ?? new Prisma.Decimal(0),
-      credit: a._sum.creditAmount ?? new Prisma.Decimal(0),
-    }]),
-  );
-
-  const operatingAdjustments: StatementLine[] = [];
-  let totalOperatingAdjustments = new Prisma.Decimal(0);
-  const investingItems:  StatementLine[] = [];
-  let totalInvesting = new Prisma.Decimal(0);
-  const financingItems:  StatementLine[] = [];
-  let totalFinancing = new Prisma.Decimal(0);
-
-  for (const acc of accounts) {
-    const sums = aggMap.get(acc.id)!;
-    const isCash = acc.type === AccountType.CASH || acc.type === AccountType.BANK;
-
-    if (acc.class === AccountClass.ASSET && (acc.subClass === 'CURRENT') && !isCash) {
-      const change = sums.debit.sub(sums.credit).neg();
-      if (!change.isZero()) {
-        operatingAdjustments.push({ accountId: acc.id, code: acc.code, name: `Change in ${acc.name}`, class: acc.class, type: acc.type, subClass: acc.subClass, level: 1, balance: change.toFixed(2) });
-        totalOperatingAdjustments = totalOperatingAdjustments.add(change);
-      }
-    } else if (acc.class === AccountClass.LIABILITY && acc.subClass === 'CURRENT') {
-      const change = sums.credit.sub(sums.debit);
-      if (!change.isZero()) {
-        operatingAdjustments.push({ accountId: acc.id, code: acc.code, name: `Change in ${acc.name}`, class: acc.class, type: acc.type, subClass: acc.subClass, level: 1, balance: change.toFixed(2) });
-        totalOperatingAdjustments = totalOperatingAdjustments.add(change);
-      }
-    } else if (acc.class === AccountClass.ASSET && acc.subClass !== 'CURRENT') {
-      const change = sums.debit.sub(sums.credit).neg();
-      if (!change.isZero()) {
-        investingItems.push({ accountId: acc.id, code: acc.code, name: acc.name, class: acc.class, type: acc.type, subClass: acc.subClass, level: 1, balance: change.toFixed(2) });
-        totalInvesting = totalInvesting.add(change);
-      }
-    } else if (acc.class === AccountClass.LIABILITY && acc.subClass !== 'CURRENT') {
-      const change = sums.credit.sub(sums.debit);
-      if (!change.isZero()) {
-        financingItems.push({ accountId: acc.id, code: acc.code, name: acc.name, class: acc.class, type: acc.type, subClass: acc.subClass, level: 1, balance: change.toFixed(2) });
-        totalFinancing = totalFinancing.add(change);
-      }
-    } else if (acc.class === AccountClass.EQUITY) {
-      const change = sums.credit.sub(sums.debit);
-      if (!change.isZero()) {
-        financingItems.push({ accountId: acc.id, code: acc.code, name: acc.name, class: acc.class, type: acc.type, subClass: acc.subClass, level: 1, balance: change.toFixed(2) });
-        totalFinancing = totalFinancing.add(change);
-      }
-    }
-  }
-
-  const netCashFromOperating = netProfit.add(totalOperatingAdjustments);
-  const cashAccountIds = accounts.filter((a) => a.type === AccountType.CASH || a.type === AccountType.BANK).map((a) => a.id);
-
-  let openingCash = new Prisma.Decimal(0);
-  if (cashAccountIds.length > 0) {
-    const openingFilter: Prisma.LedgerEntryWhereInput = options.fromDate
-      ? { transactionDate: { lt: new Date(options.fromDate + 'T00:00:00Z') } }
-      : options.periodId ? await (async () => {
-          const p = await prisma.accountingPeriod.findUnique({ where: { id: options.periodId }, select: { startDate: true } });
-          return p ? { transactionDate: { lt: p.startDate } } : {};
-        })() : {};
-    if (Object.keys(openingFilter).length > 0) {
-      const openingAgg = await prisma.ledgerEntry.aggregate({
-        where: { organisationId, accountId: { in: cashAccountIds }, ...openingFilter },
-        _sum: { debitAmount: true, creditAmount: true },
-      });
-      openingCash = (openingAgg._sum.debitAmount ?? new Prisma.Decimal(0)).sub(openingAgg._sum.creditAmount ?? new Prisma.Decimal(0));
-    }
-  }
-
-  const netChange   = netCashFromOperating.add(totalInvesting).add(totalFinancing);
-  const closingCash = openingCash.add(netChange);
-
-  return {
-    organisation: { id: org.id, name: org.name, currency: org.baseCurrency },
-    period: { fromDate: options.fromDate ?? null, toDate: options.toDate ?? null, periodId: options.periodId ?? null },
-    operatingActivities: { netProfit: netProfit.toFixed(2), workingCapitalAdjustments: operatingAdjustments, totalAdjustments: totalOperatingAdjustments.toFixed(2), netCashFromOperating: netCashFromOperating.toFixed(2) },
-    investingActivities: { items: investingItems, netCashFromInvesting: totalInvesting.toFixed(2) },
-    financingActivities: { items: financingItems, netCashFromFinancing: totalFinancing.toFixed(2) },
-    netChangeInCash: netChange.toFixed(2),
-    openingCashBalance: openingCash.toFixed(2),
-    closingCashBalance: closingCash.toFixed(2),
-  };
-}
-
 // ─── Statement of Changes in Equity (IAS 1) ──────────────────────────────────
 
 export interface ChangesInEquityOptions {
@@ -1318,5 +1227,428 @@ export async function getChangesInEquity(organisationId: string, options: Change
     components: movements,
     profitForPeriod: profitForPeriod.toFixed(2),
     totals: { openingEquity: totalOpening.toFixed(2), movementsDuringPeriod: totalMovements.toFixed(2), closingEquity: totalClosing.toFixed(2) },
+  };
+}
+
+// ─── Cash Flow Statement — IAS 7 Indirect Method ─────────────────────────────
+
+export interface CFSMultiPeriod {
+  current: string;
+  priorPeriod?: string;
+  priorYear?: string;
+}
+
+export interface CFSLine {
+  accountId: string;
+  code: string;
+  name: string;
+  label?: string;
+  amounts: CFSMultiPeriod;
+}
+
+export interface CFSSection {
+  label: string;
+  lines: CFSLine[];
+  subtotal: CFSMultiPeriod;
+}
+
+export interface CashFlowResult {
+  organisation: { id: string; name: string; currency: string };
+  fromDate: string;
+  toDate: string;
+  priorPeriod: { fromDate: string; toDate: string } | null;
+  priorYear: { fromDate: string; toDate: string } | null;
+  netProfit: CFSMultiPeriod;
+  nonCashAdjustments: CFSSection;
+  workingCapitalChanges: CFSSection;
+  netCashFromOperating: CFSMultiPeriod;
+  investingActivities: CFSSection;
+  netCashFromInvesting: CFSMultiPeriod;
+  financingActivities: CFSSection;
+  netCashFromFinancing: CFSMultiPeriod;
+  netChangeInCash: CFSMultiPeriod;
+  openingCash: CFSMultiPeriod;
+  closingCashCFS: CFSMultiPeriod;
+  closingCashBS: string;
+  reconciled: boolean;
+  disclosures: {
+    interestPaid: CFSMultiPeriod;
+    taxPaid: CFSMultiPeriod;
+    nonCashTransactions: string[];
+  };
+}
+
+export interface CashFlowOptions {
+  fromDate?: string;
+  toDate?: string;
+  periodId?: string;
+  comparisons?: ('prior_period' | 'prior_year')[];
+}
+
+export async function getCashFlowStatement(
+  organisationId: string,
+  options: CashFlowOptions = {},
+): Promise<CashFlowResult> {
+  const org = await verifyOrg(organisationId);
+
+  const D = (n: number | string) => new Prisma.Decimal(n);
+
+  const today    = new Date().toISOString().slice(0, 10);
+  const toDate   = options.toDate   ?? today;
+  const fromDate = options.fromDate ?? `${toDate.slice(0, 4)}-01-01`;
+  const comparisons = options.comparisons ?? [];
+  const hasPP = comparisons.includes('prior_period');
+  const hasPY = comparisons.includes('prior_year');
+
+  // Prior-period dates (same duration, ending day before fromDate)
+  let ppFrom: string | null = null, ppTo: string | null = null;
+  if (hasPP) {
+    const f   = new Date(fromDate + 'T00:00:00Z');
+    const t   = new Date(toDate   + 'T00:00:00Z');
+    const dur = t.getTime() - f.getTime();
+    const ppEnd   = new Date(f.getTime() - 86_400_000);
+    const ppStart = new Date(ppEnd.getTime() - dur);
+    ppFrom = ppStart.toISOString().slice(0, 10);
+    ppTo   = ppEnd.toISOString().slice(0, 10);
+  }
+
+  // Prior-year dates (same calendar period, one year back)
+  let pyFrom: string | null = null, pyTo: string | null = null;
+  if (hasPY) {
+    const f = new Date(fromDate + 'T00:00:00Z');
+    const t = new Date(toDate   + 'T00:00:00Z');
+    f.setFullYear(f.getFullYear() - 1);
+    t.setFullYear(t.getFullYear() - 1);
+    pyFrom = f.toISOString().slice(0, 10);
+    pyTo   = t.toISOString().slice(0, 10);
+  }
+
+  const curFilter = buildPeriodFilter(fromDate, toDate, options.periodId);
+  const ppFilter  = ppFrom && ppTo ? buildPeriodFilter(ppFrom, ppTo) : null;
+  const pyFilter  = pyFrom && pyTo ? buildPeriodFilter(pyFrom, pyTo) : null;
+
+  // All account metadata (one query — exclude control/deleted)
+  const allAccounts = await prisma.account.findMany({
+    where: { organisationId, isDeleted: false, isControlAccount: false },
+    select: { id: true, code: true, name: true, class: true, type: true, subClass: true },
+    orderBy: { code: 'asc' },
+  });
+
+  const cashIds = allAccounts
+    .filter((a) => a.type === AccountType.BANK || a.type === AccountType.CASH)
+    .map((a) => a.id);
+
+  // Period movement aggregations + point-in-time cash balances
+  const openingDay = new Date(new Date(fromDate + 'T00:00:00Z').getTime() - 86_400_000)
+    .toISOString().slice(0, 10);
+
+  const ppOpenDay = ppFrom
+    ? new Date(new Date(ppFrom + 'T00:00:00Z').getTime() - 86_400_000).toISOString().slice(0, 10)
+    : null;
+
+  const pyOpenDay = pyFrom
+    ? new Date(new Date(pyFrom + 'T00:00:00Z').getTime() - 86_400_000).toISOString().slice(0, 10)
+    : null;
+
+  const [
+    curMov, ppMov, pyMov,
+    cashOpening, cashClosingBS,
+    cashPPOpening, cashPYOpening,
+  ] = await Promise.all([
+    aggregateForCFS(organisationId, curFilter),
+    ppFilter ? aggregateForCFS(organisationId, ppFilter) : Promise.resolve(null as AggMap | null),
+    pyFilter ? aggregateForCFS(organisationId, pyFilter) : Promise.resolve(null as AggMap | null),
+    cashIds.length ? aggregateForCFS(organisationId, buildDateFilter(openingDay), cashIds) : Promise.resolve(new Map() as AggMap),
+    cashIds.length ? aggregateForCFS(organisationId, buildDateFilter(toDate), cashIds) : Promise.resolve(new Map() as AggMap),
+    cashIds.length && ppOpenDay ? aggregateForCFS(organisationId, buildDateFilter(ppOpenDay), cashIds) : Promise.resolve(null as AggMap | null),
+    cashIds.length && pyOpenDay ? aggregateForCFS(organisationId, buildDateFilter(pyOpenDay), cashIds) : Promise.resolve(null as AggMap | null),
+  ]);
+
+  // ── Local helpers ──────────────────────────────────────────────────────────
+  const getDebitMinus = (map: AggMap | null, id: string): Prisma.Decimal | null => {
+    if (!map) return null;
+    const s = map.get(id);
+    return s ? s.debit.sub(s.credit) : D(0);
+  };
+
+  const sumCash = (map: AggMap): Prisma.Decimal =>
+    cashIds.reduce((s, id) => {
+      const e = map.get(id);
+      return s.add(e ? e.debit.sub(e.credit) : D(0));
+    }, D(0));
+
+  type MPD = { cur: Prisma.Decimal; pp: Prisma.Decimal | null; py: Prisma.Decimal | null };
+  const toMP = (m: MPD): CFSMultiPeriod => ({
+    current: m.cur.toFixed(2),
+    ...(m.pp != null ? { priorPeriod: m.pp.toFixed(2) } : {}),
+    ...(m.py != null ? { priorYear:   m.py.toFixed(2) } : {}),
+  });
+
+  // ── 1. Net Profit — after tax, after interest ─────────────────────────────
+  // profit = sum(credit - debit) for all P&L accounts = -sum(netDebit)
+  let npCur = D(0), npPP = hasPP ? D(0) : null, npPY = hasPY ? D(0) : null;
+  for (const acc of allAccounts) {
+    if (acc.class !== AccountClass.REVENUE && acc.class !== AccountClass.EXPENSE) continue;
+    const m = getDebitMinus(curMov, acc.id);
+    if (m !== null) npCur = npCur.sub(m);
+    if (hasPP && npPP !== null) { const x = getDebitMinus(ppMov, acc.id); if (x !== null) npPP = npPP.sub(x); }
+    if (hasPY && npPY !== null) { const x = getDebitMinus(pyMov, acc.id); if (x !== null) npPY = npPY.sub(x); }
+  }
+
+  // ── 2. Non-cash adjustments (D&A, impairment) ─────────────────────────────
+  // These reduced net profit; add them back (expense netDebit is positive = amount charged)
+  const nonCashLines: CFSLine[] = [];
+  for (const acc of allAccounts) {
+    if (acc.class !== AccountClass.EXPENSE) continue;
+    const daFlag   = isDA(acc.subClass, acc.name);
+    const imFlag   = (acc.subClass ?? '').toUpperCase().includes('IMPAIR') ||
+                     acc.name.toLowerCase().includes('impairment loss');
+    if (!daFlag && !imFlag) continue;
+
+    const cAmt  = getDebitMinus(curMov, acc.id) ?? D(0);
+    const ppAmt = hasPP ? (getDebitMinus(ppMov, acc.id) ?? D(0)) : null;
+    const pyAmt = hasPY ? (getDebitMinus(pyMov, acc.id) ?? D(0)) : null;
+    if (cAmt.isZero() && (ppAmt == null || ppAmt.isZero()) && (pyAmt == null || pyAmt.isZero())) continue;
+
+    nonCashLines.push({ accountId: acc.id, code: acc.code, name: acc.name,
+      amounts: toMP({ cur: cAmt, pp: ppAmt, py: pyAmt }) });
+  }
+
+  const ncCur = nonCashLines.reduce((s, l) => s.add(D(l.amounts.current)),           D(0));
+  const ncPP  = hasPP ? nonCashLines.reduce((s, l) => s.add(D(l.amounts.priorPeriod ?? 0)), D(0)) : null;
+  const ncPY  = hasPY ? nonCashLines.reduce((s, l) => s.add(D(l.amounts.priorYear   ?? 0)), D(0)) : null;
+
+  const nonCashAdjustments: CFSSection = {
+    label: 'Adjustments for Non-Cash Items',
+    lines: nonCashLines,
+    subtotal: toMP({ cur: ncCur, pp: ncPP, py: ncPY }),
+  };
+
+  // ── 3. Working capital changes ─────────────────────────────────────────────
+  // CFS effect = -(debit - credit). Works for both asset and liability accounts:
+  // Asset increases (debit > credit) → negative CFS (outflow) ✓
+  // Liability increases (credit > debit) → positive CFS (inflow) ✓
+  const isWC = (acc: typeof allAccounts[0]): boolean => {
+    if (acc.class === AccountClass.ASSET) {
+      return acc.type === AccountType.RECEIVABLE ||
+             acc.type === AccountType.INVENTORY  ||
+             acc.type === AccountType.TAX_RECEIVABLE ||
+             acc.name.toLowerCase().includes('prepaid') ||
+             acc.name.toLowerCase().includes('prepayment') ||
+             acc.name.toLowerCase().includes('advance paid');
+    }
+    if (acc.class === AccountClass.LIABILITY) {
+      if (acc.type === AccountType.PAYABLE || acc.type === AccountType.TAX_PAYABLE) return true;
+      // Accrued liabilities, other current payables (exclude loans/leases)
+      const sc = (acc.subClass ?? '').toUpperCase();
+      const nm = acc.name.toLowerCase();
+      if (sc.includes('LOAN') || sc.includes('BORROW') || sc.includes('LEASE') || nm.includes('loan') || nm.includes('borrowing') || nm.includes('lease')) return false;
+      if (nm.includes('accrued') || nm.includes('accrual') || nm.includes('deferred') || nm.includes('advance received') || nm.includes('other payable')) return true;
+    }
+    return false;
+  };
+
+  const wcLabelFor = (acc: typeof allAccounts[0]): string => {
+    if (acc.type === AccountType.RECEIVABLE) return '(Increase)/Decrease in trade receivables';
+    if (acc.type === AccountType.INVENTORY)  return '(Increase)/Decrease in inventories';
+    if (acc.type === AccountType.TAX_RECEIVABLE) return '(Increase)/Decrease in tax receivables';
+    if (acc.type === AccountType.PAYABLE)    return 'Increase/(Decrease) in trade payables';
+    if (acc.type === AccountType.TAX_PAYABLE) return 'Increase/(Decrease) in tax payables';
+    const nm = acc.name.toLowerCase();
+    if (nm.includes('prepaid') || nm.includes('prepayment')) return '(Increase)/Decrease in prepayments';
+    if (acc.class === AccountClass.LIABILITY) return `Increase/(Decrease) in ${acc.name}`;
+    return `(Increase)/Decrease in ${acc.name}`;
+  };
+
+  const wcLines: CFSLine[] = [];
+  for (const acc of allAccounts) {
+    if (!isWC(acc)) continue;
+    const cMov  = getDebitMinus(curMov, acc.id) ?? D(0);
+    const ppMov2 = hasPP ? (getDebitMinus(ppMov, acc.id) ?? D(0)) : null;
+    const pyMov2 = hasPY ? (getDebitMinus(pyMov, acc.id) ?? D(0)) : null;
+    const cEff  = cMov.neg();
+    const ppEff = ppMov2 != null ? ppMov2.neg() : null;
+    const pyEff = pyMov2 != null ? pyMov2.neg() : null;
+    if (cEff.isZero() && (ppEff == null || ppEff.isZero()) && (pyEff == null || pyEff.isZero())) continue;
+    wcLines.push({ accountId: acc.id, code: acc.code, name: acc.name, label: wcLabelFor(acc),
+      amounts: toMP({ cur: cEff, pp: ppEff, py: pyEff }) });
+  }
+
+  const wcCur = wcLines.reduce((s, l) => s.add(D(l.amounts.current)),           D(0));
+  const wcPP  = hasPP ? wcLines.reduce((s, l) => s.add(D(l.amounts.priorPeriod ?? 0)), D(0)) : null;
+  const wcPY  = hasPY ? wcLines.reduce((s, l) => s.add(D(l.amounts.priorYear   ?? 0)), D(0)) : null;
+
+  const workingCapitalChanges: CFSSection = {
+    label: 'Changes in Working Capital',
+    lines: wcLines,
+    subtotal: toMP({ cur: wcCur, pp: wcPP, py: wcPY }),
+  };
+
+  const opCur = npCur.add(ncCur).add(wcCur);
+  const opPP  = hasPP && npPP !== null && ncPP !== null && wcPP !== null ? npPP.add(ncPP).add(wcPP) : null;
+  const opPY  = hasPY && npPY !== null && ncPY !== null && wcPY !== null ? npPY.add(ncPY).add(wcPY) : null;
+  const netCashFromOperating = toMP({ cur: opCur, pp: opPP, py: opPY });
+
+  // ── 4. Investing Activities ────────────────────────────────────────────────
+  // Fixed-asset cost accounts, intangibles, ROU assets (exclude accum. depr.)
+  // Debit-normal assets: -(netDebit) → capex is negative (outflow), disposals positive
+  const isCapex = (acc: typeof allAccounts[0]): boolean => {
+    if (acc.class !== AccountClass.ASSET) return false;
+    if (acc.type !== AccountType.FIXED_ASSET && acc.type !== AccountType.INTANGIBLE && acc.type !== AccountType.RIGHT_OF_USE_ASSET) return false;
+    const sc = (acc.subClass ?? '').toUpperCase();
+    const nm = acc.name.toLowerCase();
+    return !sc.includes('ACCUM') && !sc.includes('PROVISION') && !nm.includes('accumulated') && !nm.includes('provision for');
+  };
+
+  const investLines: CFSLine[] = [];
+  for (const acc of allAccounts) {
+    if (!isCapex(acc)) continue;
+    const cMov  = getDebitMinus(curMov, acc.id) ?? D(0);
+    const ppMov3 = hasPP ? (getDebitMinus(ppMov, acc.id) ?? D(0)) : null;
+    const pyMov3 = hasPY ? (getDebitMinus(pyMov, acc.id) ?? D(0)) : null;
+    const cEff  = cMov.neg();
+    const ppEff = ppMov3 != null ? ppMov3.neg() : null;
+    const pyEff = pyMov3 != null ? pyMov3.neg() : null;
+    if (cEff.isZero() && (ppEff == null || ppEff.isZero()) && (pyEff == null || pyEff.isZero())) continue;
+
+    const capexLabel = acc.type === AccountType.INTANGIBLE
+      ? `Acquisition of intangibles — ${acc.name}`
+      : acc.type === AccountType.RIGHT_OF_USE_ASSET
+        ? `Right-of-use asset recognised — ${acc.name}`
+        : `Capital expenditure — ${acc.name}`;
+
+    investLines.push({ accountId: acc.id, code: acc.code, name: acc.name, label: capexLabel,
+      amounts: toMP({ cur: cEff, pp: ppEff, py: pyEff }) });
+  }
+
+  const invCur = investLines.reduce((s, l) => s.add(D(l.amounts.current)),           D(0));
+  const invPP  = hasPP ? investLines.reduce((s, l) => s.add(D(l.amounts.priorPeriod ?? 0)), D(0)) : null;
+  const invPY  = hasPY ? investLines.reduce((s, l) => s.add(D(l.amounts.priorYear   ?? 0)), D(0)) : null;
+
+  const investingActivities: CFSSection = {
+    label: 'Investing Activities',
+    lines: investLines,
+    subtotal: toMP({ cur: invCur, pp: invPP, py: invPY }),
+  };
+  const netCashFromInvesting = toMP({ cur: invCur, pp: invPP, py: invPY });
+
+  // ── 5. Financing Activities ────────────────────────────────────────────────
+  // Loans, lease liabilities, share capital, dividends
+  // Liability/equity are credit-normal → CFS = -(netDebit) = credit - debit
+  const isFinancing = (acc: typeof allAccounts[0]): boolean => {
+    if (acc.class === AccountClass.LIABILITY) {
+      const sc = (acc.subClass ?? '').toUpperCase();
+      const nm = acc.name.toLowerCase();
+      return sc.includes('LOAN') || sc.includes('BORROW') || sc.includes('LEASE') || sc.includes('OVERDRAFT') ||
+             nm.includes('loan') || nm.includes('borrowing') || nm.includes('lease liability') ||
+             nm.includes('overdraft') || nm.includes('credit facility');
+    }
+    if (acc.class === AccountClass.EQUITY) {
+      const sc = (acc.subClass ?? '').toUpperCase();
+      const nm = acc.name.toLowerCase();
+      // Exclude retained earnings — that's the P&L flow
+      if (sc.includes('RETAINED') || nm.includes('retained earnings') || nm.includes('accumulated profit')) return false;
+      return acc.type === AccountType.EQUITY_ACCOUNT ||
+             sc.includes('DIVIDEND') || nm.includes('dividend') ||
+             nm.includes('share capital') || nm.includes('paid-up capital') || nm.includes('issued capital');
+    }
+    return false;
+  };
+
+  const finLines: CFSLine[] = [];
+  for (const acc of allAccounts) {
+    if (!isFinancing(acc)) continue;
+    const cMov  = getDebitMinus(curMov, acc.id) ?? D(0);
+    const ppMov4 = hasPP ? (getDebitMinus(ppMov, acc.id) ?? D(0)) : null;
+    const pyMov4 = hasPY ? (getDebitMinus(pyMov, acc.id) ?? D(0)) : null;
+    const cEff  = cMov.neg(); // credit - debit: inflow positive, outflow negative
+    const ppEff = ppMov4 != null ? ppMov4.neg() : null;
+    const pyEff = pyMov4 != null ? pyMov4.neg() : null;
+    if (cEff.isZero() && (ppEff == null || ppEff.isZero()) && (pyEff == null || pyEff.isZero())) continue;
+    finLines.push({ accountId: acc.id, code: acc.code, name: acc.name,
+      amounts: toMP({ cur: cEff, pp: ppEff, py: pyEff }) });
+  }
+
+  const finCur = finLines.reduce((s, l) => s.add(D(l.amounts.current)),           D(0));
+  const finPP  = hasPP ? finLines.reduce((s, l) => s.add(D(l.amounts.priorPeriod ?? 0)), D(0)) : null;
+  const finPY  = hasPY ? finLines.reduce((s, l) => s.add(D(l.amounts.priorYear   ?? 0)), D(0)) : null;
+
+  const financingActivities: CFSSection = {
+    label: 'Financing Activities',
+    lines: finLines,
+    subtotal: toMP({ cur: finCur, pp: finPP, py: finPY }),
+  };
+  const netCashFromFinancing = toMP({ cur: finCur, pp: finPP, py: finPY });
+
+  // ── 6. Cash reconciliation ─────────────────────────────────────────────────
+  const openingBal    = sumCash(cashOpening);
+  const closingBSBal  = sumCash(cashClosingBS);
+  const ppOpenBal     = cashPPOpening ? sumCash(cashPPOpening) : null;
+  const pyOpenBal     = cashPYOpening ? sumCash(cashPYOpening) : null;
+
+  const netChangeCur = opCur.add(invCur).add(finCur);
+  const netChangePP  = opPP !== null && invPP !== null && finPP !== null ? opPP.add(invPP).add(finPP) : null;
+  const netChangePY  = opPY !== null && invPY !== null && finPY !== null ? opPY.add(invPY).add(finPY) : null;
+
+  const closingCFSBal = openingBal.add(netChangeCur);
+  const reconciled    = closingCFSBal.sub(closingBSBal).abs().lessThan(new Prisma.Decimal('0.02'));
+
+  // ── 7. Disclosure notes (IAS 7.31–32: interest paid, tax paid) ────────────
+  let intCur = D(0), intPP2 = hasPP ? D(0) : null, intPY2 = hasPY ? D(0) : null;
+  let taxCur = D(0), taxPP2 = hasPP ? D(0) : null, taxPY2 = hasPY ? D(0) : null;
+  for (const acc of allAccounts) {
+    if (acc.class !== AccountClass.EXPENSE) continue;
+    if (isFinanceCostAccount(acc.subClass, acc.name)) {
+      const m = getDebitMinus(curMov, acc.id) ?? D(0);
+      intCur = intCur.add(m);
+      if (intPP2 !== null) intPP2 = intPP2.add(getDebitMinus(ppMov, acc.id) ?? D(0));
+      if (intPY2 !== null) intPY2 = intPY2.add(getDebitMinus(pyMov, acc.id) ?? D(0));
+    }
+    if (isTaxAccount(acc.subClass, acc.name)) {
+      const m = getDebitMinus(curMov, acc.id) ?? D(0);
+      taxCur = taxCur.add(m);
+      if (taxPP2 !== null) taxPP2 = taxPP2.add(getDebitMinus(ppMov, acc.id) ?? D(0));
+      if (taxPY2 !== null) taxPY2 = taxPY2.add(getDebitMinus(pyMov, acc.id) ?? D(0));
+    }
+  }
+
+  const nonCashNotes: string[] = [];
+  if (investLines.some((l) => l.name.toLowerCase().includes('right-of-use'))) {
+    nonCashNotes.push('Right-of-use assets recognised under IFRS 16 are non-cash transactions and included for completeness.');
+  }
+
+  return {
+    organisation: { id: org.id, name: org.name, currency: org.baseCurrency },
+    fromDate,
+    toDate,
+    priorPeriod: ppFrom && ppTo ? { fromDate: ppFrom, toDate: ppTo } : null,
+    priorYear:   pyFrom && pyTo ? { fromDate: pyFrom, toDate: pyTo } : null,
+
+    netProfit: toMP({ cur: npCur, pp: npPP, py: npPY }),
+    nonCashAdjustments,
+    workingCapitalChanges,
+    netCashFromOperating,
+
+    investingActivities,
+    netCashFromInvesting,
+
+    financingActivities,
+    netCashFromFinancing,
+
+    netChangeInCash: toMP({ cur: netChangeCur, pp: netChangePP, py: netChangePY }),
+    openingCash: toMP({ cur: openingBal, pp: ppOpenBal, py: pyOpenBal }),
+    closingCashCFS: toMP({
+      cur: closingCFSBal,
+      pp:  ppOpenBal !== null && netChangePP !== null ? ppOpenBal.add(netChangePP) : null,
+      py:  pyOpenBal !== null && netChangePY !== null ? pyOpenBal.add(netChangePY) : null,
+    }),
+    closingCashBS: closingBSBal.toFixed(2),
+    reconciled,
+
+    disclosures: {
+      interestPaid: toMP({ cur: intCur, pp: intPP2, py: intPY2 }),
+      taxPaid:      toMP({ cur: taxCur, pp: taxPP2, py: taxPY2 }),
+      nonCashTransactions: nonCashNotes,
+    },
   };
 }

@@ -60,8 +60,13 @@ export const getIncomeStatementDrilldown = asyncHandler(async (req: Request, res
 
 export const getCashFlowStatement = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId } = req.params;
-  const { fromDate, toDate, periodId } = req.query as Record<string, string | undefined>;
-  const data = await statementsService.getCashFlowStatement(organisationId, { fromDate, toDate, periodId });
+  const { fromDate, toDate, periodId, comparisons } = req.query as Record<string, string | undefined>;
+  const parsedComparisons = comparisons
+    ? (comparisons.split(',').filter((c) => c === 'prior_period' || c === 'prior_year') as ('prior_period' | 'prior_year')[])
+    : undefined;
+  const data = await statementsService.getCashFlowStatement(organisationId, {
+    fromDate, toDate, periodId, comparisons: parsedComparisons,
+  });
   return sendSuccess(res, data, 'Cash flow statement generated');
 });
 
