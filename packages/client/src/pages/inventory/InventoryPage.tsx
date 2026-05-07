@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { AccountSelect } from '@/components/ui/account-select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogTrigger, DialogClose } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -194,18 +195,22 @@ function NewItemDialog({ organisationId }: { organisationId: string }) {
           </div>
           {invAccounts.length > 0 && (
             <div><label className="text-xs font-medium mb-1 block">Inventory Control Account</label>
-              <Select value={form.inventoryAccountId} onChange={(e) => set('inventoryAccountId', e.target.value)} className="h-8 text-xs w-full">
-                <option value="">Select…</option>
-                {invAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
-              </Select>
+              <AccountSelect
+                value={form.inventoryAccountId}
+                onChange={(id) => set('inventoryAccountId', id)}
+                accounts={invAccounts}
+                placeholder="Select…"
+              />
             </div>
           )}
           {expAccounts.length > 0 && (
             <div><label className="text-xs font-medium mb-1 block">COGS / Cost of Sales Account</label>
-              <Select value={form.cogsAccountId} onChange={(e) => set('cogsAccountId', e.target.value)} className="h-8 text-xs w-full">
-                <option value="">Select…</option>
-                {expAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
-              </Select>
+              <AccountSelect
+                value={form.cogsAccountId}
+                onChange={(id) => set('cogsAccountId', id)}
+                accounts={expAccounts}
+                placeholder="Select…"
+              />
             </div>
           )}
           {mutation.isError && <p className="text-xs text-destructive">{(mutation.error as any)?.response?.data?.message ?? 'Error creating item'}</p>}
@@ -311,10 +316,12 @@ function CreateMovementDialog({ organisationId, item, onSuccess }: { organisatio
           </div>
           {needsContra && (
             <div><label className="text-xs font-medium mb-1 block">Contra Account (for GL posting)</label>
-              <Select value={form.contraAccountId} onChange={(e) => set('contraAccountId', e.target.value)} className="h-8 text-xs w-full">
-                <option value="">None (skip GL posting)</option>
-                {allAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
-              </Select>
+              <AccountSelect
+                value={form.contraAccountId}
+                onChange={(id) => set('contraAccountId', id)}
+                accounts={allAccounts}
+                placeholder="None (skip GL posting)"
+              />
             </div>
           )}
           {needsContra && form.contraAccountId && (

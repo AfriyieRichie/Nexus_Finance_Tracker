@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { AccountSelect } from '@/components/ui/account-select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogTrigger, DialogClose } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -123,10 +124,12 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
           </div>
           <div>
             <label className="text-xs font-medium mb-1 block">Paid From / Source of Funds <span className="text-muted-foreground font-normal">(optional — auto-posts acquisition journal)</span></label>
-            <Select value={form.acquisitionCreditAccountId} onChange={(e) => set('acquisitionCreditAccountId', e.target.value)} className="h-8 text-xs w-full">
-              <option value="">— Select to auto-post GL entry —</option>
-              {bankAccounts.map((a: Account) => <option key={a.id} value={a.id}>{a.code} · {a.name}</option>)}
-            </Select>
+            <AccountSelect
+              value={form.acquisitionCreditAccountId}
+              onChange={(id) => set('acquisitionCreditAccountId', id)}
+              accounts={bankAccounts}
+              placeholder="— Select to auto-post GL entry —"
+            />
             <p className="text-[10px] text-muted-foreground mt-0.5">If selected, posts: Dr Asset Cost Account / Cr this account for the acquisition amount.</p>
           </div>
           <div className="grid grid-cols-3 gap-3">
@@ -541,10 +544,12 @@ function AssetDetailPanel({ organisationId, assetId, onClose }: { organisationId
               </div>
             )}
             <div><label className="text-xs font-medium mb-1 block">Bank Account (if proceeds received)</label>
-              <Select value={disposeForm.bankAccountId} onChange={(e) => setDisposeForm((f) => ({ ...f, bankAccountId: e.target.value }))} className="h-8 text-xs">
-                <option value="">None</option>
-                {bankAccounts.map((a: { id: string; name: string; code: string }) => <option key={a.id} value={a.id}>{a.code} {a.name}</option>)}
-              </Select></div>
+              <AccountSelect
+                value={disposeForm.bankAccountId}
+                onChange={(id) => setDisposeForm((f) => ({ ...f, bankAccountId: id }))}
+                accounts={bankAccounts}
+                placeholder="None"
+              /></div>
             {disposeMutation.isError && <p className="text-xs text-destructive">{errMsg(disposeMutation.error)}</p>}
             <Button size="sm" className="w-full" variant="destructive" disabled={!periodId || disposeMutation.isPending} onClick={() => disposeMutation.mutate()}>
               <Trash2 size={14} /> {disposeMutation.isPending ? 'Posting…' : 'Dispose Asset'}
@@ -640,24 +645,30 @@ function CategoriesTab({ organisationId }: { organisationId: string }) {
               </div>
               <div>
                 <label className="text-xs font-medium mb-1 block">Asset Cost Account (FIXED_ASSET type) *</label>
-                <Select value={form.assetCostAccountId} onChange={(e) => set('assetCostAccountId', e.target.value)} className="h-8 text-xs w-full">
-                  <option value="">— Select account —</option>
-                  {fixedAssetAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} · {a.name}</option>)}
-                </Select>
+                <AccountSelect
+                  value={form.assetCostAccountId}
+                  onChange={(id) => set('assetCostAccountId', id)}
+                  accounts={fixedAssetAccounts}
+                  placeholder="— Select account —"
+                />
               </div>
               <div>
                 <label className="text-xs font-medium mb-1 block">Accumulated Depreciation Account (FIXED_ASSET contra) *</label>
-                <Select value={form.accumulatedDepreciationAccountId} onChange={(e) => set('accumulatedDepreciationAccountId', e.target.value)} className="h-8 text-xs w-full">
-                  <option value="">— Select account —</option>
-                  {fixedAssetAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} · {a.name}</option>)}
-                </Select>
+                <AccountSelect
+                  value={form.accumulatedDepreciationAccountId}
+                  onChange={(id) => set('accumulatedDepreciationAccountId', id)}
+                  accounts={fixedAssetAccounts}
+                  placeholder="— Select account —"
+                />
               </div>
               <div>
                 <label className="text-xs font-medium mb-1 block">Depreciation Expense Account (EXPENSE type) *</label>
-                <Select value={form.depreciationExpenseAccountId} onChange={(e) => set('depreciationExpenseAccountId', e.target.value)} className="h-8 text-xs w-full">
-                  <option value="">— Select account —</option>
-                  {expenseAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} · {a.name}</option>)}
-                </Select>
+                <AccountSelect
+                  value={form.depreciationExpenseAccountId}
+                  onChange={(id) => set('depreciationExpenseAccountId', id)}
+                  accounts={expenseAccounts}
+                  placeholder="— Select account —"
+                />
               </div>
 
               {mutation.isError && <p className="text-xs text-destructive">{errMsg(mutation.error)}</p>}

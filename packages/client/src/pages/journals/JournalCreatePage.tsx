@@ -11,6 +11,7 @@ import { listPeriods } from '@/services/periods.service';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { AccountSelect } from '@/components/ui/account-select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 
@@ -302,24 +303,12 @@ export function JournalCreatePage() {
                   <tr key={line.id} className="border-b last:border-0">
                     <td className="px-3 py-2 text-xs text-muted-foreground">{idx + 1}</td>
                     <td className="px-3 py-2">
-                      <select
+                      <AccountSelect
                         value={line.accountId}
-                        onChange={(e) => updateLine(line.id, 'accountId', e.target.value)}
-                        className="w-full text-xs border border-input rounded-md px-2 py-1.5 bg-background focus:outline-none focus:ring-2 focus:ring-ring"
-                      >
-                        <option value="">Select account…</option>
-                        {['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'].map((cls) => {
-                          const group = accounts.filter((a) => a.class === cls && a.isActive);
-                          if (!group.length) return null;
-                          return (
-                            <optgroup key={cls} label={cls}>
-                              {group.map((a) => (
-                                <option key={a.id} value={a.id}>{a.code} — {a.name}</option>
-                              ))}
-                            </optgroup>
-                          );
-                        })}
-                      </select>
+                        onChange={(id) => updateLine(line.id, 'accountId', id)}
+                        accounts={accounts}
+                        placeholder="Select account…"
+                      />
                     </td>
                     <td className="px-3 py-2">
                       <input

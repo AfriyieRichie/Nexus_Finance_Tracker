@@ -18,6 +18,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { AccountSelect } from '@/components/ui/account-select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogTrigger, DialogClose } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -345,10 +346,12 @@ function NewInvoiceDialog({ organisationId }: { organisationId: string }) {
           {arAccounts.length > 0 && (
             <div>
               <label className="text-xs font-medium mb-1 block">AR Control Account</label>
-              <Select value={arAccountId} onChange={(e) => setArAccountId(e.target.value)}>
-                <option value="">Auto-select first RECEIVABLE account</option>
-                {arAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
-              </Select>
+              <AccountSelect
+                value={arAccountId}
+                onChange={setArAccountId}
+                accounts={arAccounts}
+                placeholder="Auto-select first RECEIVABLE account"
+              />
             </div>
           )}
 
@@ -393,10 +396,12 @@ function NewInvoiceDialog({ organisationId }: { organisationId: string }) {
                         {(Number(line.quantity) * Number(line.unitPrice) + Number(line.taxAmount)).toFixed(2)}
                       </td>
                       <td className="px-1 py-1">
-                        <Select value={line.accountId} onChange={(e) => updateLine(i, 'accountId', e.target.value)} className="h-7 text-xs">
-                          <option value="">Auto</option>
-                          {revenueAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
-                        </Select>
+                        <AccountSelect
+                          value={line.accountId}
+                          onChange={(id) => updateLine(i, 'accountId', id)}
+                          accounts={revenueAccounts}
+                          placeholder="Auto"
+                        />
                       </td>
                       <td className="px-1 py-1">
                         {lines.length > 1 && (
@@ -619,10 +624,12 @@ function RecordPaymentDialog({ organisationId, invoice, trigger }: { organisatio
 
           <div>
             <label className="text-xs font-medium mb-1 block">Bank / Cash Account *</label>
-            <Select value={bankAccountId} onChange={(e) => setBankAccountId(e.target.value)}>
-              <option value="">Select account…</option>
-              {bankAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
-            </Select>
+            <AccountSelect
+              value={bankAccountId}
+              onChange={setBankAccountId}
+              accounts={bankAccounts}
+              placeholder="Select account…"
+            />
           </div>
 
           <div>
@@ -741,10 +748,12 @@ function CreditNoteDialog({ organisationId, invoice, trigger }: { organisationId
 
           <div>
             <label className="text-xs font-medium mb-1 block">Revenue Account (optional — auto-detected)</label>
-            <Select value={revenueAccountId} onChange={(e) => setRevenueAccountId(e.target.value)}>
-              <option value="">Auto-detect from invoice</option>
-              {revenueAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
-            </Select>
+            <AccountSelect
+              value={revenueAccountId}
+              onChange={setRevenueAccountId}
+              accounts={revenueAccounts}
+              placeholder="Auto-detect from invoice"
+            />
           </div>
 
           <div>
@@ -855,10 +864,12 @@ function BadDebtDialog({ organisationId, invoice, trigger }: { organisationId: s
 
           <div>
             <label className="text-xs font-medium mb-1 block">Expense Account (optional — auto-detects Bad Debt account)</label>
-            <Select value={expenseAccountId} onChange={(e) => setExpenseAccountId(e.target.value)}>
-              <option value="">Auto-detect bad debt expense account</option>
-              {expenseAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
-            </Select>
+            <AccountSelect
+              value={expenseAccountId}
+              onChange={setExpenseAccountId}
+              accounts={expenseAccounts}
+              placeholder="Auto-detect bad debt expense account"
+            />
           </div>
 
           {mutation.isError && <p className="text-xs text-destructive">{errMsg(mutation.error)}</p>}

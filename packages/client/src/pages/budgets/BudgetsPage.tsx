@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { AccountSelect } from '@/components/ui/account-select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogTrigger, DialogClose } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -336,11 +337,13 @@ function BudgetLineEditor({ organisationId, budget, onBack }: { organisationId: 
             {rows.map((row) => (
               <tr key={row.key} className="border-t hover:bg-muted/20">
                 <td className="px-2 py-1">
-                  <select value={row.accountId} onChange={(e) => updateRow(row.key, 'accountId', e.target.value)} disabled={budget.isApproved}
-                    className="w-full h-7 text-xs rounded border border-input bg-background px-1 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50">
-                    <option value="">— Select account —</option>
-                    {accounts.map((a) => <option key={a.id} value={a.id}>{a.code} {a.name}</option>)}
-                  </select>
+                  <AccountSelect
+                    value={row.accountId}
+                    onChange={(id) => updateRow(row.key, 'accountId', id)}
+                    accounts={accounts}
+                    placeholder="— Select account —"
+                    disabled={budget.isApproved}
+                  />
                 </td>
                 <td className="px-2 py-1">
                   <select value={row.costCentreId} onChange={(e) => updateRow(row.key, 'costCentreId', e.target.value)} disabled={budget.isApproved}
@@ -535,10 +538,12 @@ function CommitmentsView({ organisationId, budget, costCentres }: { organisation
                 </div>
                 <div>
                   <label className="text-xs font-medium mb-1 block">Account *</label>
-                  <Select value={form.accountId} onChange={(e) => set('accountId', e.target.value)} className="h-8 text-xs">
-                    <option value="">Select account…</option>
-                    {accounts.map((a) => <option key={a.id} value={a.id}>{a.code} {a.name}</option>)}
-                  </Select>
+                  <AccountSelect
+                    value={form.accountId}
+                    onChange={(id) => set('accountId', id)}
+                    accounts={accounts}
+                    placeholder="Select account…"
+                  />
                 </div>
                 <div className="grid grid-cols-3 gap-3">
                   <div>

@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { AccountSelect } from '@/components/ui/account-select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogTrigger, DialogClose } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -166,10 +167,12 @@ function NewBankAccountDialog({ organisationId }: { organisationId: string }) {
         <div className="space-y-3">
           <div>
             <label className="text-xs font-medium mb-1 block">GL Account (Bank/Cash) *</label>
-            <Select value={form.accountId} onChange={(e) => set('accountId', e.target.value)} className="h-8 text-xs w-full">
-              <option value="">Select account…</option>
-              {bankAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
-            </Select>
+            <AccountSelect
+              value={form.accountId}
+              onChange={(id) => set('accountId', id)}
+              accounts={bankAccounts}
+              placeholder="Select account…"
+            />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -651,10 +654,12 @@ function CreateJournalDialog({ organisationId, line, onSuccess }: { organisation
           </p>
           <div>
             <label className="text-xs font-medium mb-1 block">Contra Account (non-bank) *</label>
-            <Select value={form.accountId} onChange={(e) => set('accountId', e.target.value)} className="h-8 text-xs w-full">
-              <option value="">Select account…</option>
-              {postingAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
-            </Select>
+            <AccountSelect
+              value={form.accountId}
+              onChange={(id) => set('accountId', id)}
+              accounts={postingAccounts}
+              placeholder="Select account…"
+            />
           </div>
           <div>
             <label className="text-xs font-medium mb-1 block">Accounting Period *</label>

@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { AccountSelect } from '@/components/ui/account-select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogTrigger, DialogClose } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -155,12 +156,12 @@ function TaxCodeDialog({
           </div>
           <div>
             <label className="text-xs font-medium mb-1 block">GL Account (Output / Input Tax)</label>
-            <Select value={glAccountId} onChange={(e) => setGlAccountId(e.target.value)} className="h-8 text-xs">
-              <option value="">— None —</option>
-              {(accounts ?? [])
-                .filter((a) => a.class === 'LIABILITY' || a.class === 'ASSET')
-                .map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
-            </Select>
+            <AccountSelect
+              value={glAccountId}
+              onChange={setGlAccountId}
+              accounts={(accounts ?? []).filter((a: { class: string }) => a.class === 'LIABILITY' || a.class === 'ASSET')}
+              placeholder="— None —"
+            />
           </div>
           <div>
             <label className="text-xs font-medium mb-1 block">Description</label>

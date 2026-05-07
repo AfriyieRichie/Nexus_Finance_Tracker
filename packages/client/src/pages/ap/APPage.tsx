@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { AccountSelect } from '@/components/ui/account-select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogTrigger, DialogClose } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -210,10 +211,12 @@ function NewSupplierInvoiceDialog({ organisationId }: { organisationId: string }
             {apAccounts.length > 0 && (
               <div>
                 <label className="text-xs font-medium mb-1 block">AP Control Account</label>
-                <Select value={apAccountId} onChange={(e) => setApAccountId(e.target.value)}>
-                  <option value="">Auto-select first PAYABLE account</option>
-                  {apAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
-                </Select>
+                <AccountSelect
+                  value={apAccountId}
+                  onChange={setApAccountId}
+                  accounts={apAccounts}
+                  placeholder="Auto-select first PAYABLE account"
+                />
               </div>
             )}
           </div>
@@ -276,14 +279,12 @@ function NewSupplierInvoiceDialog({ organisationId }: { organisationId: string }
                         {(Number(line.quantity) * Number(line.unitPrice) + Number(line.taxAmount)).toFixed(2)}
                       </td>
                       <td className="px-1 py-1">
-                        <Select
+                        <AccountSelect
                           value={line.accountId}
-                          onChange={(e) => updateLine(i, 'accountId', e.target.value)}
-                          className="h-7 text-xs"
-                        >
-                          <option value="">Auto (first expense acct)</option>
-                          {expenseAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
-                        </Select>
+                          onChange={(id) => updateLine(i, 'accountId', id)}
+                          accounts={expenseAccounts}
+                          placeholder="Auto (first expense acct)"
+                        />
                       </td>
                       <td className="px-1 py-1">
                         {lines.length > 1 && (
