@@ -221,7 +221,7 @@ export function Sidebar() {
       <div className="p-3 border-t">
         <div className="flex items-center gap-2 px-2 py-1.5">
           <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-xs font-semibold text-primary shrink-0">
-            {user?.firstName[0]}{user?.lastName[0]}
+            {user?.firstName?.[0]}{user?.lastName?.[0]}
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-xs font-medium truncate">{user?.firstName} {user?.lastName}</p>

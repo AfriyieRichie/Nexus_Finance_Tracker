@@ -23,12 +23,14 @@ export async function listOrgUsers(organisationId: string) {
     orderBy: { createdAt: 'asc' },
   });
 
-  return orgUsers.map((ou) => ({
-    ...ou.user,
-    role: ou.role,
-    orgIsActive: ou.isActive,
-    joinedAt: ou.joinedAt,
-  }));
+  return orgUsers
+    .filter((ou) => ou.user != null)
+    .map((ou) => ({
+      ...ou.user!,
+      role: ou.role,
+      orgIsActive: ou.isActive,
+      joinedAt: ou.joinedAt,
+    }));
 }
 
 export async function createOrgUser(

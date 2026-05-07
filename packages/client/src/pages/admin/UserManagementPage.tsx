@@ -274,7 +274,7 @@ export function UserManagementPage() {
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <div className="w-7 h-7 rounded-full bg-primary/15 flex items-center justify-center text-[10px] font-semibold text-primary shrink-0">
-                            {u.firstName[0]}{u.lastName[0]}
+                            {u.firstName?.[0]}{u.lastName?.[0]}
                           </div>
                           <div>
                             <p className="text-xs font-medium">{u.firstName} {u.lastName}</p>
