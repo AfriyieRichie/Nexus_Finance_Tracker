@@ -26,6 +26,7 @@ import { taxRouter } from './modules/tax/tax.routes';
 import { payrollRouter } from './modules/payroll/payroll.routes';
 import { inventoryRouter } from './modules/inventory/inventory.routes';
 import { auditRouter } from './modules/audit-trail/audit.routes';
+import { usersRouter } from './modules/users/users.routes';
 
 const app = express();
 
@@ -94,6 +95,7 @@ app.use('/api/v1/organisations/:organisationId/budgets', budgetsRouter);
 app.use('/api/v1/organisations/:organisationId/tax', taxRouter);
 app.use('/api/v1/organisations/:organisationId/payroll', payrollRouter);
 app.use('/api/v1/organisations/:organisationId/audit', auditRouter);
+app.use('/api/v1/organisations/:organisationId/users', usersRouter);
 
 // ─── 404 & Error Handling ─────────────────────────────────────────────────
 app.use(notFoundMiddleware);

@@ -6,7 +6,9 @@ interface UserProfile {
   email: string;
   firstName: string;
   lastName: string;
+  jobTitle?: string;
   isSuperAdmin: boolean;
+  mustChangePassword: boolean;
   organisations: Array<{
     organisationId: string;
     organisationName: string;

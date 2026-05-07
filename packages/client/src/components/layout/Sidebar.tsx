@@ -1,45 +1,39 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
-  LayoutDashboard,
-  BookOpen,
-  FileText,
-  BarChart3,
-  TrendingUp,
-  Building2,
-  ChevronDown,
-  LogOut,
-  Settings,
-  Scale,
-  Banknote,
-  Users,
-  ShoppingCart,
-  Package,
-  Landmark,
-  Archive,
-  PiggyBank,
-  Receipt,
-  CheckCircle,
-  Shield,
-  Bell,
+  LayoutDashboard, BookOpen, FileText, BarChart3, TrendingUp, Building2,
+  ChevronDown, LogOut, Settings, Scale, Banknote, Users, ShoppingCart,
+  Package, Landmark, Archive, PiggyBank, Receipt, CheckCircle, Shield,
+  Bell, UserCog,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth.store';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getUnreadCount } from '@/services/approvals.service';
+import type { UserRole } from '@/services/users.types';
 
 interface NavItem {
   label: string;
   to: string;
   icon: React.ReactNode;
+  roles?: UserRole[]; // undefined = all roles
 }
 
 interface NavGroup {
   heading: string;
   items: NavItem[];
+  roles?: UserRole[];
 }
 
-const navGroups: NavGroup[] = [
+const ADMIN_ROLES: UserRole[] = ['ORG_ADMIN', 'SUPER_ADMIN'];
+const FINANCE_AND_UP: UserRole[] = ['ORG_ADMIN', 'SUPER_ADMIN', 'FINANCE_MANAGER'];
+const ACCOUNTING_ROLES: UserRole[] = ['ORG_ADMIN', 'SUPER_ADMIN', 'FINANCE_MANAGER', 'ACCOUNTANT', 'AUDITOR'];
+const AP_ROLES: UserRole[] = ['ORG_ADMIN', 'SUPER_ADMIN', 'FINANCE_MANAGER', 'ACCOUNTANT', 'ACCOUNTS_PAYABLE_CLERK', 'AUDITOR'];
+const AR_ROLES: UserRole[] = ['ORG_ADMIN', 'SUPER_ADMIN', 'FINANCE_MANAGER', 'ACCOUNTANT', 'ACCOUNTS_RECEIVABLE_CLERK', 'AUDITOR'];
+const REPORT_ROLES: UserRole[] = ['ORG_ADMIN', 'SUPER_ADMIN', 'FINANCE_MANAGER', 'ACCOUNTANT', 'AUDITOR', 'REPORT_VIEWER'];
+const WORKFLOW_ROLES: UserRole[] = ['ORG_ADMIN', 'SUPER_ADMIN', 'FINANCE_MANAGER', 'ACCOUNTANT', 'ACCOUNTS_PAYABLE_CLERK', 'ACCOUNTS_RECEIVABLE_CLERK', 'AUDITOR', 'APPROVER'];
+
+const NAV_GROUPS: NavGroup[] = [
   {
     heading: 'Overview',
     items: [{ label: 'Dashboard', to: '/dashboard', icon: <LayoutDashboard size={16} /> }],
@@ -47,52 +41,66 @@ const navGroups: NavGroup[] = [
   {
     heading: 'Accounting',
     items: [
-      { label: 'Chart of Accounts', to: '/accounts', icon: <BookOpen size={16} /> },
-      { label: 'Journal Entries', to: '/journals', icon: <FileText size={16} /> },
-      { label: 'Accounting Periods', to: '/periods', icon: <Settings size={16} /> },
+      { label: 'Chart of Accounts', to: '/accounts', icon: <BookOpen size={16} />, roles: ACCOUNTING_ROLES },
+      { label: 'Journal Entries', to: '/journals', icon: <FileText size={16} />, roles: ACCOUNTING_ROLES },
+      { label: 'Accounting Periods', to: '/periods', icon: <Settings size={16} />, roles: FINANCE_AND_UP },
     ],
   },
   {
     heading: 'Ledger',
     items: [
-      { label: 'Trial Balance', to: '/ledger/trial-balance', icon: <Scale size={16} /> },
+      { label: 'Trial Balance', to: '/ledger/trial-balance', icon: <Scale size={16} />, roles: ACCOUNTING_ROLES },
     ],
   },
   {
     heading: 'Sub-Ledgers',
     items: [
-      { label: 'Accounts Receivable', to: '/ar', icon: <Users size={16} /> },
-      { label: 'Accounts Payable', to: '/ap', icon: <ShoppingCart size={16} /> },
-      { label: 'Fixed Assets', to: '/assets', icon: <Package size={16} /> },
-      { label: 'Bank Reconciliation', to: '/bank', icon: <Landmark size={16} /> },
-      { label: 'Inventory', to: '/inventory', icon: <Archive size={16} /> },
+      { label: 'Accounts Receivable', to: '/ar', icon: <Users size={16} />, roles: AR_ROLES },
+      { label: 'Accounts Payable', to: '/ap', icon: <ShoppingCart size={16} />, roles: AP_ROLES },
+      { label: 'Fixed Assets', to: '/assets', icon: <Package size={16} />, roles: ACCOUNTING_ROLES },
+      { label: 'Bank Reconciliation', to: '/bank', icon: <Landmark size={16} />, roles: ACCOUNTING_ROLES },
+      { label: 'Inventory', to: '/inventory', icon: <Archive size={16} />, roles: ACCOUNTING_ROLES },
     ],
   },
   {
     heading: 'Planning',
     items: [
-      { label: 'Budgets & Cost Centres', to: '/budgets', icon: <PiggyBank size={16} /> },
-      { label: 'Tax & Currency', to: '/tax', icon: <Receipt size={16} /> },
-      { label: 'Payroll', to: '/payroll', icon: <Users size={16} /> },
+      { label: 'Budgets & Cost Centres', to: '/budgets', icon: <PiggyBank size={16} />, roles: FINANCE_AND_UP },
+      { label: 'Tax & Currency', to: '/tax', icon: <Receipt size={16} />, roles: ACCOUNTING_ROLES },
+      { label: 'Payroll', to: '/payroll', icon: <Users size={16} />, roles: FINANCE_AND_UP },
     ],
   },
   {
     heading: 'Workflow',
     items: [
-      { label: 'Approvals', to: '/approvals', icon: <CheckCircle size={16} /> },
-      { label: 'Audit Trail', to: '/audit', icon: <Shield size={16} /> },
+      { label: 'Approvals', to: '/approvals', icon: <CheckCircle size={16} />, roles: WORKFLOW_ROLES },
+      { label: 'Audit Trail', to: '/audit', icon: <Shield size={16} />, roles: [...ACCOUNTING_ROLES, 'APPROVER'] as UserRole[] },
     ],
   },
   {
     heading: 'Reports',
     items: [
-      { label: 'Balance Sheet', to: '/reports/balance-sheet', icon: <Building2 size={16} /> },
-      { label: 'Income Statement', to: '/reports/income-statement', icon: <TrendingUp size={16} /> },
-      { label: 'Cash Flow', to: '/reports/cash-flow', icon: <Banknote size={16} /> },
-      { label: 'Changes in Equity', to: '/reports/changes-in-equity', icon: <TrendingUp size={16} /> },
+      { label: 'Balance Sheet', to: '/reports/balance-sheet', icon: <Building2 size={16} />, roles: REPORT_ROLES },
+      { label: 'Income Statement', to: '/reports/income-statement', icon: <TrendingUp size={16} />, roles: REPORT_ROLES },
+      { label: 'Cash Flow', to: '/reports/cash-flow', icon: <Banknote size={16} />, roles: REPORT_ROLES },
+      { label: 'Changes in Equity', to: '/reports/changes-in-equity', icon: <TrendingUp size={16} />, roles: REPORT_ROLES },
+    ],
+  },
+  {
+    heading: 'Administration',
+    roles: ADMIN_ROLES,
+    items: [
+      { label: 'User Management', to: '/admin/users', icon: <UserCog size={16} />, roles: ADMIN_ROLES },
     ],
   },
 ];
+
+function canSee(itemRoles: UserRole[] | undefined, userRole: UserRole | undefined, isSuperAdmin: boolean): boolean {
+  if (isSuperAdmin) return true;
+  if (!userRole) return false;
+  if (!itemRoles) return true;
+  return itemRoles.includes(userRole);
+}
 
 export function Sidebar() {
   const { user, activeOrganisationId, setActiveOrganisation, logout } = useAuthStore();
@@ -100,6 +108,8 @@ export function Sidebar() {
   const [orgOpen, setOrgOpen] = useState(false);
 
   const activeOrg = user?.organisations.find((o) => o.organisationId === activeOrganisationId);
+  const userRole = activeOrg?.role as UserRole | undefined;
+  const isSuperAdmin = user?.isSuperAdmin ?? false;
 
   const { data: unreadCount = 0 } = useQuery({
     queryKey: ['notifications-unread', activeOrganisationId],
@@ -112,6 +122,14 @@ export function Sidebar() {
     logout();
     void navigate('/login');
   }
+
+  const visibleGroups = NAV_GROUPS.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => canSee(item.roles, userRole, isSuperAdmin)),
+  })).filter((group) => {
+    if (!canSee(group.roles, userRole, isSuperAdmin)) return false;
+    return group.items.length > 0;
+  });
 
   return (
     <aside className="flex flex-col w-60 shrink-0 border-r bg-card h-screen sticky top-0 overflow-y-auto">
@@ -157,10 +175,7 @@ export function Sidebar() {
                     'w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-accent transition-colors text-left',
                     org.organisationId === activeOrganisationId && 'bg-accent font-medium',
                   )}
-                  onClick={() => {
-                    setActiveOrganisation(org.organisationId);
-                    setOrgOpen(false);
-                  }}
+                  onClick={() => { setActiveOrganisation(org.organisationId); setOrgOpen(false); }}
                 >
                   {org.organisationName}
                   <span className="ml-auto text-muted-foreground">{org.role}</span>
@@ -173,7 +188,7 @@ export function Sidebar() {
 
       {/* Nav */}
       <nav className="flex-1 px-3 py-4 space-y-5 overflow-y-auto">
-        {navGroups.map((group) => (
+        {visibleGroups.map((group) => (
           <div key={group.heading}>
             <p className="px-2 mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               {group.heading}

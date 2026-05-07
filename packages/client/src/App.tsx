@@ -26,6 +26,8 @@ import { TaxPage } from './pages/tax/TaxPage';
 import { PayrollPage } from './pages/payroll/PayrollPage';
 import { ApprovalsPage } from './pages/approvals/ApprovalsPage';
 import { AuditPage } from './pages/audit/AuditPage';
+import { UserManagementPage } from './pages/admin/UserManagementPage';
+import { ForcePasswordChangePage } from './pages/auth/ForcePasswordChangePage';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)();
@@ -36,6 +38,13 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 function PublicRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)();
   if (isAuthenticated) return <Navigate to="/dashboard" replace />;
+  return <>{children}</>;
+}
+
+// Force password change before accessing any other page
+function MustChangePasswordGuard({ children }: { children: React.ReactNode }) {
+  const user = useAuthStore((s) => s.user);
+  if (user?.mustChangePassword) return <Navigate to="/change-password" replace />;
   return <>{children}</>;
 }
 
@@ -66,13 +75,25 @@ export default function App() {
           }
         />
 
+        {/* Force password change — must complete before accessing app */}
+        <Route
+          path="/change-password"
+          element={
+            <ProtectedRoute>
+              <ForcePasswordChangePage />
+            </ProtectedRoute>
+          }
+        />
+
         {/* Protected app shell */}
         <Route
           element={
             <ProtectedRoute>
-              <OrgGuard>
-                <AppShell />
-              </OrgGuard>
+              <MustChangePasswordGuard>
+                <OrgGuard>
+                  <AppShell />
+                </OrgGuard>
+              </MustChangePasswordGuard>
             </ProtectedRoute>
           }
         >
@@ -99,6 +120,7 @@ export default function App() {
           <Route path="/reports/income-statement" element={<IncomeStatementPage />} />
           <Route path="/reports/cash-flow" element={<CashFlowPage />} />
           <Route path="/reports/changes-in-equity" element={<ChangesInEquityPage />} />
+          <Route path="/admin/users" element={<UserManagementPage />} />
         </Route>
 
         {/* Default */}
