@@ -26,7 +26,7 @@ export const updateJournalEntry = asyncHandler(async (req: Request, res: Respons
 
 export const deleteJournalEntry = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId, journalId } = req.params;
-  await journalService.deleteJournalEntry(organisationId, journalId);
+  await journalService.deleteJournalEntry(organisationId, journalId, req.user!.sub);
   return sendNoContent(res);
 });
 

@@ -14,6 +14,7 @@ import type {
 } from './coa.schemas';
 import type { AccountNode, CoaTemplate } from './coa.types';
 import { getTemplate } from './templates';
+import { auditLog } from '../audit-trail/audit.service';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -53,7 +54,7 @@ async function resolveLevel(organisationId: string, parentId?: string | null): P
 
 // ─── CRUD ────────────────────────────────────────────────────────────────────
 
-export async function createAccount(organisationId: string, input: CreateAccountInput) {
+export async function createAccount(organisationId: string, input: CreateAccountInput, userId?: string) {
   const existing = await prisma.account.findFirst({
     where: { organisationId, code: input.code, isDeleted: false },
   });
@@ -61,7 +62,7 @@ export async function createAccount(organisationId: string, input: CreateAccount
 
   const level = await resolveLevel(organisationId, input.parentId);
 
-  return prisma.account.create({
+  const account = await prisma.account.create({
     data: {
       organisationId,
       code: input.code,
@@ -78,12 +79,23 @@ export async function createAccount(organisationId: string, input: CreateAccount
       level,
     },
   });
+
+  auditLog({
+    organisationId, userId,
+    action: 'ACCOUNT_CREATED', module: 'CHART_OF_ACCOUNTS', entityType: 'ACCOUNT',
+    entityId: account.id, entityRef: `${account.code} ${account.name}`,
+    description: `Account ${account.code} '${account.name}' created (${account.class})`,
+    after: { code: account.code, name: account.name, class: account.class, type: account.type },
+  });
+
+  return account;
 }
 
 export async function updateAccount(
   organisationId: string,
   accountId: string,
   input: UpdateAccountInput,
+  userId?: string,
 ) {
   const account = await prisma.account.findFirst({
     where: { id: accountId, organisationId, isDeleted: false },
@@ -93,14 +105,13 @@ export async function updateAccount(
     throw new ForbiddenError('Account is locked and cannot be modified');
   }
 
-  // Block name/type changes on accounts with ledger entries unless only toggling active/locked
   const safeOnlyFields = new Set(['isActive', 'isLocked']);
   const changingStructural = Object.keys(input).some((k) => !safeOnlyFields.has(k));
   if (changingStructural) {
     await assertNoLedgerEntries(accountId);
   }
 
-  return prisma.account.update({
+  const updated = await prisma.account.update({
     where: { id: accountId },
     data: {
       name: input.name,
@@ -116,9 +127,20 @@ export async function updateAccount(
       isLocked: input.isLocked,
     },
   });
+
+  auditLog({
+    organisationId, userId,
+    action: 'ACCOUNT_UPDATED', module: 'CHART_OF_ACCOUNTS', entityType: 'ACCOUNT',
+    entityId: account.id, entityRef: `${account.code} ${account.name}`,
+    description: `Account ${account.code} '${account.name}' updated`,
+    before: { name: account.name, isActive: account.isActive, isLocked: account.isLocked },
+    after:  { name: updated.name, isActive: updated.isActive, isLocked: updated.isLocked },
+  });
+
+  return updated;
 }
 
-export async function softDeleteAccount(organisationId: string, accountId: string) {
+export async function softDeleteAccount(organisationId: string, accountId: string, userId?: string) {
   const account = await prisma.account.findFirst({
     where: { id: accountId, organisationId, isDeleted: false },
   });
@@ -134,10 +156,20 @@ export async function softDeleteAccount(organisationId: string, accountId: strin
     throw new ForbiddenError('Cannot delete account with active child accounts');
   }
 
-  return prisma.account.update({
+  const result = await prisma.account.update({
     where: { id: accountId },
     data: { isDeleted: true, isActive: false },
   });
+
+  auditLog({
+    organisationId, userId,
+    action: 'ACCOUNT_DELETED', module: 'CHART_OF_ACCOUNTS', entityType: 'ACCOUNT',
+    entityId: account.id, entityRef: `${account.code} ${account.name}`,
+    description: `Account ${account.code} '${account.name}' soft-deleted`,
+    before: { code: account.code, name: account.name, isActive: account.isActive },
+  });
+
+  return result;
 }
 
 export async function getAccount(organisationId: string, accountId: string) {

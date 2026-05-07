@@ -9,6 +9,6 @@ export const auditRouter = Router({ mergeParams: true });
 
 auditRouter.use(requireAuth);
 
-// Auditors and above can read audit logs
-auditRouter.get('/', requireRole(UserRole.AUDITOR), auditController.listAuditLogs);
-auditRouter.get('/:logId', requireRole(UserRole.AUDITOR), auditController.getAuditLog);
+auditRouter.get('/export',   requireRole(UserRole.AUDITOR), auditController.exportCsv);
+auditRouter.get('/',         requireRole(UserRole.AUDITOR), auditController.listAuditLogs);
+auditRouter.get('/:logId',   requireRole(UserRole.AUDITOR), auditController.getAuditLog);

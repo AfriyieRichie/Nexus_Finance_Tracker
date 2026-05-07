@@ -18,6 +18,7 @@ import type {
   ReverseJournalInput,
 } from './journal.schemas';
 import { createJournalApprovalRequest } from '../approvals/approval.service';
+import { auditLog } from '../audit-trail/audit.service';
 
 // ─── Journal Number Generator ─────────────────────────────────────────────────
 
@@ -212,6 +213,14 @@ export async function createJournalEntry(
       include: { lines: true },
     });
 
+    auditLog({
+      organisationId, userId,
+      action: 'JOURNAL_CREATED', module: 'JOURNAL', entityType: 'JOURNAL_ENTRY',
+      entityId: entry.id, entityRef: entry.journalNumber,
+      description: `Journal entry ${entry.journalNumber} created as DRAFT`,
+      after: { journalNumber: entry.journalNumber, type: entry.type, description: entry.description, status: entry.status },
+    });
+
     return entry;
   });
 }
@@ -220,7 +229,7 @@ export async function updateJournalEntry(
   organisationId: string,
   journalId: string,
   input: UpdateJournalInput,
-  _userId: string,
+  userId: string,
 ) {
   const existing = await findJournal(organisationId, journalId);
   assertEditable(existing.status);
@@ -250,7 +259,7 @@ export async function updateJournalEntry(
       ? new Date(input.entryDate + 'T00:00:00Z')
       : undefined;
 
-    return tx.journalEntry.update({
+    const updated = await tx.journalEntry.update({
       where: { id: journalId },
       data: {
         reference: input.reference,
@@ -283,14 +292,33 @@ export async function updateJournalEntry(
       },
       include: { lines: true },
     });
+
+    auditLog({
+      organisationId, userId,
+      action: 'JOURNAL_UPDATED', module: 'JOURNAL', entityType: 'JOURNAL_ENTRY',
+      entityId: journalId, entityRef: updated.journalNumber,
+      description: `Journal entry ${updated.journalNumber} updated`,
+      before: { description: existing.description, reference: existing.reference },
+      after:  { description: updated.description,  reference: updated.reference  },
+    });
+
+    return updated;
   });
 }
 
-export async function deleteJournalEntry(organisationId: string, journalId: string) {
+export async function deleteJournalEntry(organisationId: string, journalId: string, userId?: string) {
   const entry = await findJournal(organisationId, journalId);
   assertEditable(entry.status);
   // Lines cascade-delete via schema
   await prisma.journalEntry.delete({ where: { id: journalId } });
+
+  auditLog({
+    organisationId, userId,
+    action: 'JOURNAL_DELETED', module: 'JOURNAL', entityType: 'JOURNAL_ENTRY',
+    entityId: journalId, entityRef: entry.journalNumber,
+    description: `Journal entry ${entry.journalNumber} deleted`,
+    before: { journalNumber: entry.journalNumber, description: entry.description, status: entry.status },
+  });
 }
 
 export async function getJournalEntry(organisationId: string, journalId: string) {
@@ -382,12 +410,20 @@ export async function submitForApproval(
     data: { status: EntryStatus.PENDING_APPROVAL },
   });
 
-  // Wire into approval workflow if one is configured for this org
   const { requestId, hasWorkflow } = await createJournalApprovalRequest(
     organisationId,
     journalId,
     submittedBy,
   );
+
+  auditLog({
+    organisationId, userId: submittedBy,
+    action: 'JOURNAL_SUBMITTED', module: 'JOURNAL', entityType: 'JOURNAL_ENTRY',
+    entityId: journalId, entityRef: entry.journalNumber,
+    description: `Journal entry ${entry.journalNumber} submitted for approval`,
+    before: { status: EntryStatus.DRAFT },
+    after:  { status: EntryStatus.PENDING_APPROVAL },
+  });
 
   return { journalId, status: EntryStatus.PENDING_APPROVAL, approvalRequestId: hasWorkflow ? requestId : null };
 }
@@ -405,26 +441,33 @@ export async function approveJournalEntry(
     throw new ForbiddenError('Cannot approve your own journal entry (segregation of duties)');
   }
 
-  return prisma.journalEntry.update({
+  const result = await prisma.journalEntry.update({
     where: { id: journalId },
-    data: {
-      status: EntryStatus.APPROVED,
-      approvedBy: userId,
-      approvedAt: new Date(),
-    },
+    data: { status: EntryStatus.APPROVED, approvedBy: userId, approvedAt: new Date() },
   });
+
+  auditLog({
+    organisationId, userId,
+    action: 'JOURNAL_APPROVED', module: 'JOURNAL', entityType: 'JOURNAL_ENTRY',
+    entityId: journalId, entityRef: entry.journalNumber,
+    description: `Journal entry ${entry.journalNumber} approved`,
+    before: { status: EntryStatus.PENDING_APPROVAL },
+    after:  { status: EntryStatus.APPROVED },
+  });
+
+  return result;
 }
 
 export async function rejectJournalEntry(
   organisationId: string,
   journalId: string,
-  _rejectedBy: string,
+  rejectedBy: string,
   input: ApproveRejectInput,
 ) {
   const entry = await findJournal(organisationId, journalId);
   assertStatus(entry.status, EntryStatus.PENDING_APPROVAL, 'reject');
 
-  return prisma.journalEntry.update({
+  const result = await prisma.journalEntry.update({
     where: { id: journalId },
     data: {
       status: EntryStatus.DRAFT,
@@ -433,6 +476,17 @@ export async function rejectJournalEntry(
         : entry.description,
     },
   });
+
+  auditLog({
+    organisationId, userId: rejectedBy,
+    action: 'JOURNAL_REJECTED', module: 'JOURNAL', entityType: 'JOURNAL_ENTRY',
+    entityId: journalId, entityRef: entry.journalNumber,
+    description: `Journal entry ${entry.journalNumber} rejected${input.comments ? `: ${input.comments}` : ''}`,
+    before: { status: EntryStatus.PENDING_APPROVAL },
+    after:  { status: EntryStatus.DRAFT },
+  });
+
+  return result;
 }
 
 // ─── Post to Ledger ───────────────────────────────────────────────────────────
@@ -479,7 +533,7 @@ export async function postJournalEntry(
   journalId: string,
   userId: string,
 ) {
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const entry = await tx.journalEntry.findFirst({
       where: { id: journalId, organisationId },
       include: { lines: true },
@@ -506,16 +560,25 @@ export async function postJournalEntry(
 
     await postToLedger(entry, tx);
 
-    return tx.journalEntry.update({
+    const posted = await tx.journalEntry.update({
       where: { id: journalId },
-      data: {
-        status: EntryStatus.POSTED,
-        postedBy: userId,
-        postedAt: new Date(),
-      },
+      data: { status: EntryStatus.POSTED, postedBy: userId, postedAt: new Date() },
       include: { lines: true },
     });
+
+    return posted;
   });
+
+  auditLog({
+    organisationId, userId,
+    action: 'JOURNAL_POSTED', module: 'JOURNAL', entityType: 'JOURNAL_ENTRY',
+    entityId: result.id, entityRef: result.journalNumber,
+    description: `Journal entry ${result.journalNumber} posted to ledger`,
+    before: { status: EntryStatus.APPROVED },
+    after:  { status: EntryStatus.POSTED, postedAt: result.postedAt },
+  });
+
+  return result;
 }
 
 // ─── System Entry Helper ──────────────────────────────────────────────────────
@@ -558,7 +621,7 @@ export async function reverseJournalEntry(
   });
   if (!org) throw new NotFoundError('Organisation not found');
 
-  return prisma.$transaction(async (tx) => {
+  const reversal = await prisma.$transaction(async (tx) => {
     const reverseDate = new Date(input.reverseDate + 'T00:00:00Z');
 
     await assertPeriodOpen(organisationId, input.periodId, tx);
@@ -626,4 +689,15 @@ export async function reverseJournalEntry(
       include: { lines: true },
     });
   });
+
+  auditLog({
+    organisationId, userId,
+    action: 'JOURNAL_REVERSED', module: 'JOURNAL', entityType: 'JOURNAL_ENTRY',
+    entityId: journalId, entityRef: original.journalNumber,
+    description: `Journal entry ${original.journalNumber} reversed — reversal entry ${reversal.journalNumber} created and posted`,
+    before: { status: EntryStatus.POSTED },
+    after:  { status: EntryStatus.REVERSED, reversalEntry: reversal.journalNumber },
+  });
+
+  return reversal;
 }

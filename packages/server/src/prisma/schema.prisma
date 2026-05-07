@@ -740,8 +740,11 @@ model AuditLog {
   organisationId String?
   userId         String?
   action         String
+  module         String?
   entityType     String
   entityId       String?
+  entityRef      String?
+  description    String?
   previousValue  Json?
   newValue       Json?
   ipAddress      String?
@@ -754,6 +757,7 @@ model AuditLog {
   @@index([organisationId, timestamp])
   @@index([userId])
   @@index([entityType, entityId])
+  @@index([module])
   @@map("audit_logs")
 }
 

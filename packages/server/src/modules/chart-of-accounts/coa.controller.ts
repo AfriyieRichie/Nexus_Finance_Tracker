@@ -18,20 +18,20 @@ import * as coaService from './coa.service';
 export const createAccount = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId } = req.params;
   const input = createAccountSchema.parse(req.body);
-  const account = await coaService.createAccount(organisationId, input);
+  const account = await coaService.createAccount(organisationId, input, req.user?.sub);
   return sendCreated(res, account, 'Account created');
 });
 
 export const updateAccount = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId, accountId } = req.params;
   const input = updateAccountSchema.parse(req.body);
-  const account = await coaService.updateAccount(organisationId, accountId, input);
+  const account = await coaService.updateAccount(organisationId, accountId, input, req.user?.sub);
   return sendSuccess(res, account, 'Account updated');
 });
 
 export const deleteAccount = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId, accountId } = req.params;
-  await coaService.softDeleteAccount(organisationId, accountId);
+  await coaService.softDeleteAccount(organisationId, accountId, req.user?.sub);
   return sendNoContent(res);
 });
 

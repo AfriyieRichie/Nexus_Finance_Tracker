@@ -11,6 +11,7 @@ import {
 import type { RegisterInput, LoginInput, ChangePasswordInput } from './auth.schemas';
 import type { TokenPair } from './auth.types';
 import type { JwtPayload } from '../../middleware/auth.middleware';
+import { auditLog } from '../audit-trail/audit.service';
 
 const BCRYPT_ROUNDS = 12;
 const ACCESS_TOKEN_TTL_SECONDS = 15 * 60;
@@ -110,14 +111,10 @@ export async function login(
   );
 
   if (!user || !passwordValid) {
-    // Log failed attempt without revealing whether email exists
-    await prisma.auditLog.create({
-      data: {
-        action: 'LOGIN_FAILED',
-        entityType: 'auth',
-        ipAddress: ipAddress ?? null,
-        userAgent: userAgent ?? null,
-      },
+    auditLog({
+      action: 'LOGIN_FAILED', module: 'AUTH', entityType: 'USER',
+      description: `Failed login attempt for ${input.email}`,
+      ipAddress, userAgent,
     });
     throw new UnauthorizedError('Invalid email or password');
   }
@@ -138,6 +135,14 @@ export async function login(
     ipAddress,
     userAgent,
   );
+
+  auditLog({
+    userId: user.id,
+    action: 'LOGIN', module: 'AUTH', entityType: 'USER',
+    entityId: user.id,
+    description: `User ${user.email} logged in`,
+    ipAddress, userAgent,
+  });
 
   return {
     user: {
@@ -262,9 +267,15 @@ export async function changePassword(
   const newHash = await bcrypt.hash(input.newPassword, BCRYPT_ROUNDS);
   await prisma.$transaction([
     prisma.user.update({ where: { id: userId }, data: { passwordHash: newHash } }),
-    // Revoke all refresh tokens on password change for security
     prisma.refreshToken.updateMany({ where: { userId }, data: { isRevoked: true } }),
   ]);
+
+  auditLog({
+    userId,
+    action: 'PASSWORD_CHANGED', module: 'AUTH', entityType: 'USER',
+    entityId: userId,
+    description: 'User changed their password — all sessions revoked',
+  });
 }
 
 export async function cleanupExpiredTokens(): Promise<void> {
