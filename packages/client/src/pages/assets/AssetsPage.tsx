@@ -41,7 +41,7 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
     acquisitionDate: new Date().toISOString().split('T')[0],
     acquisitionCost: '', residualValue: '0',
     usefulLifeMonths: '60', depreciationMethod: 'STRAIGHT_LINE',
-    unitsOfProductionTotal: '',
+    unitsOfProductionTotal: '', acquisitionCreditAccountId: '',
   });
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -50,6 +50,15 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
     queryFn: () => assetSvc.listCategories(organisationId),
     enabled: !!organisationId,
   });
+
+  const { data: bankAccountsData } = useQuery({
+    queryKey: ['accounts-bank', organisationId],
+    queryFn: () => listAccounts(organisationId, { pageSize: 200 } as Parameters<typeof listAccounts>[1]),
+    enabled: open,
+  });
+  const bankAccounts = (bankAccountsData?.accounts ?? []).filter(
+    (a: Account) => (a.type === 'BANK' || a.type === 'CASH' || a.type === 'PAYABLE') && a.isActive && !a.isControlAccount,
+  );
 
   const onCategoryChange = (catId: string) => {
     const cat = categories.find((c) => c.id === catId);
@@ -76,6 +85,7 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
       unitsOfProductionTotal: form.unitsOfProductionTotal ? Number(form.unitsOfProductionTotal) : undefined,
       serialNumber: form.serialNumber || undefined,
       location: form.location || undefined,
+      acquisitionCreditAccountId: form.acquisitionCreditAccountId || undefined,
     }),
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['assets'] }); setOpen(false); },
   });
@@ -110,6 +120,14 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
               <Input type="date" value={form.acquisitionDate} onChange={(e) => set('acquisitionDate', e.target.value)} className="h-8 text-xs" /></div>
             <div><label className="text-xs font-medium mb-1 block">Cost *</label>
               <Input type="number" value={form.acquisitionCost} onChange={(e) => set('acquisitionCost', e.target.value)} placeholder="0.00" className="h-8 text-xs" /></div>
+          </div>
+          <div>
+            <label className="text-xs font-medium mb-1 block">Paid From / Source of Funds <span className="text-muted-foreground font-normal">(optional — auto-posts acquisition journal)</span></label>
+            <Select value={form.acquisitionCreditAccountId} onChange={(e) => set('acquisitionCreditAccountId', e.target.value)} className="h-8 text-xs w-full">
+              <option value="">— Select to auto-post GL entry —</option>
+              {bankAccounts.map((a: Account) => <option key={a.id} value={a.id}>{a.code} · {a.name}</option>)}
+            </Select>
+            <p className="text-[10px] text-muted-foreground mt-0.5">If selected, posts: Dr Asset Cost Account / Cr this account for the acquisition amount.</p>
           </div>
           <div className="grid grid-cols-3 gap-3">
             <div><label className="text-xs font-medium mb-1 block">Residual Value</label>

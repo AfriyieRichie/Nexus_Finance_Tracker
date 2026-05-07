@@ -26,7 +26,7 @@ export const updateCategory = asyncHandler(async (req: Request, res: Response) =
 
 export const createAsset = asyncHandler(async (req: Request, res: Response) => {
   const input = createAssetSchema.parse(req.body);
-  return sendCreated(res, await svc.createAsset(req.params.organisationId, input), 'Asset created');
+  return sendCreated(res, await svc.createAsset(req.params.organisationId, input, req.user?.sub), 'Asset created');
 });
 
 export const updateAsset = asyncHandler(async (req: Request, res: Response) => {

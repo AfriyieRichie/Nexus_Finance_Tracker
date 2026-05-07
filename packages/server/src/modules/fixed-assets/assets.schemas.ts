@@ -25,6 +25,8 @@ export const createAssetSchema = z.object({
   assetAccountId: z.string().uuid().optional(),
   deprnAccountId: z.string().uuid().optional(),
   accDeprnAccountId: z.string().uuid().optional(),
+  // If provided, auto-post acquisition journal: Dr assetCostAccount / Cr this account
+  acquisitionCreditAccountId: z.string().uuid().optional(),
 });
 
 export const updateAssetSchema = createAssetSchema

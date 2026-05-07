@@ -373,31 +373,29 @@ const GROUP_ORDER_EQUITY = [
 ];
 
 function accountGroupLabel(type: string, accountClass: AccountClass, subClass: string | null): string {
+  // subClass === 'CURRENT' is an optional override; for core types the type itself
+  // is authoritative — BANK is always cash, PAYABLE is always trade payable, etc.
   const isCurrent = subClass === 'CURRENT';
 
   if (accountClass === AccountClass.ASSET) {
-    if (isCurrent) {
-      if (type === 'BANK' || type === 'CASH')                 return 'Cash & Cash Equivalents';
-      if (type === 'RECEIVABLE' || type === 'TAX_RECEIVABLE') return 'Trade & Other Receivables';
-      if (type === 'INVENTORY')                               return 'Inventories';
-      return 'Other Current Assets';
-    } else {
-      if (type === 'FIXED_ASSET')                             return 'Property, Plant & Equipment';
-      if (type === 'INTANGIBLE')                              return 'Intangible Assets';
-      if (type === 'RIGHT_OF_USE_ASSET')                      return 'Right-of-Use Assets';
-      if (type === 'INTERCOMPANY')                            return 'Equity Investments';
-      return 'Other Non-Current Assets';
-    }
+    // These types are inherently current — no subClass needed
+    if (type === 'BANK' || type === 'CASH')                   return 'Cash & Cash Equivalents';
+    if (type === 'INVENTORY')                                 return 'Inventories';
+    if (type === 'RECEIVABLE' || type === 'TAX_RECEIVABLE')   return 'Trade & Other Receivables';
+    // Non-current asset types
+    if (type === 'FIXED_ASSET')                               return 'Property, Plant & Equipment';
+    if (type === 'INTANGIBLE')                                return 'Intangible Assets';
+    if (type === 'RIGHT_OF_USE_ASSET')                        return 'Right-of-Use Assets';
+    if (type === 'INTERCOMPANY')                              return 'Equity Investments';
+    // OTHER falls back to subClass
+    return isCurrent ? 'Other Current Assets' : 'Other Non-Current Assets';
   }
 
   if (accountClass === AccountClass.LIABILITY) {
-    if (isCurrent) {
-      if (type === 'PAYABLE')                                 return 'Trade & Other Payables';
-      if (type === 'TAX_PAYABLE')                             return 'Tax Liabilities';
-      return 'Other Current Liabilities';
-    } else {
-      return 'Long-Term Borrowings';
-    }
+    // PAYABLE and TAX_PAYABLE are inherently current trade liabilities
+    if (type === 'PAYABLE')                                   return 'Trade & Other Payables';
+    if (type === 'TAX_PAYABLE')                               return 'Tax Liabilities';
+    return isCurrent ? 'Other Current Liabilities' : 'Long-Term Borrowings';
   }
 
   if (accountClass === AccountClass.EQUITY) {

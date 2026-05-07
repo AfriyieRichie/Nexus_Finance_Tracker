@@ -99,6 +99,7 @@ export async function createAsset(organisationId: string, data: {
   residualValue?: number; usefulLifeMonths: number;
   depreciationMethod?: string; unitsOfProductionTotal?: number;
   assetAccountId?: string; deprnAccountId?: string; accDeprnAccountId?: string;
+  acquisitionCreditAccountId?: string;
 }) {
   const res = await api.post(`/organisations/${organisationId}/assets`, data);
   return res.data.data as FixedAsset;

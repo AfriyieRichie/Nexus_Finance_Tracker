@@ -178,7 +178,7 @@ export async function updateCategory(organisationId: string, categoryId: string,
 
 // ─── CRUD ────────────────────────────────────────────────────────────────────
 
-export async function createAsset(organisationId: string, input: CreateAssetInput) {
+export async function createAsset(organisationId: string, input: CreateAssetInput, userId?: string) {
   const exists = await prisma.fixedAsset.findFirst({
     where: { organisationId, code: input.code, isDeleted: false },
   });
@@ -207,7 +207,7 @@ export async function createAsset(organisationId: string, input: CreateAssetInpu
     }
   }
 
-  return prisma.fixedAsset.create({
+  const asset = await prisma.fixedAsset.create({
     data: {
       organisationId,
       code: input.code,
@@ -230,6 +230,45 @@ export async function createAsset(organisationId: string, input: CreateAssetInpu
     },
     include: { assetCategory: true },
   });
+
+  // Auto-post acquisition journal if payment account provided
+  if (input.acquisitionCreditAccountId && assetAccountId && userId) {
+    const org = await prisma.organisation.findUnique({
+      where: { id: organisationId }, select: { baseCurrency: true },
+    });
+    const currency = org?.baseCurrency ?? 'GHS';
+    const acquisitionDate = new Date(input.acquisitionDate + 'T00:00:00Z');
+
+    const period = await prisma.accountingPeriod.findFirst({
+      where: {
+        organisationId, status: 'OPEN',
+        startDate: { lte: acquisitionDate },
+        endDate: { gte: acquisitionDate },
+      },
+      select: { id: true },
+    });
+
+    if (period) {
+      await journalService.createAndPostSystemEntry(
+        organisationId,
+        {
+          type: 'GENERAL',
+          description: `Asset acquisition — ${input.name} (${input.code})`,
+          entryDate: input.acquisitionDate,
+          periodId: period.id,
+          currency,
+          exchangeRate: 1,
+          lines: [
+            { accountId: assetAccountId, description: `Asset cost — ${input.name}`, debitAmount: Number(cost), creditAmount: 0, currency, exchangeRate: 1 },
+            { accountId: input.acquisitionCreditAccountId, description: `Asset acquisition — ${input.name}`, debitAmount: 0, creditAmount: Number(cost), currency, exchangeRate: 1 },
+          ],
+        },
+        userId,
+      );
+    }
+  }
+
+  return asset;
 }
 
 export async function updateAsset(organisationId: string, assetId: string, input: UpdateAssetInput) {
