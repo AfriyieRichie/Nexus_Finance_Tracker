@@ -20,7 +20,8 @@ export function DialogContent({
       <RadixDialog.Overlay className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
       <RadixDialog.Content
         onInteractOutside={(e) => {
-          if ((e.target as Element).closest?.('[data-account-select-portal]')) {
+          const nativeTarget = (e as CustomEvent<{ originalEvent: PointerEvent }>).detail?.originalEvent?.target as Element | null;
+          if (nativeTarget?.closest?.('[data-account-select-portal]')) {
             e.preventDefault();
           }
         }}
