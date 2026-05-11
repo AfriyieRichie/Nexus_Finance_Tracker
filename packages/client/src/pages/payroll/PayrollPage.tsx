@@ -1282,14 +1282,26 @@ function CreateRunDialog({ organisationId, onClose }: { organisationId: string; 
 
 function RunDetail({ organisationId, run }: { organisationId: string; run: PayrollRun }) {
   const qc = useQueryClient();
+  const [workflowError, setWorkflowError] = useState<string | null>(null);
+
   const { data: detail } = useQuery({
     queryKey: ['payroll-run', organisationId, run.id],
     queryFn:  () => payrollSvc.getPayrollRun(organisationId, run.id),
   });
 
-  const submit  = useMutation({ mutationFn: () => payrollSvc.submitPayrollRun(organisationId, run.id),  onSuccess: () => void qc.invalidateQueries({ queryKey: ['payroll-runs', organisationId] }) });
-  const approve = useMutation({ mutationFn: () => payrollSvc.approvePayrollRun(organisationId, run.id), onSuccess: () => void qc.invalidateQueries({ queryKey: ['payroll-runs', organisationId] }) });
-  const pay     = useMutation({ mutationFn: () => payrollSvc.payPayrollRun(organisationId, run.id),     onSuccess: () => void qc.invalidateQueries({ queryKey: ['payroll-runs', organisationId] }) });
+  function onWorkflowError(err: unknown) {
+    setWorkflowError((err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? (err as Error)?.message ?? 'Action failed');
+  }
+
+  function onWorkflowSuccess() {
+    setWorkflowError(null);
+    void qc.invalidateQueries({ queryKey: ['payroll-runs', organisationId] });
+    void qc.invalidateQueries({ queryKey: ['payroll-run', organisationId, run.id] });
+  }
+
+  const submit  = useMutation({ mutationFn: () => payrollSvc.submitPayrollRun(organisationId, run.id),  onSuccess: onWorkflowSuccess, onError: onWorkflowError });
+  const approve = useMutation({ mutationFn: () => payrollSvc.approvePayrollRun(organisationId, run.id), onSuccess: onWorkflowSuccess, onError: onWorkflowError });
+  const pay     = useMutation({ mutationFn: () => payrollSvc.payPayrollRun(organisationId, run.id),     onSuccess: onWorkflowSuccess, onError: onWorkflowError });
 
   async function downloadCSV() {
     try {
@@ -1337,6 +1349,10 @@ function RunDetail({ organisationId, run }: { organisationId: string; run: Payro
           <Button size="sm" variant="outline" onClick={downloadCSV}><Download className="w-4 h-4 mr-1" />Payment CSV</Button>
         )}
       </div>
+
+      {workflowError && (
+        <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{workflowError}</p>
+      )}
 
       {payslips.length > 0 && (
         <div>

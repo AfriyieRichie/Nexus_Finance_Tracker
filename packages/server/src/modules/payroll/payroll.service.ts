@@ -801,7 +801,8 @@ export async function submitPayrollRun(organisationId: string, id: string, userI
   const run = await prisma.payrollRun.findFirst({ where: { id, organisationId } });
   if (!run)                                  throw new NotFoundError('Payroll run not found');
   if (run.status !== PayrollRunStatus.DRAFT) throw new ValidationError('Only DRAFT runs can be submitted');
-  if (run.createdBy === userId)              throw new ForbiddenError('The submitter must differ from the creator (four-eyes principle)');
+  // No four-eyes check between creator and submitter — the payroll preparer creates and submits.
+  // Four-eyes applies at approval and payment stages below.
 
   return prisma.payrollRun.update({
     where: { id },
