@@ -128,6 +128,7 @@ export function AccountSelect({
     ? createPortal(
         <div
           ref={dropdownRef}
+          data-account-select-portal=""
           style={{
             position: 'absolute',
             top: pos.top,
