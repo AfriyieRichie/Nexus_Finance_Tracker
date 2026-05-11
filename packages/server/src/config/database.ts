@@ -25,17 +25,13 @@ function buildDbUrl(): string {
 
 export const prisma: PrismaClient =
   global.__prisma ??
-  new PrismaClient({
+  (global.__prisma = new PrismaClient({
     datasources: { db: { url: buildDbUrl() } },
     log: [
       { emit: 'event', level: 'error' },
       { emit: 'event', level: 'warn' },
     ],
-  });
-
-if (process.env.NODE_ENV !== 'production') {
-  global.__prisma = prisma;
-}
+  }));
 
 prisma.$on('error' as never, (e: { message: string; target: string }) => {
   logger.error('Prisma error', { message: e.message, target: e.target });

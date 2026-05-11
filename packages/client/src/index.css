@@ -59,7 +59,32 @@
   }
 }
 
-/* Accounting-specific utilities */
+/* ─── Print / PDF ────────────────────────────────────────────────────────── */
+@media print {
+  /* Hide sidebar and any non-report chrome */
+  aside { display: none !important; }
+  header { display: none !important; }
+
+  /* Let the main content fill the full page */
+  main {
+    overflow: visible !important;
+    width: 100% !important;
+  }
+
+  /* Remove page padding so the report uses full paper width */
+  body { background: white !important; }
+
+  /* Preserve colours in PDF (browser default strips backgrounds) */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Sensible page margins */
+  @page { margin: 1.5cm; }
+}
+
+/* ─── Accounting-specific utilities ─────────────────────────────────────── */
 @layer utilities {
   .debit-amount {
     @apply text-blue-700 dark:text-blue-400 font-mono;

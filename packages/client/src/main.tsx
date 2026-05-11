@@ -8,9 +8,11 @@ import './index.css';
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 30_000,
+      staleTime:            5 * 60_000,  // data stays fresh for 5 min — no refetch on nav
+      gcTime:              30 * 60_000,  // keep in memory cache for 30 min
+      refetchOnWindowFocus: false,        // don't refetch when switching browser tabs
+      refetchOnReconnect:   true,         // do refetch if internet drops and reconnects
       retry: (failureCount, error) => {
-        // Do not retry on 4xx errors
         if (error instanceof Error && 'status' in error) {
           const status = (error as { status: number }).status;
           if (status >= 400 && status < 500) return false;
