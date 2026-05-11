@@ -1495,7 +1495,10 @@ export async function getCashFlowStatement(
     if (acc.type !== AccountType.FIXED_ASSET && acc.type !== AccountType.INTANGIBLE && acc.type !== AccountType.RIGHT_OF_USE_ASSET) return false;
     const sc = (acc.subClass ?? '').toUpperCase();
     const nm = acc.name.toLowerCase();
-    return !sc.includes('ACCUM') && !sc.includes('PROVISION') && !nm.includes('accumulated') && !nm.includes('provision for');
+    // Exclude contra-asset accounts (accumulated depreciation/amortisation/provision)
+    if (sc.includes('ACCUM') || sc.includes('PROVISION') || sc.includes('DEPRECIATION') || sc.includes('AMORTIS') || sc.includes('AMORTIZ')) return false;
+    if (nm.includes('accum') || nm.includes('provision for') || nm.includes('depreciation') || nm.includes('amortis') || nm.includes('amortiz')) return false;
+    return true;
   };
 
   const investLines: CFSLine[] = [];
@@ -1544,11 +1547,12 @@ export async function getCashFlowStatement(
     if (acc.class === AccountClass.EQUITY) {
       const sc = (acc.subClass ?? '').toUpperCase();
       const nm = acc.name.toLowerCase();
-      // Exclude retained earnings — that's the P&L flow
-      if (sc.includes('RETAINED') || nm.includes('retained earnings') || nm.includes('accumulated profit')) return false;
-      return acc.type === AccountType.EQUITY_ACCOUNT ||
-             sc.includes('DIVIDEND') || nm.includes('dividend') ||
-             nm.includes('share capital') || nm.includes('paid-up capital') || nm.includes('issued capital');
+      // Retained earnings flow through net profit in the operating section — exclude here
+      if (sc.includes('RETAINED') || nm.includes('retained earnings') ||
+          nm.includes('accumulated profit') || nm.includes('accumulated loss')) return false;
+      // All other equity movements are financing activities per IAS 7.17
+      // (share issuances, owner contributions, dividends, capital repayments)
+      return true;
     }
     return false;
   };
