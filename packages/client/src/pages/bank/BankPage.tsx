@@ -139,7 +139,7 @@ function NewBankAccountDialog({ organisationId }: { organisationId: string }) {
   const [open, setOpen] = useState(false);
   const { data: accountsData } = useQuery({
     queryKey: ['accounts', organisationId, 'bank-posting'],
-    queryFn: () => listAccounts(organisationId, { pageSize: 200, isControlAccount: false }),
+    queryFn: () => listAccounts(organisationId, { pageSize: 200, isControlAccount: false, postingOnly: true }),
     enabled: open,
   });
   const bankAccounts = (accountsData?.accounts ?? []).filter((a) => (a.type === 'BANK' || a.type === 'CASH') && a.isActive);
@@ -613,7 +613,7 @@ function CreateJournalDialog({ organisationId, line, onSuccess }: { organisation
   const [open, setOpen] = useState(false);
   const { data: accountsData } = useQuery({
     queryKey: ['accounts', organisationId, 'posting'],
-    queryFn: () => listAccounts(organisationId, { pageSize: 300, isControlAccount: false }),
+    queryFn: () => listAccounts(organisationId, { pageSize: 300, isControlAccount: false, postingOnly: true }),
     enabled: open,
   });
   const { data: periods } = useQuery({

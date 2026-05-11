@@ -207,7 +207,7 @@ function NewInvoiceDialog({ organisationId }: { organisationId: string }) {
 
   const { data: accountsData } = useQuery({
     queryKey: ['accounts', organisationId, 'posting'],
-    queryFn: () => listAccounts(organisationId, { pageSize: 200, isControlAccount: false }),
+    queryFn: () => listAccounts(organisationId, { pageSize: 200, isControlAccount: false, postingOnly: true }),
     enabled: open,
   });
 
@@ -560,7 +560,7 @@ function RecordPaymentDialog({ organisationId, invoice, trigger }: { organisatio
 
   const { data: accountsData } = useQuery({
     queryKey: ['accounts', organisationId, 'bank-cash'],
-    queryFn: () => listAccounts(organisationId, { pageSize: 200, isControlAccount: false }),
+    queryFn: () => listAccounts(organisationId, { pageSize: 200, isControlAccount: false, postingOnly: true }),
     enabled: open,
   });
 
@@ -678,7 +678,7 @@ function CreditNoteDialog({ organisationId, invoice, trigger }: { organisationId
 
   const { data: accountsData } = useQuery({
     queryKey: ['accounts', organisationId, 'posting'],
-    queryFn: () => listAccounts(organisationId, { pageSize: 200, isControlAccount: false }),
+    queryFn: () => listAccounts(organisationId, { pageSize: 200, isControlAccount: false, postingOnly: true }),
     enabled: open,
   });
 
@@ -792,7 +792,7 @@ function BadDebtDialog({ organisationId, invoice, trigger }: { organisationId: s
 
   const { data: accountsData } = useQuery({
     queryKey: ['accounts', organisationId, 'posting'],
-    queryFn: () => listAccounts(organisationId, { pageSize: 200, isControlAccount: false }),
+    queryFn: () => listAccounts(organisationId, { pageSize: 200, isControlAccount: false, postingOnly: true }),
     enabled: open,
   });
 

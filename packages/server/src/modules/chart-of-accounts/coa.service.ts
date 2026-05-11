@@ -189,6 +189,7 @@ export async function listAccounts(organisationId: string, query: ListAccountsQu
     ...(query.isActive !== undefined && { isActive: query.isActive }),
     ...(query.isControlAccount !== undefined && { isControlAccount: query.isControlAccount }),
     ...(query.parentId !== undefined && { parentId: query.parentId }),
+    ...(query.postingOnly && { children: { none: {} } }),
     ...(query.search && {
       OR: [
         { name: { contains: query.search, mode: 'insensitive' } },

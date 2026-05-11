@@ -112,7 +112,7 @@ function NewLocationDialog({ organisationId }: { organisationId: string }) {
 function NewItemDialog({ organisationId }: { organisationId: string }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
-  const { data: accountsData } = useQuery({ queryKey: ['accounts', organisationId, 'posting'], queryFn: () => listAccounts(organisationId, { pageSize: 300, isControlAccount: false }), enabled: open });
+  const { data: accountsData } = useQuery({ queryKey: ['accounts', organisationId, 'posting'], queryFn: () => listAccounts(organisationId, { pageSize: 300, isControlAccount: false, postingOnly: true }), enabled: open });
   const { data: categories } = useQuery({ queryKey: ['inv-categories', organisationId], queryFn: () => inv.listCategories(organisationId), enabled: open });
 
   const [form, setForm] = useState({
@@ -230,7 +230,7 @@ function NewItemDialog({ organisationId }: { organisationId: string }) {
 
 function CreateMovementDialog({ organisationId, item, onSuccess }: { organisationId: string; item: inv.InventoryItem; onSuccess: () => void }) {
   const [open, setOpen] = useState(false);
-  const { data: accountsData } = useQuery({ queryKey: ['accounts', organisationId, 'posting'], queryFn: () => listAccounts(organisationId, { pageSize: 300, isControlAccount: false }), enabled: open });
+  const { data: accountsData } = useQuery({ queryKey: ['accounts', organisationId, 'posting'], queryFn: () => listAccounts(organisationId, { pageSize: 300, isControlAccount: false, postingOnly: true }), enabled: open });
   const { data: periods } = useQuery({ queryKey: ['periods', organisationId, 'open'], queryFn: () => listPeriods(organisationId, { status: 'OPEN' }), enabled: open });
   const { data: locations } = useQuery({ queryKey: ['inv-locations', organisationId], queryFn: () => inv.listLocations(organisationId), enabled: open });
 

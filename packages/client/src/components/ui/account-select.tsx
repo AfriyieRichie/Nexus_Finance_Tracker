@@ -134,6 +134,7 @@ export function AccountSelect({
             top: pos.top,
             left: pos.left,
             width: pos.width,
+            minWidth: 260,
             zIndex: 9999,
             pointerEvents: 'auto',
           }}

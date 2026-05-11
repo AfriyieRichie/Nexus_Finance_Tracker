@@ -209,7 +209,7 @@ function BudgetLineEditor({ organisationId, budget, onBack }: { organisationId: 
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const { data: accountsData } = useQuery({ queryKey: ['accounts', organisationId], queryFn: () => listAccounts(organisationId, { pageSize: 500, isActive: true }) });
+  const { data: accountsData } = useQuery({ queryKey: ['accounts', organisationId], queryFn: () => listAccounts(organisationId, { pageSize: 500, isActive: true, postingOnly: true }) });
   const { data: centres = [] } = useQuery({ queryKey: ['cost-centres', organisationId], queryFn: () => budgets.listCostCentres(organisationId) });
 
   const buildInitialRows = (): LineRow[] => {
@@ -485,7 +485,7 @@ function CommitmentsView({ organisationId, budget, costCentres }: { organisation
   });
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
-  const { data: accountsData } = useQuery({ queryKey: ['accounts', organisationId], queryFn: () => listAccounts(organisationId, { pageSize: 500, isActive: true }) });
+  const { data: accountsData } = useQuery({ queryKey: ['accounts', organisationId], queryFn: () => listAccounts(organisationId, { pageSize: 500, isActive: true, postingOnly: true }) });
   const { data: commitments = [], isLoading } = useQuery({
     queryKey: ['commitments', organisationId, budget.id],
     queryFn: () => budgets.listCommitments(organisationId, budget.id),

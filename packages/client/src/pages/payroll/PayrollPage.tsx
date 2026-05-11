@@ -141,7 +141,7 @@ function SalaryComponentsTab({ organisationId }: { organisationId: string }) {
   });
   const { data: accountsData } = useQuery({
     queryKey: ['accounts', organisationId, 'posting'],
-    queryFn:  () => listAccounts(organisationId, { pageSize: 300, isControlAccount: false }),
+    queryFn:  () => listAccounts(organisationId, { pageSize: 300, isControlAccount: false, postingOnly: true }),
     enabled:  open,
   });
   const allAccounts = accountsData?.accounts ?? [];
@@ -247,7 +247,7 @@ function EmployeeDialog({ organisationId, emp, onClose }: { organisationId: stri
   const qc = useQueryClient();
   const { data: accountsData } = useQuery({
     queryKey: ['accounts', organisationId, 'posting'],
-    queryFn:  () => listAccounts(organisationId, { pageSize: 300, isControlAccount: false }),
+    queryFn:  () => listAccounts(organisationId, { pageSize: 300, isControlAccount: false, postingOnly: true }),
   });
   const allAccounts = accountsData?.accounts ?? [];
   const expenseAccounts = allAccounts.filter((a) => a.class === 'EXPENSE');
@@ -488,7 +488,7 @@ function PayslipRow({ slip }: { slip: Payslip }) {
 function CreateRunDialog({ organisationId, onClose }: { organisationId: string; onClose: () => void }) {
   const qc = useQueryClient();
   const { data: periodsData = [] } = useQuery({ queryKey: ['periods', organisationId], queryFn: () => listPeriods(organisationId) });
-  const { data: accountsData } = useQuery({ queryKey: ['accounts', organisationId, 'posting'], queryFn: () => listAccounts(organisationId, { pageSize: 300, isControlAccount: false }) });
+  const { data: accountsData } = useQuery({ queryKey: ['accounts', organisationId, 'posting'], queryFn: () => listAccounts(organisationId, { pageSize: 300, isControlAccount: false, postingOnly: true }) });
   const allAccounts = accountsData?.accounts ?? [];
   const liabilityAccounts = allAccounts.filter((a) => a.class === 'LIABILITY');
 

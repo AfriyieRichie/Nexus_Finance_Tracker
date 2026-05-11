@@ -276,8 +276,8 @@ function AssetDetailPanel({ organisationId, assetId, onClose }: { organisationId
   });
 
   const { data: accounts } = useQuery({
-    queryKey: ['accounts', organisationId],
-    queryFn: () => listAccounts(organisationId),
+    queryKey: ['accounts', organisationId, 'posting'],
+    queryFn: () => listAccounts(organisationId, { postingOnly: true }),
   });
 
   const openPeriods = (periods ?? []).filter((p) => p.status === 'OPEN');
@@ -583,8 +583,8 @@ function CategoriesTab({ organisationId }: { organisationId: string }) {
   });
 
   const { data: accountsData } = useQuery({
-    queryKey: ['accounts', organisationId],
-    queryFn: () => listAccounts(organisationId),
+    queryKey: ['accounts', organisationId, 'posting'],
+    queryFn: () => listAccounts(organisationId, { postingOnly: true }),
     enabled: open,
   });
   const allAccounts = accountsData?.accounts ?? [];
