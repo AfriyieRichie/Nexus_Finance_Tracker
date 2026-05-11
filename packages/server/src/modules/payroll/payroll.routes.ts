@@ -26,6 +26,9 @@ payrollRouter.get('/employees/:id',             requireRole(REPORT_VIEWER),   ct
 payrollRouter.patch('/employees/:id',           requireRole(FINANCE_MANAGER), ctrl.updateEmployee);
 payrollRouter.post('/employees/:id/components', requireRole(FINANCE_MANAGER), ctrl.assignComponent);
 payrollRouter.delete('/employees/:id/components/:assignmentId', requireRole(FINANCE_MANAGER), ctrl.removeComponent);
+payrollRouter.get('/employees/:employeeId/loans',              requireRole(REPORT_VIEWER),   ctrl.listLoans);
+payrollRouter.post('/employees/:employeeId/loans',             requireRole(FINANCE_MANAGER), ctrl.createLoan);
+payrollRouter.patch('/employees/:employeeId/loans/:loanId',    requireRole(FINANCE_MANAGER), ctrl.updateLoan);
 
 // ─── Payroll Runs ─────────────────────────────────────────────────────────────
 payrollRouter.get('/runs',                      requireRole(REPORT_VIEWER),   ctrl.listPayrollRuns);

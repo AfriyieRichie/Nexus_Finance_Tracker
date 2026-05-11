@@ -93,6 +93,20 @@ export interface ListPayrollParams {
   pageSize?: number;
 }
 
+export interface CreateLoanInput {
+  description: string;
+  principalAmount: number;
+  instalmentAmount: number;
+  startDate: string;
+  glAccountId?: string;
+}
+
+export interface UpdateLoanInput {
+  status?: 'ACTIVE' | 'COMPLETED' | 'CANCELLED' | 'SUSPENDED';
+  instalmentAmount?: number;
+  balance?: number;
+}
+
 // ─── Ghana 2024 Default PAYE Bands (monthly GHS) ─────────────────────────────
 
 const DEFAULT_PAYE_BANDS: PayeBand[] = [
@@ -335,6 +349,64 @@ export async function removeComponent(organisationId: string, employeeId: string
   });
 }
 
+// ─── Employee Loans ───────────────────────────────────────────────────────────
+
+export async function listLoans(organisationId: string, employeeId: string) {
+  const emp = await prisma.employee.findFirst({ where: { id: employeeId, organisationId } });
+  if (!emp) throw new NotFoundError('Employee not found');
+
+  return (prisma as any).employeeLoan.findMany({
+    where:   { employeeId, organisationId },
+    orderBy: { createdAt: 'desc' },
+    include: { glAccount: { select: { id: true, code: true, name: true } } },
+  });
+}
+
+export async function createLoan(
+  organisationId: string,
+  employeeId: string,
+  input: CreateLoanInput,
+  userId: string,
+) {
+  const emp = await prisma.employee.findFirst({ where: { id: employeeId, organisationId } });
+  if (!emp) throw new NotFoundError('Employee not found');
+
+  if (input.principalAmount <= 0)  throw new ValidationError('Principal amount must be positive');
+  if (input.instalmentAmount <= 0) throw new ValidationError('Instalment amount must be positive');
+  if (input.instalmentAmount > input.principalAmount) throw new ValidationError('Instalment cannot exceed principal');
+
+  return (prisma as any).employeeLoan.create({
+    data: {
+      organisationId,
+      employeeId,
+      description:      input.description,
+      principalAmount:  input.principalAmount,
+      balance:          input.principalAmount,
+      instalmentAmount: input.instalmentAmount,
+      startDate:        new Date(input.startDate),
+      glAccountId:      input.glAccountId,
+      createdBy:        userId,
+      status:           'ACTIVE',
+    },
+    include: { glAccount: { select: { id: true, code: true, name: true } } },
+  });
+}
+
+export async function updateLoan(organisationId: string, id: string, input: UpdateLoanInput) {
+  const loan = await (prisma as any).employeeLoan.findFirst({ where: { id, organisationId } });
+  if (!loan) throw new NotFoundError('Loan not found');
+
+  return (prisma as any).employeeLoan.update({
+    where: { id },
+    data: {
+      ...(input.status            !== undefined && { status:            input.status }),
+      ...(input.instalmentAmount  !== undefined && { instalmentAmount:  input.instalmentAmount }),
+      ...(input.balance           !== undefined && { balance:           input.balance }),
+    },
+    include: { glAccount: { select: { id: true, code: true, name: true } } },
+  });
+}
+
 // ─── Salary Components ────────────────────────────────────────────────────────
 
 export async function listSalaryComponents(organisationId: string, isActive?: boolean) {
@@ -513,7 +585,7 @@ export async function createPayrollRun(
     let otherEarnings  = 0;
     let otherDeductions = 0;
 
-    const lines: { description: string; type: SalaryComponentType; amount: number; isEmployer: boolean; componentId: string | undefined }[] = [];
+    const lines: { description: string; type: SalaryComponentType; amount: number; isEmployer: boolean; componentId: string | undefined; loanId?: string }[] = [];
 
     lines.push({ description: 'Basic Salary', type: SalaryComponentType.BASIC_SALARY, amount: basic, isEmployer: false, componentId: undefined });
     if (overtime  > 0) lines.push({ description: 'Overtime', type: SalaryComponentType.OVERTIME, amount: overtime, isEmployer: false, componentId: undefined });
@@ -533,6 +605,18 @@ export async function createPayrollRun(
       } else if (compType === SalaryComponentType.EMPLOYEE_DEDUCTION) {
         otherDeductions = round4(otherDeductions + compAmount);
         lines.push({ description: ec.component.name, type: compType, amount: compAmount, isEmployer: false, componentId: ec.component.id });
+      }
+    }
+
+    // Active loan repayments
+    const activeLoans = await (prisma as any).employeeLoan.findMany({
+      where: { employeeId: emp.id, status: 'ACTIVE', startDate: { lte: paymentDate } },
+    });
+    for (const loan of activeLoans) {
+      const instalment = round4(Math.min(Number(loan.instalmentAmount), Number(loan.balance)));
+      if (instalment > 0) {
+        otherDeductions = round4(otherDeductions + instalment);
+        lines.push({ description: `Loan Repayment: ${loan.description}`, type: SalaryComponentType.EMPLOYEE_DEDUCTION, amount: instalment, isEmployer: false, componentId: undefined, loanId: loan.id });
       }
     }
 
@@ -627,7 +711,7 @@ export async function createPayrollRun(
       ytdNetPay,
       departmentId:     emp.departmentId,
       costCentreId:     emp.costCentreId,
-      lines:            { create: lines.map((l) => ({ description: l.description, type: l.type, amount: l.amount, isEmployer: l.isEmployer, componentId: l.componentId })) },
+      lines:            { create: lines.map((l) => ({ description: l.description, type: l.type, amount: l.amount, isEmployer: l.isEmployer, componentId: l.componentId, loanId: l.loanId })) },
     } as PayslipCreate);
 
     totalGross           = round4(totalGross           + grossPay);
@@ -799,6 +883,25 @@ export async function payPayrollRun(organisationId: string, id: string, userId: 
       data:  { status: PayslipStatus.PAID },
     }),
   ]);
+
+  // Reduce loan balances for repayments in this run
+  const loanLines = await prisma.payslipLine.findMany({
+    where: { payslip: { payrollRunId: id }, loanId: { not: null } },
+    select: { loanId: true, amount: true },
+  });
+  const loanTotals = new Map<string, number>();
+  for (const line of loanLines) {
+    if (line.loanId) loanTotals.set(line.loanId, (loanTotals.get(line.loanId) ?? 0) + Number(line.amount));
+  }
+  for (const [loanId, repaid] of loanTotals.entries()) {
+    const loan = await (prisma as any).employeeLoan.findUnique({ where: { id: loanId } });
+    if (!loan) continue;
+    const newBalance = round4(Math.max(0, Number(loan.balance) - repaid));
+    await (prisma as any).employeeLoan.update({
+      where: { id: loanId },
+      data:  { balance: newBalance, status: newBalance === 0 ? 'COMPLETED' : 'ACTIVE' },
+    });
+  }
 
   return updatedRun;
 }

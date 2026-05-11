@@ -182,6 +182,26 @@ export interface PayrollRun {
   _count?: { payslips: number };
 }
 
+// ── Employee Loan ─────────────────────────────────────────────────────────────
+
+export type LoanStatus = 'ACTIVE' | 'COMPLETED' | 'CANCELLED' | 'SUSPENDED';
+
+export interface EmployeeLoan {
+  id: string;
+  organisationId: string;
+  employeeId: string;
+  description: string;
+  principalAmount: string;
+  balance: string;
+  instalmentAmount: string;
+  startDate: string;
+  glAccountId: string | null;
+  status: LoanStatus;
+  createdBy: string;
+  createdAt: string;
+  glAccount: { id: string; code: string; name: string } | null;
+}
+
 // ── API Functions ─────────────────────────────────────────────────────────────
 
 // Statutory Config
@@ -261,6 +281,25 @@ export const payPayrollRun = (organisationId: string, id: string) =>
 
 export const downloadPaymentFile = (organisationId: string, id: string) =>
   api.get(`/organisations/${organisationId}/payroll/runs/${id}/payment-file`, { responseType: 'blob' });
+
+// Loans
+export const listLoans = (organisationId: string, employeeId: string) =>
+  api.get(`/organisations/${organisationId}/payroll/employees/${employeeId}/loans`).then((r) => r.data.data as EmployeeLoan[]);
+
+export const createLoan = (
+  organisationId: string,
+  employeeId: string,
+  data: { description: string; principalAmount: number; instalmentAmount: number; startDate: string; glAccountId?: string },
+) =>
+  api.post(`/organisations/${organisationId}/payroll/employees/${employeeId}/loans`, data).then((r) => r.data.data as EmployeeLoan);
+
+export const updateLoan = (
+  organisationId: string,
+  employeeId: string,
+  loanId: string,
+  data: { status?: LoanStatus; instalmentAmount?: number; balance?: number },
+) =>
+  api.patch(`/organisations/${organisationId}/payroll/employees/${employeeId}/loans/${loanId}`, data).then((r) => r.data.data as EmployeeLoan);
 
 // Legacy journal-based
 export const processPayroll = (organisationId: string, data: object) =>

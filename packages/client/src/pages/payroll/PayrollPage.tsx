@@ -3,9 +3,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Users, Settings, Play, Download, ChevronDown, ChevronRight, CheckCircle, XCircle, Plus, Trash2 } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import * as payrollSvc from '@/services/payroll.service';
-import type { PayrollRun, Employee, SalaryComponent, Payslip, SalaryComponentType } from '@/services/payroll.service';
+import type { PayrollRun, Employee, SalaryComponent, Payslip, SalaryComponentType, EmployeeLoan } from '@/services/payroll.service';
 import { listAccounts } from '@/services/accounts.service';
 import { listPeriods } from '@/services/periods.service';
+import { listDepartments, listCostCentres } from '@/services/budgets.service';
 import { AccountSelect } from '@/components/ui/account-select';
 import type { AccountOption } from '@/components/ui/account-select';
 import { Card, CardContent } from '@/components/ui/card';
@@ -337,6 +338,25 @@ function SalaryComponentsTab({ organisationId }: { organisationId: string }) {
 
 // ─── Employee Tab ─────────────────────────────────────────────────────────────
 
+type EmpTab = 'personal' | 'employment' | 'compensation' | 'statutory' | 'bank' | 'pay-elements' | 'loans';
+
+const EMP_TABS: { key: EmpTab; label: string }[] = [
+  { key: 'personal',     label: 'Personal' },
+  { key: 'employment',   label: 'Employment' },
+  { key: 'compensation', label: 'Compensation' },
+  { key: 'statutory',    label: 'Tax & Statutory' },
+  { key: 'bank',         label: 'Bank' },
+  { key: 'pay-elements', label: 'Pay Elements' },
+  { key: 'loans',        label: 'Loans' },
+];
+
+const LOAN_STATUS_COLORS: Record<string, string> = {
+  ACTIVE:    'bg-blue-100 text-blue-700',
+  COMPLETED: 'bg-green-100 text-green-700',
+  CANCELLED: 'bg-gray-100 text-gray-500',
+  SUSPENDED: 'bg-yellow-100 text-yellow-700',
+};
+
 function EmployeeDialog({ organisationId, emp, employees, onClose }: {
   organisationId: string;
   emp: Employee | null;
@@ -344,134 +364,548 @@ function EmployeeDialog({ organisationId, emp, employees, onClose }: {
   onClose: () => void;
 }) {
   const qc = useQueryClient();
+  const today = new Date().toISOString().split('T')[0];
+
+  const [activeTab, setActiveTab] = useState<EmpTab>('personal');
+  // ID of a freshly created employee (stays null when editing)
+  const [savedEmpId, setSavedEmpId] = useState<string | null>(null);
+  const effectiveEmpId = emp?.id ?? savedEmpId;
+
+  // ── Queries ────────────────────────────────────────────────────────────────
   const { data: accountsData } = useQuery({
     queryKey: ['accounts', organisationId, 'posting'],
     queryFn:  () => listAccounts(organisationId, { pageSize: 300, isControlAccount: false, postingOnly: true }),
   });
-  const allAccounts = accountsData?.accounts ?? [];
-  const expenseAccountOptions: AccountOption[] = toAccountOptions(allAccounts.filter((a) => a.class === 'EXPENSE'));
+  const { data: departments = [] } = useQuery({
+    queryKey: ['departments', organisationId],
+    queryFn:  () => listDepartments(organisationId),
+  });
+  const { data: costCentres = [] } = useQuery({
+    queryKey: ['cost-centres', organisationId],
+    queryFn:  () => listCostCentres(organisationId),
+  });
+  const { data: allComponents = [] } = useQuery({
+    queryKey: ['payroll-components', organisationId],
+    queryFn:  () => payrollSvc.listSalaryComponents(organisationId, true),
+  });
+  const { data: freshEmp, refetch: refetchEmp } = useQuery({
+    queryKey: ['payroll-employee', effectiveEmpId],
+    queryFn:  () => payrollSvc.getEmployee(organisationId, effectiveEmpId!),
+    enabled:  !!effectiveEmpId,
+  });
 
+  const expenseAccountOptions: AccountOption[] = toAccountOptions(
+    (accountsData?.accounts ?? []).filter((a) => a.class === 'EXPENSE'),
+  );
+
+  // ── Form state ─────────────────────────────────────────────────────────────
   const defaultForm = {
     employeeNumber: nextEmployeeNumber(employees),
-    firstName: '', lastName: '', email: '', phone: '',
-    nationalId: '', tinNumber: '', ssnitNumber: '',
+    firstName: '', lastName: '', email: '', phone: '', nationalId: '',
+    tinNumber: '', ssnitNumber: '',
     employmentType: 'FULL_TIME', payFrequency: 'MONTHLY',
-    startDate: new Date().toISOString().split('T')[0], endDate: '',
-    jobTitle: '', basicSalary: '', bankName: '', bankAccountNumber: '', bankBranch: '',
-    tier3EmployeeRate: '', tier3EmployerRate: '', salaryExpenseAccountId: '',
+    startDate: today, endDate: '',
+    jobTitle: '', departmentId: '', costCentreId: '',
+    basicSalary: '', salaryExpenseAccountId: '',
+    tier3EmployeeRate: '', tier3EmployerRate: '',
     isResident: true,
+    bankName: '', bankAccountNumber: '', bankBranch: '',
   };
+
   const [form, setForm] = useState(emp ? {
-    employeeNumber:        emp.employeeNumber,
-    firstName:             emp.firstName,
-    lastName:              emp.lastName,
-    email:                 emp.email ?? '',
-    phone:                 emp.phone ?? '',
-    nationalId:            emp.nationalId ?? '',
-    tinNumber:             emp.tinNumber ?? '',
-    ssnitNumber:           emp.ssnitNumber ?? '',
-    employmentType:        emp.employmentType,
-    payFrequency:          emp.payFrequency,
-    startDate:             emp.startDate.split('T')[0],
-    endDate:               emp.endDate?.split('T')[0] ?? '',
-    jobTitle:              emp.jobTitle ?? '',
-    basicSalary:           emp.basicSalary,
-    bankName:              emp.bankName ?? '',
-    bankAccountNumber:     emp.bankAccountNumber ?? '',
-    bankBranch:            emp.bankBranch ?? '',
-    tier3EmployeeRate:     emp.tier3EmployeeRate ? String(Number(emp.tier3EmployeeRate) * 100) : '',
-    tier3EmployerRate:     emp.tier3EmployerRate ? String(Number(emp.tier3EmployerRate) * 100) : '',
+    employeeNumber:         emp.employeeNumber,
+    firstName:              emp.firstName,
+    lastName:               emp.lastName,
+    email:                  emp.email ?? '',
+    phone:                  emp.phone ?? '',
+    nationalId:             emp.nationalId ?? '',
+    tinNumber:              emp.tinNumber ?? '',
+    ssnitNumber:            emp.ssnitNumber ?? '',
+    employmentType:         emp.employmentType,
+    payFrequency:           emp.payFrequency,
+    startDate:              emp.startDate.split('T')[0],
+    endDate:                emp.endDate?.split('T')[0] ?? '',
+    jobTitle:               emp.jobTitle ?? '',
+    departmentId:           emp.departmentId ?? '',
+    costCentreId:           emp.costCentreId ?? '',
+    basicSalary:            emp.basicSalary,
     salaryExpenseAccountId: emp.salaryExpenseAccountId ?? '',
-    isResident:            emp.isResident ?? true,
+    tier3EmployeeRate:      emp.tier3EmployeeRate ? String(Number(emp.tier3EmployeeRate) * 100) : '',
+    tier3EmployerRate:      emp.tier3EmployerRate ? String(Number(emp.tier3EmployerRate) * 100) : '',
+    isResident:             emp.isResident ?? true,
+    bankName:               emp.bankName ?? '',
+    bankAccountNumber:      emp.bankAccountNumber ?? '',
+    bankBranch:             emp.bankBranch ?? '',
   } : defaultForm);
 
   const set = (k: string, v: string | boolean) => setForm((f) => ({ ...f, [k]: v }));
 
+  // ── Component assignment state ─────────────────────────────────────────────
+  const [addingComp, setAddingComp] = useState(false);
+  const defaultCompForm = { componentId: '', amount: '', rate: '', effectiveFrom: today };
+  const [compForm, setCompForm] = useState(defaultCompForm);
+  const setC = (k: string, v: string) => setCompForm((f) => ({ ...f, [k]: v }));
+
+  // ── Loan state ─────────────────────────────────────────────────────────────
+  const { data: loans = [], refetch: refetchLoans } = useQuery({
+    queryKey: ['employee-loans', effectiveEmpId],
+    queryFn:  () => payrollSvc.listLoans(organisationId, effectiveEmpId!),
+    enabled:  !!effectiveEmpId,
+  });
+  const [addingLoan, setAddingLoan] = useState(false);
+  const { data: assetAccountsData } = useQuery({
+    queryKey: ['accounts', organisationId, 'posting', 'asset'],
+    queryFn:  () => listAccounts(organisationId, { pageSize: 300, isControlAccount: false, postingOnly: true }),
+    enabled:  activeTab === 'loans' && !!effectiveEmpId,
+  });
+  const assetAccountOptions: AccountOption[] = toAccountOptions(
+    (assetAccountsData?.accounts ?? []).filter((a) => a.class === 'ASSET'),
+  );
+  const defaultLoanForm = { description: '', principalAmount: '', instalmentAmount: '', startDate: today, glAccountId: '' };
+  const [loanForm, setLoanForm] = useState(defaultLoanForm);
+  const setL = (k: string, v: string) => setLoanForm((f) => ({ ...f, [k]: v }));
+
+  const createLoan = useMutation({
+    mutationFn: () => payrollSvc.createLoan(organisationId, effectiveEmpId!, {
+      description:      loanForm.description,
+      principalAmount:  Number(loanForm.principalAmount),
+      instalmentAmount: Number(loanForm.instalmentAmount),
+      startDate:        loanForm.startDate,
+      glAccountId:      loanForm.glAccountId || undefined,
+    }),
+    onSuccess: () => { void refetchLoans(); setAddingLoan(false); setLoanForm(defaultLoanForm); },
+  });
+
+  const updateLoanStatus = useMutation({
+    mutationFn: ({ loanId, status }: { loanId: string; status: EmployeeLoan['status'] }) =>
+      payrollSvc.updateLoan(organisationId, effectiveEmpId!, loanId, { status }),
+    onSuccess: () => void refetchLoans(),
+  });
+
+  // ── Mutations ──────────────────────────────────────────────────────────────
   const save = useMutation({
     mutationFn: () => {
       const payload = {
         ...form,
-        basicSalary:           Number(form.basicSalary),
-        endDate:               form.endDate || undefined,
-        email:                 form.email || undefined,
-        phone:                 form.phone || undefined,
-        nationalId:            form.nationalId || undefined,
-        tinNumber:             form.tinNumber || undefined,
-        ssnitNumber:           form.ssnitNumber || undefined,
-        jobTitle:              form.jobTitle || undefined,
-        bankName:              form.bankName || undefined,
-        bankAccountNumber:     form.bankAccountNumber || undefined,
-        bankBranch:            form.bankBranch || undefined,
-        tier3EmployeeRate:     form.tier3EmployeeRate ? Number(form.tier3EmployeeRate) / 100 : undefined,
-        tier3EmployerRate:     form.tier3EmployerRate ? Number(form.tier3EmployerRate) / 100 : undefined,
+        basicSalary:            Number(form.basicSalary),
+        endDate:                form.endDate || undefined,
+        email:                  form.email || undefined,
+        phone:                  form.phone || undefined,
+        nationalId:             form.nationalId || undefined,
+        tinNumber:              form.tinNumber || undefined,
+        ssnitNumber:            form.ssnitNumber || undefined,
+        jobTitle:               form.jobTitle || undefined,
+        departmentId:           form.departmentId || undefined,
+        costCentreId:           form.costCentreId || undefined,
+        bankName:               form.bankName || undefined,
+        bankAccountNumber:      form.bankAccountNumber || undefined,
+        bankBranch:             form.bankBranch || undefined,
+        tier3EmployeeRate:      form.tier3EmployeeRate ? Number(form.tier3EmployeeRate) / 100 : undefined,
+        tier3EmployerRate:      form.tier3EmployerRate ? Number(form.tier3EmployerRate) / 100 : undefined,
         salaryExpenseAccountId: form.salaryExpenseAccountId || undefined,
       };
       return emp
         ? payrollSvc.updateEmployee(organisationId, emp.id, payload as unknown as Parameters<typeof payrollSvc.updateEmployee>[2])
         : payrollSvc.createEmployee(organisationId, payload as Parameters<typeof payrollSvc.createEmployee>[1]);
     },
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['payroll-employees', organisationId] }); onClose(); },
+    onSuccess: (result) => {
+      void qc.invalidateQueries({ queryKey: ['payroll-employees', organisationId] });
+      if (!emp) {
+        setSavedEmpId(result.id);
+        setActiveTab('pay-elements');
+      } else {
+        onClose();
+      }
+    },
   });
 
+  const assignComp = useMutation({
+    mutationFn: () => payrollSvc.assignComponent(organisationId, effectiveEmpId!, {
+      componentId:  compForm.componentId,
+      amount:       compForm.amount ? Number(compForm.amount) : undefined,
+      rate:         compForm.rate   ? Number(compForm.rate) / 100 : undefined,
+      effectiveFrom: compForm.effectiveFrom,
+    }),
+    onSuccess: () => { void refetchEmp(); setAddingComp(false); setCompForm(defaultCompForm); },
+  });
+
+  const removeComp = useMutation({
+    mutationFn: (assignmentId: string) => payrollSvc.removeComponent(organisationId, effectiveEmpId!, assignmentId),
+    onSuccess: () => void refetchEmp(),
+  });
+
+  // ── Derived ────────────────────────────────────────────────────────────────
+  const currentComponents = (freshEmp ?? emp)?.components ?? [];
+  const requiresEmpId = (key: EmpTab) => key === 'pay-elements' || key === 'loans';
+  const tabLocked     = (key: EmpTab) => requiresEmpId(key) && !effectiveEmpId;
+  const tabIdx  = EMP_TABS.findIndex((t) => t.key === activeTab);
+  const canBack = tabIdx > 0;
+  const canNext = tabIdx < EMP_TABS.length - 1 && !tabLocked(EMP_TABS[tabIdx + 1].key);
+  const isPayElements = activeTab === 'pay-elements';
+  const isLoans       = activeTab === 'loans';
+
+  function goTo(key: EmpTab) {
+    if (tabLocked(key)) return;
+    setActiveTab(key);
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-2">
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="text-sm font-medium">Employee No.</label>
-          <Input value={form.employeeNumber} onChange={(e) => set('employeeNumber', e.target.value)} placeholder="EMP-0001" />
-          {!emp && <p className="text-xs text-muted-foreground mt-0.5">Auto-generated — override if needed</p>}
-        </div>
-        <div><label className="text-sm font-medium">First Name</label><Input value={form.firstName} onChange={(e) => set('firstName', e.target.value)} /></div>
-        <div><label className="text-sm font-medium">Last Name</label><Input value={form.lastName} onChange={(e) => set('lastName', e.target.value)} /></div>
-        <div><label className="text-sm font-medium">Email</label><Input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} /></div>
-        <div><label className="text-sm font-medium">Phone</label><Input value={form.phone} onChange={(e) => set('phone', e.target.value)} /></div>
-        <div><label className="text-sm font-medium">National ID</label><Input value={form.nationalId} onChange={(e) => set('nationalId', e.target.value)} /></div>
-        <div><label className="text-sm font-medium">TIN Number</label><Input value={form.tinNumber} onChange={(e) => set('tinNumber', e.target.value)} /></div>
-        <div><label className="text-sm font-medium">SSNIT Number</label><Input value={form.ssnitNumber} onChange={(e) => set('ssnitNumber', e.target.value)} /></div>
-        <div>
-          <label className="text-sm font-medium">Employment Type</label>
-          <Select value={form.employmentType} onChange={(e) => set('employmentType', e.target.value)}>
-            <option value="FULL_TIME">Full Time</option>
-            <option value="PART_TIME">Part Time</option>
-            <option value="CONTRACT">Contract</option>
-            <option value="CASUAL">Casual</option>
-          </Select>
-        </div>
-        <div>
-          <label className="text-sm font-medium">Pay Frequency</label>
-          <Select value={form.payFrequency} onChange={(e) => set('payFrequency', e.target.value)}>
-            <option value="MONTHLY">Monthly</option>
-            <option value="FORTNIGHTLY">Fortnightly</option>
-            <option value="WEEKLY">Weekly</option>
-          </Select>
-        </div>
-        <div><label className="text-sm font-medium">Start Date</label><Input type="date" value={form.startDate} onChange={(e) => set('startDate', e.target.value)} /></div>
-        <div><label className="text-sm font-medium">End Date (optional)</label><Input type="date" value={form.endDate} onChange={(e) => set('endDate', e.target.value)} /></div>
-        <div><label className="text-sm font-medium">Job Title</label><Input value={form.jobTitle} onChange={(e) => set('jobTitle', e.target.value)} /></div>
-        <div><label className="text-sm font-medium">Basic Salary (GHS/month)</label><Input type="number" value={form.basicSalary} onChange={(e) => set('basicSalary', e.target.value)} /></div>
-        <div><label className="text-sm font-medium">Bank Name</label><Input value={form.bankName} onChange={(e) => set('bankName', e.target.value)} /></div>
-        <div><label className="text-sm font-medium">Bank Account No.</label><Input value={form.bankAccountNumber} onChange={(e) => set('bankAccountNumber', e.target.value)} /></div>
-        <div><label className="text-sm font-medium">Bank Branch</label><Input value={form.bankBranch} onChange={(e) => set('bankBranch', e.target.value)} /></div>
-        <div><label className="text-sm font-medium">Tier 3 Emp Rate (%)</label><Input type="number" step="0.5" value={form.tier3EmployeeRate} onChange={(e) => set('tier3EmployeeRate', e.target.value)} placeholder="0" /></div>
-        <div><label className="text-sm font-medium">Tier 3 Er Rate (%)</label><Input type="number" step="0.5" value={form.tier3EmployerRate} onChange={(e) => set('tier3EmployerRate', e.target.value)} placeholder="0" /></div>
-        <div className="col-span-2 flex items-center gap-2 pt-1">
-          <input type="checkbox" id="isResident" checked={!!form.isResident} onChange={(e) => set('isResident', e.target.checked)} />
-          <label htmlFor="isResident" className="text-sm font-medium">Resident employee</label>
-          <span className="text-xs text-muted-foreground">(uncheck for non-resident — overtime taxed at 20%)</span>
-        </div>
-        <div className="col-span-2">
-          <label className="text-sm font-medium">Salary Expense Account</label>
-          <AccountSelect
-            value={form.salaryExpenseAccountId}
-            onChange={(id) => set('salaryExpenseAccountId', id)}
-            accounts={expenseAccountOptions}
-            placeholder="— use run default —"
-          />
-        </div>
+    <div className="flex flex-col">
+
+      {/* Tab bar */}
+      <div className="flex border-b mb-5 overflow-x-auto gap-0">
+        {EMP_TABS.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => goTo(t.key)}
+            disabled={tabLocked(t.key)}
+            className={[
+              'px-4 py-2 text-sm font-medium whitespace-nowrap border-b-2 -mb-px transition-colors',
+              activeTab === t.key
+                ? 'border-primary text-primary'
+                : 'border-transparent text-muted-foreground hover:text-foreground',
+              tabLocked(t.key) ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer',
+            ].join(' ')}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
-      <div className="flex justify-end gap-2 pt-2">
-        <Button variant="outline" onClick={onClose}>Cancel</Button>
-        <Button onClick={() => save.mutate()} disabled={save.isPending}>Save</Button>
+
+      {/* Content */}
+      <div className="max-h-[55vh] overflow-y-auto pr-1">
+
+        {/* ── Personal ── */}
+        {activeTab === 'personal' && (
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="text-sm font-medium">Employee No.</label>
+              <Input value={form.employeeNumber} onChange={(e) => set('employeeNumber', e.target.value)} />
+              {!emp && <p className="text-xs text-muted-foreground mt-0.5">Auto-generated — override if needed</p>}
+            </div>
+            <div><label className="text-sm font-medium">First Name <span className="text-destructive">*</span></label><Input value={form.firstName} onChange={(e) => set('firstName', e.target.value)} /></div>
+            <div><label className="text-sm font-medium">Last Name <span className="text-destructive">*</span></label><Input value={form.lastName} onChange={(e) => set('lastName', e.target.value)} /></div>
+            <div className="col-span-2"><label className="text-sm font-medium">Email</label><Input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} /></div>
+            <div><label className="text-sm font-medium">Phone</label><Input value={form.phone} onChange={(e) => set('phone', e.target.value)} /></div>
+            <div><label className="text-sm font-medium">National ID</label><Input value={form.nationalId} onChange={(e) => set('nationalId', e.target.value)} /></div>
+          </div>
+        )}
+
+        {/* ── Employment ── */}
+        {activeTab === 'employment' && (
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-sm font-medium">Employment Type</label>
+              <Select value={form.employmentType} onChange={(e) => set('employmentType', e.target.value)}>
+                <option value="FULL_TIME">Full Time</option>
+                <option value="PART_TIME">Part Time</option>
+                <option value="CONTRACT">Contract</option>
+                <option value="CASUAL">Casual</option>
+              </Select>
+            </div>
+            <div>
+              <label className="text-sm font-medium">Pay Frequency</label>
+              <Select value={form.payFrequency} onChange={(e) => set('payFrequency', e.target.value)}>
+                <option value="MONTHLY">Monthly</option>
+                <option value="FORTNIGHTLY">Fortnightly</option>
+                <option value="WEEKLY">Weekly</option>
+              </Select>
+            </div>
+            <div><label className="text-sm font-medium">Job Title</label><Input value={form.jobTitle} onChange={(e) => set('jobTitle', e.target.value)} /></div>
+            <div>
+              <label className="text-sm font-medium">Department</label>
+              <Select value={form.departmentId} onChange={(e) => set('departmentId', e.target.value)}>
+                <option value="">— none —</option>
+                {departments.filter((d) => d.isActive).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </Select>
+            </div>
+            <div>
+              <label className="text-sm font-medium">Cost Centre</label>
+              <Select value={form.costCentreId} onChange={(e) => set('costCentreId', e.target.value)}>
+                <option value="">— none —</option>
+                {costCentres.filter((c) => c.isActive).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </Select>
+            </div>
+            <div><label className="text-sm font-medium">Start Date <span className="text-destructive">*</span></label><Input type="date" value={form.startDate} onChange={(e) => set('startDate', e.target.value)} /></div>
+            <div><label className="text-sm font-medium">End Date</label><Input type="date" value={form.endDate} onChange={(e) => set('endDate', e.target.value)} /></div>
+          </div>
+        )}
+
+        {/* ── Compensation ── */}
+        {activeTab === 'compensation' && (
+          <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2">
+              <label className="text-sm font-medium">Basic Salary (GHS / month) <span className="text-destructive">*</span></label>
+              <Input type="number" value={form.basicSalary} onChange={(e) => set('basicSalary', e.target.value)} />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Tier 3 Employee Rate (%)</label>
+              <Input type="number" step="0.5" value={form.tier3EmployeeRate} onChange={(e) => set('tier3EmployeeRate', e.target.value)} placeholder="0" />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Tier 3 Employer Rate (%)</label>
+              <Input type="number" step="0.5" value={form.tier3EmployerRate} onChange={(e) => set('tier3EmployerRate', e.target.value)} placeholder="0" />
+            </div>
+            <div className="col-span-2">
+              <label className="text-sm font-medium">Salary Expense Account</label>
+              <AccountSelect
+                value={form.salaryExpenseAccountId}
+                onChange={(id) => set('salaryExpenseAccountId', id)}
+                accounts={expenseAccountOptions}
+                placeholder="— use run default —"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* ── Tax & Statutory ── */}
+        {activeTab === 'statutory' && (
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="text-sm font-medium">TIN Number</label><Input value={form.tinNumber} onChange={(e) => set('tinNumber', e.target.value)} /></div>
+            <div><label className="text-sm font-medium">SSNIT Number</label><Input value={form.ssnitNumber} onChange={(e) => set('ssnitNumber', e.target.value)} /></div>
+            <div className="col-span-2 flex items-start gap-3 p-3 bg-muted/40 rounded-md mt-1">
+              <input
+                type="checkbox"
+                id="isResident"
+                checked={!!form.isResident}
+                onChange={(e) => set('isResident', e.target.checked)}
+                className="mt-0.5 w-4 h-4 shrink-0"
+              />
+              <div>
+                <label htmlFor="isResident" className="text-sm font-medium cursor-pointer">Resident Employee</label>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Uncheck for non-resident employees — overtime is taxed at a flat 20% (GRA rule) rather than the standard PAYE bands.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Bank ── */}
+        {activeTab === 'bank' && (
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="text-sm font-medium">Bank Name</label><Input value={form.bankName} onChange={(e) => set('bankName', e.target.value)} /></div>
+            <div><label className="text-sm font-medium">Bank Branch</label><Input value={form.bankBranch} onChange={(e) => set('bankBranch', e.target.value)} /></div>
+            <div className="col-span-2"><label className="text-sm font-medium">Account Number</label><Input value={form.bankAccountNumber} onChange={(e) => set('bankAccountNumber', e.target.value)} /></div>
+          </div>
+        )}
+
+        {/* ── Pay Elements ── */}
+        {activeTab === 'pay-elements' && (
+          <div className="space-y-3">
+            <div className="flex justify-between items-center">
+              <p className="text-sm text-muted-foreground">
+                Salary components assigned to this employee. Changes take effect from the specified date.
+              </p>
+              {!addingComp && (
+                <Button size="sm" onClick={() => setAddingComp(true)}>
+                  <Plus className="w-3 h-3 mr-1" />Add Component
+                </Button>
+              )}
+            </div>
+
+            {addingComp && (
+              <div className="border rounded-md p-4 bg-muted/30 space-y-3">
+                <p className="text-sm font-semibold">New Pay Element</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="col-span-2">
+                    <label className="text-xs font-medium">Component <span className="text-destructive">*</span></label>
+                    <Select value={compForm.componentId} onChange={(e) => setC('componentId', e.target.value)}>
+                      <option value="">— select —</option>
+                      {allComponents
+                        .filter((c) => c.isActive && c.type !== 'BASIC_SALARY')
+                        .map((c) => (
+                          <option key={c.id} value={c.id}>{c.name} — {COMP_TYPE_LABELS[c.type]}</option>
+                        ))}
+                    </Select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium">Fixed Amount (GHS)</label>
+                    <Input type="number" value={compForm.amount} onChange={(e) => setC('amount', e.target.value)} placeholder="0.00" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium">Rate (% of basic salary)</label>
+                    <Input type="number" step="0.5" value={compForm.rate} onChange={(e) => setC('rate', e.target.value)} placeholder="0" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium">Effective From <span className="text-destructive">*</span></label>
+                    <Input type="date" value={compForm.effectiveFrom} onChange={(e) => setC('effectiveFrom', e.target.value)} />
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">Enter a fixed amount or a rate — not both. Rate is applied to basic salary at payroll run time.</p>
+                <div className="flex gap-2 justify-end">
+                  <Button variant="outline" size="sm" onClick={() => { setAddingComp(false); setCompForm(defaultCompForm); }}>Cancel</Button>
+                  <Button size="sm" onClick={() => assignComp.mutate()} disabled={!compForm.componentId || assignComp.isPending}>Add</Button>
+                </div>
+              </div>
+            )}
+
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Component</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead className="text-right">Amount / Rate</TableHead>
+                  <TableHead>Effective From</TableHead>
+                  <TableHead>Effective To</TableHead>
+                  <TableHead />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {currentComponents.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                      No pay elements assigned yet
+                    </TableCell>
+                  </TableRow>
+                )}
+                {currentComponents.map((ec) => (
+                  <TableRow key={ec.id}>
+                    <TableCell className="font-medium">{ec.component.name}</TableCell>
+                    <TableCell><Badge variant="outline" className="text-xs">{COMP_TYPE_LABELS[ec.component.type]}</Badge></TableCell>
+                    <TableCell className="text-right font-mono text-sm">
+                      {ec.amount
+                        ? `GHS ${fmt(ec.amount)}`
+                        : ec.rate
+                        ? `${(Number(ec.rate) * 100).toFixed(2)}% of basic`
+                        : '—'}
+                    </TableCell>
+                    <TableCell className="text-sm">{ec.effectiveFrom.split('T')[0]}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{ec.effectiveTo?.split('T')[0] ?? 'Ongoing'}</TableCell>
+                    <TableCell>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive hover:text-destructive"
+                        onClick={() => removeComp.mutate(ec.id)}
+                        disabled={removeComp.isPending}
+                      >
+                        Remove
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+        {/* ── Loans ── */}
+        {activeTab === 'loans' && (
+          <div className="space-y-3">
+            <div className="flex justify-between items-center">
+              <p className="text-sm text-muted-foreground">Salary advances and loans — instalments are deducted automatically each payroll run.</p>
+              {!addingLoan && (
+                <Button size="sm" onClick={() => setAddingLoan(true)}>
+                  <Plus className="w-3 h-3 mr-1" />New Loan
+                </Button>
+              )}
+            </div>
+
+            {addingLoan && (
+              <div className="border rounded-md p-4 bg-muted/30 space-y-3">
+                <p className="text-sm font-semibold">New Loan / Advance</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="col-span-2">
+                    <label className="text-xs font-medium">Description <span className="text-destructive">*</span></label>
+                    <Input value={loanForm.description} onChange={(e) => setL('description', e.target.value)} placeholder="e.g. Salary Advance — May 2026" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium">Principal Amount (GHS) <span className="text-destructive">*</span></label>
+                    <Input type="number" value={loanForm.principalAmount} onChange={(e) => setL('principalAmount', e.target.value)} placeholder="0.00" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium">Monthly Instalment (GHS) <span className="text-destructive">*</span></label>
+                    <Input type="number" value={loanForm.instalmentAmount} onChange={(e) => setL('instalmentAmount', e.target.value)} placeholder="0.00" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium">Repayment Start Date <span className="text-destructive">*</span></label>
+                    <Input type="date" value={loanForm.startDate} onChange={(e) => setL('startDate', e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium">GL Account (Loans to Employees)</label>
+                    <AccountSelect value={loanForm.glAccountId} onChange={(id) => setL('glAccountId', id)} accounts={assetAccountOptions} placeholder="— optional —" />
+                  </div>
+                </div>
+                {loanForm.principalAmount && loanForm.instalmentAmount && Number(loanForm.instalmentAmount) > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Estimated repayment: {Math.ceil(Number(loanForm.principalAmount) / Number(loanForm.instalmentAmount))} months
+                  </p>
+                )}
+                <div className="flex gap-2 justify-end">
+                  <Button variant="outline" size="sm" onClick={() => { setAddingLoan(false); setLoanForm(defaultLoanForm); }}>Cancel</Button>
+                  <Button size="sm" onClick={() => createLoan.mutate()} disabled={!loanForm.description || !loanForm.principalAmount || !loanForm.instalmentAmount || createLoan.isPending}>Create Loan</Button>
+                </div>
+              </div>
+            )}
+
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Description</TableHead>
+                  <TableHead className="text-right">Principal</TableHead>
+                  <TableHead className="text-right">Balance</TableHead>
+                  <TableHead className="text-right">Instalment</TableHead>
+                  <TableHead>Start Date</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {loans.length === 0 && (
+                  <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-8">No loans recorded</TableCell></TableRow>
+                )}
+                {loans.map((loan) => {
+                  const pct = Math.round((1 - Number(loan.balance) / Number(loan.principalAmount)) * 100);
+                  return (
+                    <TableRow key={loan.id}>
+                      <TableCell>
+                        <div className="font-medium">{loan.description}</div>
+                        <div className="w-32 bg-gray-200 rounded-full h-1.5 mt-1">
+                          <div className="bg-green-500 h-1.5 rounded-full" style={{ width: `${pct}%` }} />
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-0.5">{pct}% repaid</div>
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-sm">GHS {fmt(loan.principalAmount)}</TableCell>
+                      <TableCell className="text-right font-mono text-sm font-semibold">{Number(loan.balance) > 0 ? `GHS ${fmt(loan.balance)}` : <span className="text-green-600">Cleared</span>}</TableCell>
+                      <TableCell className="text-right font-mono text-sm">GHS {fmt(loan.instalmentAmount)}</TableCell>
+                      <TableCell className="text-sm">{loan.startDate.split('T')[0]}</TableCell>
+                      <TableCell><Badge className={LOAN_STATUS_COLORS[loan.status] ?? ''}>{loan.status}</Badge></TableCell>
+                      <TableCell>
+                        {loan.status === 'ACTIVE' && (
+                          <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => updateLoanStatus.mutate({ loanId: loan.id, status: 'CANCELLED' })}>Cancel</Button>
+                        )}
+                        {loan.status === 'SUSPENDED' && (
+                          <Button variant="ghost" size="sm" onClick={() => updateLoanStatus.mutate({ loanId: loan.id, status: 'ACTIVE' })}>Resume</Button>
+                        )}
+                        {loan.status === 'ACTIVE' && (
+                          <Button variant="ghost" size="sm" onClick={() => updateLoanStatus.mutate({ loanId: loan.id, status: 'SUSPENDED' })}>Suspend</Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </div>
+
+      {/* Footer */}
+      <div className="flex justify-between items-center pt-4 border-t mt-4">
+        <div className="flex gap-2">
+          {canBack && <Button variant="outline" onClick={() => goTo(EMP_TABS[tabIdx - 1].key)}>← Back</Button>}
+          {canNext && <Button variant="outline" onClick={() => goTo(EMP_TABS[tabIdx + 1].key)}>Next →</Button>}
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={onClose}>{savedEmpId && !emp ? 'Done' : 'Cancel'}</Button>
+          {!isPayElements && !isLoans && (
+            <Button onClick={() => save.mutate()} disabled={save.isPending}>
+              {emp ? 'Save' : savedEmpId ? 'Update' : 'Save & Continue →'}
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -524,8 +958,8 @@ function EmployeesTab({ organisationId }: { organisationId: string }) {
       </CardContent></Card>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-2xl">
-          <h2 className="text-lg font-semibold mb-4">{editEmp ? 'Edit Employee' : 'New Employee'}</h2>
+        <DialogContent className="max-w-3xl">
+          <h2 className="text-lg font-semibold mb-2">{editEmp ? 'Edit Employee' : 'New Employee'}</h2>
           <EmployeeDialog organisationId={organisationId} emp={editEmp} employees={employees} onClose={() => setOpen(false)} />
         </DialogContent>
       </Dialog>

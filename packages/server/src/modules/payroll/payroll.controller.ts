@@ -57,6 +57,27 @@ export const removeComponent = asyncHandler(async (req: Request, res: Response) 
   return sendSuccess(res, null, 'Component assignment deactivated');
 });
 
+// ─── Employee Loans ───────────────────────────────────────────────────────────
+
+export const listLoans = asyncHandler(async (req: Request, res: Response) => {
+  const data = await svc.listLoans(req.params.organisationId, req.params.employeeId);
+  return sendSuccess(res, data);
+});
+
+export const createLoan = asyncHandler(async (req: Request, res: Response) => {
+  const { description, principalAmount, instalmentAmount, startDate } = req.body;
+  if (!description || !principalAmount || !instalmentAmount || !startDate) {
+    throw new ValidationError('description, principalAmount, instalmentAmount, and startDate are required');
+  }
+  const data = await svc.createLoan(req.params.organisationId, req.params.employeeId, req.body, req.user!.sub);
+  return sendCreated(res, data, 'Loan created');
+});
+
+export const updateLoan = asyncHandler(async (req: Request, res: Response) => {
+  const data = await svc.updateLoan(req.params.organisationId, req.params.loanId, req.body);
+  return sendSuccess(res, data);
+});
+
 // ─── Salary Components ────────────────────────────────────────────────────────
 
 export const listSalaryComponents = asyncHandler(async (req: Request, res: Response) => {

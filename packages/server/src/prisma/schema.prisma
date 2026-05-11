@@ -228,6 +228,13 @@ enum PayslipStatus {
   PAID
 }
 
+enum LoanStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+  SUSPENDED
+}
+
 enum MovementType {
   RECEIPT
   ISSUE
@@ -457,6 +464,7 @@ model Account {
   fxRevaluationLines   FxRevaluationLine[]
   salaryComponents     SalaryComponent[]   @relation("ComponentGLAccount")
   employeeExpenses     Employee[]          @relation("EmployeeSalaryExpense")
+  employeeLoans        EmployeeLoan[]      @relation("LoanGLAccount")
 
   @@unique([organisationId, code])
   @@index([organisationId, class])
@@ -1641,6 +1649,7 @@ model Employee {
   salaryExpenseAccount Account?          @relation("EmployeeSalaryExpense", fields: [salaryExpenseAccountId], references: [id])
   components           EmployeeComponent[]
   payslips             Payslip[]
+  loans                EmployeeLoan[]
 
   @@unique([organisationId, employeeNumber])
   @@index([organisationId, isActive])
@@ -1791,6 +1800,7 @@ model PayslipLine {
   id          String              @id @default(uuid())
   payslipId   String
   componentId String?
+  loanId      String?
   description String
   type        SalaryComponentType
   amount      Decimal             @db.Decimal(20, 4)
@@ -1798,9 +1808,35 @@ model PayslipLine {
 
   payslip   Payslip          @relation(fields: [payslipId], references: [id], onDelete: Cascade)
   component SalaryComponent? @relation(fields: [componentId], references: [id])
+  loan      EmployeeLoan?    @relation(fields: [loanId], references: [id])
 
   @@index([payslipId])
   @@map("payslip_lines")
+}
+
+model EmployeeLoan {
+  id               String     @id @default(uuid())
+  organisationId   String
+  employeeId       String
+  description      String
+  principalAmount  Decimal    @db.Decimal(20, 4)
+  balance          Decimal    @db.Decimal(20, 4)
+  instalmentAmount Decimal    @db.Decimal(20, 4)
+  startDate        DateTime   @db.Date
+  glAccountId      String?
+  status           LoanStatus @default(ACTIVE)
+  createdBy        String
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  organisation   Organisation  @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  employee       Employee      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  glAccount      Account?      @relation("LoanGLAccount", fields: [glAccountId], references: [id])
+  repaymentLines PayslipLine[]
+
+  @@index([organisationId])
+  @@index([employeeId])
+  @@map("employee_loans")
 }
 
 // ============================================================
