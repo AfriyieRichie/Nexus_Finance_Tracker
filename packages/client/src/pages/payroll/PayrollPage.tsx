@@ -446,6 +446,8 @@ function EmployeeDialog({ organisationId, emp, employees, onClose }: {
 
   const set = (k: string, v: string | boolean) => setForm((f) => ({ ...f, [k]: v }));
 
+  const [saveError, setSaveError] = useState<string | null>(null);
+
   // ── Component assignment state ─────────────────────────────────────────────
   const [addingComp, setAddingComp] = useState(false);
   const defaultCompForm = { componentId: '', amount: '', rate: '', effectiveFrom: today };
@@ -471,6 +473,8 @@ function EmployeeDialog({ organisationId, emp, employees, onClose }: {
   const [loanForm, setLoanForm] = useState(defaultLoanForm);
   const setL = (k: string, v: string) => setLoanForm((f) => ({ ...f, [k]: v }));
 
+  const [loanError, setLoanError] = useState<string | null>(null);
+
   const createLoan = useMutation({
     mutationFn: () => payrollSvc.createLoan(organisationId, effectiveEmpId!, {
       description:      loanForm.description,
@@ -479,7 +483,10 @@ function EmployeeDialog({ organisationId, emp, employees, onClose }: {
       startDate:        loanForm.startDate,
       glAccountId:      loanForm.glAccountId || undefined,
     }),
-    onSuccess: () => { void refetchLoans(); setAddingLoan(false); setLoanForm(defaultLoanForm); },
+    onSuccess: () => { void refetchLoans(); setAddingLoan(false); setLoanForm(defaultLoanForm); setLoanError(null); },
+    onError: (err: unknown) => {
+      setLoanError((err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? (err as Error)?.message ?? 'Failed to create loan');
+    },
   });
 
   const updateLoanStatus = useMutation({
@@ -518,6 +525,7 @@ function EmployeeDialog({ organisationId, emp, employees, onClose }: {
         : payrollSvc.createEmployee(organisationId, payload as Parameters<typeof payrollSvc.createEmployee>[1]);
     },
     onSuccess: (result) => {
+      setSaveError(null);
       void qc.invalidateQueries({ queryKey: ['payroll-employees', organisationId] });
       if (!emp) {
         setSavedEmpId(result.id);
@@ -525,6 +533,9 @@ function EmployeeDialog({ organisationId, emp, employees, onClose }: {
       } else {
         onClose();
       }
+    },
+    onError: (err: unknown) => {
+      setSaveError((err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? (err as Error)?.message ?? 'Failed to save employee');
     },
   });
 
@@ -879,9 +890,12 @@ function EmployeeDialog({ organisationId, emp, employees, onClose }: {
                     Estimated repayment: {Math.ceil(Number(loanForm.principalAmount) / Number(loanForm.instalmentAmount))} months
                   </p>
                 )}
+                {loanError && <p className="text-xs text-destructive bg-destructive/10 rounded px-2 py-1">{loanError}</p>}
                 <div className="flex gap-2 justify-end">
-                  <Button variant="outline" size="sm" onClick={() => { setAddingLoan(false); setLoanForm(defaultLoanForm); }}>Cancel</Button>
-                  <Button size="sm" onClick={() => createLoan.mutate()} disabled={!loanForm.description || !loanForm.principalAmount || !loanForm.instalmentAmount || createLoan.isPending}>Create Loan</Button>
+                  <Button variant="outline" size="sm" onClick={() => { setAddingLoan(false); setLoanForm(defaultLoanForm); setLoanError(null); }}>Cancel</Button>
+                  <Button size="sm" disabled={!loanForm.description || !loanForm.principalAmount || !loanForm.instalmentAmount || createLoan.isPending} onClick={() => { setLoanError(null); createLoan.mutate(); }}>
+                    {createLoan.isPending ? 'Creating…' : 'Create Loan'}
+                  </Button>
                 </div>
               </div>
             )}
@@ -939,7 +953,8 @@ function EmployeeDialog({ organisationId, emp, employees, onClose }: {
       </div>
 
       {/* Footer */}
-      <div className="flex justify-between items-center pt-4 border-t mt-4">
+      {saveError && <p className="text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2 mt-3">{saveError}</p>}
+      <div className="flex justify-between items-center pt-4 border-t mt-2">
         <div className="flex gap-2">
           {canBack && <Button variant="outline" onClick={() => goTo(EMP_TABS[tabIdx - 1].key)}>← Back</Button>}
           {canNext && <Button variant="outline" onClick={() => goTo(EMP_TABS[tabIdx + 1].key)}>Next →</Button>}
@@ -947,8 +962,8 @@ function EmployeeDialog({ organisationId, emp, employees, onClose }: {
         <div className="flex gap-2">
           <Button variant="outline" onClick={onClose}>{savedEmpId && !emp ? 'Done' : 'Cancel'}</Button>
           {!isPayElements && !isLoans && (
-            <Button onClick={() => save.mutate()} disabled={save.isPending}>
-              {emp ? 'Save' : savedEmpId ? 'Update' : 'Save & Continue →'}
+            <Button onClick={() => { setSaveError(null); save.mutate(); }} disabled={save.isPending}>
+              {save.isPending ? 'Saving…' : emp ? 'Save' : savedEmpId ? 'Update' : 'Save & Continue →'}
             </Button>
           )}
         </div>
@@ -1107,6 +1122,8 @@ function CreateRunDialog({ organisationId, onClose }: { organisationId: string; 
   const setOv = (empId: string, k: keyof Override, v: string) =>
     setOverrides((prev) => ({ ...prev, [empId]: { ...(prev[empId] ?? { overtimePay: '', overtimeHours: '', bonuses: '' }), [k]: v } }));
 
+  const [runError, setRunError] = useState<string | null>(null);
+
   const create = useMutation({
     mutationFn: () => {
       const builtOverrides = employees
@@ -1125,7 +1142,28 @@ function CreateRunDialog({ organisationId, onClose }: { organisationId: string; 
       return payrollSvc.createPayrollRun(organisationId, { ...form, overrides: builtOverrides });
     },
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['payroll-runs', organisationId] }); onClose(); },
+    onError: (err: unknown) => {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? (err as Error)?.message ?? 'Failed to create payroll run';
+      setRunError(msg);
+    },
   });
+
+  const requiredFields = [
+    { key: 'periodId',               label: 'Accounting Period' },
+    { key: 'paymentDate',            label: 'Payment Date' },
+    { key: 'description',            label: 'Description' },
+    { key: 'wagesPayableAccountId',  label: 'Wages Payable account' },
+    { key: 'payePayableAccountId',   label: 'PAYE Payable account' },
+    { key: 'ssnitPayableAccountId',  label: 'SSNIT Payable account' },
+    { key: 'pensionPayableAccountId', label: 'Pension Payable account' },
+  ] as const;
+
+  function handleCreate() {
+    setRunError(null);
+    const missing = requiredFields.filter(({ key }) => !(form as Record<string, string>)[key]);
+    if (missing.length > 0) { setRunError(`Please fill in: ${missing.map((f) => f.label).join(', ')}`); return; }
+    create.mutate();
+  }
 
   return (
     <div className="space-y-3 max-h-[75vh] overflow-y-auto pr-1">
@@ -1229,9 +1267,12 @@ function CreateRunDialog({ organisationId, onClose }: { organisationId: string; 
       )}
 
       <div><label className="text-sm font-medium">Notes</label><Input value={form.notes} onChange={(e) => set('notes', e.target.value)} /></div>
+      {runError && <p className="text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2">{runError}</p>}
       <div className="flex justify-end gap-2 pt-2">
         <Button variant="outline" onClick={onClose}>Cancel</Button>
-        <Button onClick={() => create.mutate()} disabled={create.isPending}>Calculate &amp; Create</Button>
+        <Button onClick={handleCreate} disabled={create.isPending}>
+          {create.isPending ? 'Creating…' : 'Calculate & Create'}
+        </Button>
       </div>
     </div>
   );
