@@ -135,6 +135,7 @@ export function AccountSelect({
             left: pos.left,
             width: pos.width,
             zIndex: 9999,
+            pointerEvents: 'auto',
           }}
           className="max-h-64 overflow-auto rounded-md border bg-background shadow-xl"
         >
