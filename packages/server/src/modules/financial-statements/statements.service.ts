@@ -489,10 +489,10 @@ function buildDateFilter(asOfDate: string): Prisma.LedgerEntryWhereInput {
 
 function buildPeriodFilter(fromDate?: string, toDate?: string, periodId?: string): Prisma.LedgerEntryWhereInput {
   if (periodId) return { periodId };
-  return {
-    ...(fromDate && { transactionDate: { gte: new Date(fromDate + 'T00:00:00Z') } }),
-    ...(toDate   && { transactionDate: { lte: new Date(toDate   + 'T23:59:59Z') } }),
-  };
+  const range: { gte?: Date; lte?: Date } = {};
+  if (fromDate) range.gte = new Date(fromDate + 'T00:00:00Z');
+  if (toDate)   range.lte = new Date(toDate   + 'T23:59:59Z');
+  return Object.keys(range).length ? { transactionDate: range } : {};
 }
 
 // ─── P&L aggregation (for retained earnings line) ─────────────────────────────
@@ -1325,9 +1325,10 @@ export async function getCashFlowStatement(
   const ppFilter  = ppFrom && ppTo ? buildPeriodFilter(ppFrom, ppTo) : null;
   const pyFilter  = pyFrom && pyTo ? buildPeriodFilter(pyFrom, pyTo) : null;
 
-  // All account metadata (one query — exclude control/deleted)
+  // All account metadata — include control accounts so equity/financing accounts
+  // that are flagged as control are still picked up in the CFS sections
   const allAccounts = await prisma.account.findMany({
-    where: { organisationId, isDeleted: false, isControlAccount: false },
+    where: { organisationId, isDeleted: false },
     select: { id: true, code: true, name: true, class: true, type: true, subClass: true },
     orderBy: { code: 'asc' },
   });
@@ -1382,16 +1383,16 @@ export async function getCashFlowStatement(
     ...(m.py != null ? { priorYear:   m.py.toFixed(2) } : {}),
   });
 
-  // ── 1. Net Profit — after tax, after interest ─────────────────────────────
-  // profit = sum(credit - debit) for all P&L accounts = -sum(netDebit)
-  let npCur = D(0), npPP = hasPP ? D(0) : null, npPY = hasPY ? D(0) : null;
-  for (const acc of allAccounts) {
-    if (acc.class !== AccountClass.REVENUE && acc.class !== AccountClass.EXPENSE) continue;
-    const m = getDebitMinus(curMov, acc.id);
-    if (m !== null) npCur = npCur.sub(m);
-    if (hasPP && npPP !== null) { const x = getDebitMinus(ppMov, acc.id); if (x !== null) npPP = npPP.sub(x); }
-    if (hasPY && npPY !== null) { const x = getDebitMinus(pyMov, acc.id); if (x !== null) npPY = npPY.sub(x); }
-  }
+  // ── 1. Net Profit — via computeNetPnL so control accounts are included
+  // (allAccounts excludes isControlAccount rows; direct ledger aggregation does not)
+  const [npCurVal, npPPVal, npPYVal] = await Promise.all([
+    computeNetPnL(organisationId, curFilter),
+    hasPP && ppFilter ? computeNetPnL(organisationId, ppFilter) : Promise.resolve(null as Prisma.Decimal | null),
+    hasPY && pyFilter ? computeNetPnL(organisationId, pyFilter) : Promise.resolve(null as Prisma.Decimal | null),
+  ]);
+  const npCur = npCurVal;
+  const npPP  = hasPP ? npPPVal : null;
+  const npPY  = hasPY ? npPYVal : null;
 
   // ── 2. Non-cash adjustments (D&A, impairment) ─────────────────────────────
   // These reduced net profit; add them back (expense netDebit is positive = amount charged)
