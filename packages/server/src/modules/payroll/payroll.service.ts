@@ -44,6 +44,9 @@ export interface CreateEmployeeInput {
   tier3EmployeeRate?: number;
   tier3EmployerRate?: number;
   salaryExpenseAccountId?: string;
+  overtimeType?: 'NONE' | 'FIXED' | 'RATE_BASED';
+  overtimeFixedAmount?: number;
+  overtimeMultiplier?: number;
   isResident?: boolean;
 }
 
@@ -70,7 +73,8 @@ export interface AssignComponentInput {
 
 export interface PayslipOverride {
   employeeId: string;
-  overtimePay?: number;
+  overtimePay?: number;   // flat amount override — bypasses overtimeType
+  overtimeHours?: number; // used when employee overtimeType === RATE_BASED
   bonuses?: number;
 }
 
@@ -268,7 +272,10 @@ export async function createEmployee(organisationId: string, input: CreateEmploy
       tier3EmployeeRate:     input.tier3EmployeeRate,
       tier3EmployerRate:     input.tier3EmployerRate,
       salaryExpenseAccountId: input.salaryExpenseAccountId,
-      isResident:            input.isResident ?? true,
+      overtimeType:           input.overtimeType           ?? 'NONE',
+      overtimeFixedAmount:    input.overtimeFixedAmount,
+      overtimeMultiplier:     input.overtimeMultiplier,
+      isResident:             input.isResident ?? true,
     },
     include: {
       department:           { select: { id: true, name: true } },
@@ -306,6 +313,9 @@ export async function updateEmployee(organisationId: string, id: string, input: 
       ...(input.tier3EmployeeRate     !== undefined && { tier3EmployeeRate:     input.tier3EmployeeRate }),
       ...(input.tier3EmployerRate     !== undefined && { tier3EmployerRate:     input.tier3EmployerRate }),
       ...(input.salaryExpenseAccountId !== undefined && { salaryExpenseAccountId: input.salaryExpenseAccountId }),
+      ...(input.overtimeType          !== undefined && { overtimeType:          input.overtimeType }),
+      ...(input.overtimeFixedAmount   !== undefined && { overtimeFixedAmount:   input.overtimeFixedAmount }),
+      ...(input.overtimeMultiplier    !== undefined && { overtimeMultiplier:    input.overtimeMultiplier }),
       ...(input.isResident            !== undefined && { isResident:            input.isResident }),
       ...(input.isActive              !== undefined && { isActive:              input.isActive }),
     },
@@ -530,7 +540,7 @@ export async function createPayrollRun(
     select: {
       id: true, basicSalary: true, departmentId: true, costCentreId: true,
       salaryExpenseAccountId: true, tier3EmployeeRate: true, tier3EmployerRate: true,
-      isResident: true,
+      isResident: true, overtimeType: true, overtimeFixedAmount: true, overtimeMultiplier: true,
       components: {
         where:   { isActive: true, effectiveFrom: { lte: paymentDate } },
         orderBy: { effectiveFrom: 'desc' },
@@ -576,10 +586,22 @@ export async function createPayrollRun(
   let totalEmployerCost    = 0;
 
   for (const emp of employees) {
-    const override  = overrideMap.get(emp.id);
-    const basic     = round4(Number(emp.basicSalary));
-    const overtime  = round4(override?.overtimePay ?? 0);
-    const bonuses   = round4(override?.bonuses    ?? 0);
+    const override = overrideMap.get(emp.id);
+    const basic    = round4(Number(emp.basicSalary));
+    const bonuses  = round4(override?.bonuses ?? 0);
+
+    // Overtime: manual flat override > employee config
+    let overtime = 0;
+    if (override?.overtimePay !== undefined) {
+      overtime = round4(override.overtimePay);
+    } else if (emp.overtimeType === 'FIXED' && emp.overtimeFixedAmount) {
+      overtime = round4(Number(emp.overtimeFixedAmount));
+    } else if (emp.overtimeType === 'RATE_BASED' && override?.overtimeHours) {
+      // Ghana standard: 22 working days × 8 hrs = 176 hrs/month
+      const hourlyRate   = round4(basic / 176);
+      const multiplier   = emp.overtimeMultiplier ? Number(emp.overtimeMultiplier) : 1.5;
+      overtime           = round4(override.overtimeHours * hourlyRate * multiplier);
+    }
 
     let allowances     = 0;
     let otherEarnings  = 0;

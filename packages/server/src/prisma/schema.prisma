@@ -235,6 +235,12 @@ enum LoanStatus {
   SUSPENDED
 }
 
+enum OvertimeType {
+  NONE
+  FIXED
+  RATE_BASED
+}
+
 enum MovementType {
   RECEIPT
   ISSUE
@@ -1638,6 +1644,9 @@ model Employee {
   tier3EmployeeRate      Decimal?       @db.Decimal(6, 4)
   tier3EmployerRate      Decimal?       @db.Decimal(6, 4)
   salaryExpenseAccountId String?
+  overtimeType           String         @default("NONE")
+  overtimeFixedAmount    Decimal?       @db.Decimal(20, 4)
+  overtimeMultiplier     Decimal?       @db.Decimal(5, 2)
   isResident             Boolean        @default(true)
   isActive               Boolean        @default(true)
   createdAt              DateTime       @default(now())

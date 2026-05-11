@@ -4,6 +4,7 @@ import { api } from './api';
 
 export type EmploymentType  = 'FULL_TIME' | 'PART_TIME' | 'CONTRACT' | 'CASUAL';
 export type PayFrequency    = 'MONTHLY' | 'FORTNIGHTLY' | 'WEEKLY';
+export type OvertimeType    = 'NONE' | 'FIXED' | 'RATE_BASED';
 export type SalaryComponentType =
   | 'BASIC_SALARY' | 'OVERTIME' | 'BONUS' | 'COMMISSION'
   | 'ALLOWANCE' | 'OTHER_EARNING' | 'EMPLOYEE_DEDUCTION' | 'EMPLOYER_CONTRIBUTION';
@@ -64,6 +65,9 @@ export interface Employee {
   tier3EmployeeRate: string | null;
   tier3EmployerRate: string | null;
   salaryExpenseAccountId: string | null;
+  overtimeType: OvertimeType;
+  overtimeFixedAmount: string | null;
+  overtimeMultiplier: string | null;
   isResident: boolean;
   isActive: boolean;
   department: { id: string; name: string } | null;
@@ -264,7 +268,7 @@ export const createPayrollRun = (
     pensionPayableAccountId: string;
     isSupplementary?: boolean;
     parentRunId?: string;
-    overrides?: { employeeId: string; overtimePay?: number; bonuses?: number }[];
+    overrides?: { employeeId: string; overtimePay?: number; overtimeHours?: number; bonuses?: number }[];
     notes?: string;
   },
 ) =>

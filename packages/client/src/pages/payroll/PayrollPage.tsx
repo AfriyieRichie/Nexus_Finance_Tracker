@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Users, Settings, Play, Download, ChevronDown, ChevronRight, CheckCircle, XCircle, Plus, Trash2 } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import * as payrollSvc from '@/services/payroll.service';
-import type { PayrollRun, Employee, SalaryComponent, Payslip, SalaryComponentType, EmployeeLoan } from '@/services/payroll.service';
+import type { PayrollRun, Employee, SalaryComponent, Payslip, SalaryComponentType, EmployeeLoan, OvertimeType } from '@/services/payroll.service';
 import { listAccounts } from '@/services/accounts.service';
 import { listPeriods } from '@/services/periods.service';
 import { listDepartments, listCostCentres } from '@/services/budgets.service';
@@ -408,6 +408,9 @@ function EmployeeDialog({ organisationId, emp, employees, onClose }: {
     jobTitle: '', departmentId: '', costCentreId: '',
     basicSalary: '', salaryExpenseAccountId: '',
     tier3EmployeeRate: '', tier3EmployerRate: '',
+    overtimeType: 'NONE' as OvertimeType,
+    overtimeFixedAmount: '',
+    overtimeMultiplier: '1.5',
     isResident: true,
     bankName: '', bankAccountNumber: '', bankBranch: '',
   };
@@ -432,6 +435,9 @@ function EmployeeDialog({ organisationId, emp, employees, onClose }: {
     salaryExpenseAccountId: emp.salaryExpenseAccountId ?? '',
     tier3EmployeeRate:      emp.tier3EmployeeRate ? String(Number(emp.tier3EmployeeRate) * 100) : '',
     tier3EmployerRate:      emp.tier3EmployerRate ? String(Number(emp.tier3EmployerRate) * 100) : '',
+    overtimeType:           (emp.overtimeType ?? 'NONE') as OvertimeType,
+    overtimeFixedAmount:    emp.overtimeFixedAmount ? String(emp.overtimeFixedAmount) : '',
+    overtimeMultiplier:     emp.overtimeMultiplier  ? String(emp.overtimeMultiplier)  : '1.5',
     isResident:             emp.isResident ?? true,
     bankName:               emp.bankName ?? '',
     bankAccountNumber:      emp.bankAccountNumber ?? '',
@@ -503,6 +509,9 @@ function EmployeeDialog({ organisationId, emp, employees, onClose }: {
         tier3EmployeeRate:      form.tier3EmployeeRate ? Number(form.tier3EmployeeRate) / 100 : undefined,
         tier3EmployerRate:      form.tier3EmployerRate ? Number(form.tier3EmployerRate) / 100 : undefined,
         salaryExpenseAccountId: form.salaryExpenseAccountId || undefined,
+        overtimeType:           form.overtimeType,
+        overtimeFixedAmount:    form.overtimeFixedAmount ? Number(form.overtimeFixedAmount) : undefined,
+        overtimeMultiplier:     form.overtimeMultiplier  ? Number(form.overtimeMultiplier)  : undefined,
       };
       return emp
         ? payrollSvc.updateEmployee(organisationId, emp.id, payload as unknown as Parameters<typeof payrollSvc.updateEmployee>[2])
@@ -656,6 +665,43 @@ function EmployeeDialog({ organisationId, emp, employees, onClose }: {
                 accounts={expenseAccountOptions}
                 placeholder="— use run default —"
               />
+            </div>
+
+            {/* Overtime Configuration */}
+            <div className="col-span-2 pt-2 border-t">
+              <p className="text-sm font-semibold mb-2">Overtime Configuration</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2">
+                  <label className="text-xs font-medium">Overtime Type</label>
+                  <Select value={form.overtimeType} onChange={(e) => set('overtimeType', e.target.value)}>
+                    <option value="NONE">None — enter manually at each payroll run</option>
+                    <option value="FIXED">Fixed Amount — same amount every period</option>
+                    <option value="RATE_BASED">Rate-Based — hours × hourly rate × multiplier</option>
+                  </Select>
+                </div>
+                {form.overtimeType === 'FIXED' && (
+                  <div className="col-span-2">
+                    <label className="text-xs font-medium">Fixed Overtime Amount (GHS / period)</label>
+                    <Input type="number" value={form.overtimeFixedAmount} onChange={(e) => set('overtimeFixedAmount', e.target.value)} placeholder="0.00" />
+                  </div>
+                )}
+                {form.overtimeType === 'RATE_BASED' && (
+                  <>
+                    <div>
+                      <label className="text-xs font-medium">Overtime Multiplier (e.g. 1.5 = time-and-a-half)</label>
+                      <Input type="number" step="0.25" value={form.overtimeMultiplier} onChange={(e) => set('overtimeMultiplier', e.target.value)} placeholder="1.5" />
+                    </div>
+                    {form.basicSalary && (
+                      <div className="flex items-end pb-1">
+                        <p className="text-xs text-muted-foreground">
+                          Hourly rate: <span className="font-semibold">GHS {fmt(Number(form.basicSalary) / 176)}</span>
+                          <br />Based on 22 working days × 8 hrs = 176 hrs/month
+                        </p>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -1036,11 +1082,13 @@ function PayslipRow({ slip }: { slip: Payslip }) {
 function CreateRunDialog({ organisationId, onClose }: { organisationId: string; onClose: () => void }) {
   const qc = useQueryClient();
   const { data: periodsData = [] } = useQuery({ queryKey: ['periods', organisationId], queryFn: () => listPeriods(organisationId) });
-  const { data: accountsData } = useQuery({ queryKey: ['accounts', organisationId, 'posting'], queryFn: () => listAccounts(organisationId, { pageSize: 300, isControlAccount: false, postingOnly: true }) });
+  const { data: accountsData }     = useQuery({ queryKey: ['accounts', organisationId, 'posting'], queryFn: () => listAccounts(organisationId, { pageSize: 300, isControlAccount: false, postingOnly: true }) });
+  const { data: employees = [] }   = useQuery({ queryKey: ['payroll-employees', organisationId], queryFn: () => payrollSvc.listEmployees(organisationId, true) });
+
   const allAccounts = accountsData?.accounts ?? [];
   const liabilityOptions: AccountOption[] = toAccountOptions(allAccounts.filter((a) => a.class === 'LIABILITY'));
-
   const openPeriods = periodsData.filter((p) => p.status === 'OPEN');
+
   const [form, setForm] = useState({
     periodId:               '',
     paymentDate:            new Date().toISOString().split('T')[0],
@@ -1053,13 +1101,34 @@ function CreateRunDialog({ organisationId, onClose }: { organisationId: string; 
   });
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
+  // Per-employee overrides: keyed by employeeId
+  type Override = { overtimePay: string; overtimeHours: string; bonuses: string };
+  const [overrides, setOverrides] = useState<Record<string, Override>>({});
+  const setOv = (empId: string, k: keyof Override, v: string) =>
+    setOverrides((prev) => ({ ...prev, [empId]: { ...(prev[empId] ?? { overtimePay: '', overtimeHours: '', bonuses: '' }), [k]: v } }));
+
   const create = useMutation({
-    mutationFn: () => payrollSvc.createPayrollRun(organisationId, form),
-    onSuccess:  () => { void qc.invalidateQueries({ queryKey: ['payroll-runs', organisationId] }); onClose(); },
+    mutationFn: () => {
+      const builtOverrides = employees
+        .map((e) => {
+          const ov = overrides[e.id];
+          const isRateBased = e.overtimeType === 'RATE_BASED';
+          return {
+            employeeId:    e.id,
+            overtimePay:   (!isRateBased && ov?.overtimePay)   ? Number(ov.overtimePay)   : undefined,
+            overtimeHours: (isRateBased  && ov?.overtimeHours) ? Number(ov.overtimeHours) : undefined,
+            bonuses:       ov?.bonuses ? Number(ov.bonuses) : undefined,
+          };
+        })
+        .filter((o) => o.overtimePay !== undefined || o.overtimeHours !== undefined || o.bonuses !== undefined);
+
+      return payrollSvc.createPayrollRun(organisationId, { ...form, overrides: builtOverrides });
+    },
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['payroll-runs', organisationId] }); onClose(); },
   });
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 max-h-[75vh] overflow-y-auto pr-1">
       <div>
         <label className="text-sm font-medium">Accounting Period</label>
         <Select value={form.periodId} onChange={(e) => set('periodId', e.target.value)}>
@@ -1068,7 +1137,8 @@ function CreateRunDialog({ organisationId, onClose }: { organisationId: string; 
         </Select>
       </div>
       <div><label className="text-sm font-medium">Payment Date</label><Input type="date" value={form.paymentDate} onChange={(e) => set('paymentDate', e.target.value)} /></div>
-      <div><label className="text-sm font-medium">Description</label><Input value={form.description} onChange={(e) => set('description', e.target.value)} placeholder="May 2025 Payroll" /></div>
+      <div><label className="text-sm font-medium">Description</label><Input value={form.description} onChange={(e) => set('description', e.target.value)} placeholder="May 2026 Payroll" /></div>
+
       <p className="text-xs text-gray-500 font-semibold pt-1">GL Accounts for this run</p>
       {([
         { key: 'wagesPayableAccountId',   label: 'Wages Payable' },
@@ -1086,6 +1156,78 @@ function CreateRunDialog({ organisationId, onClose }: { organisationId: string; 
           />
         </div>
       ))}
+
+      {/* Per-employee adjustments */}
+      {employees.length > 0 && (
+        <div className="pt-2">
+          <p className="text-xs text-gray-500 font-semibold mb-2">Per-Employee Adjustments (optional)</p>
+          <div className="border rounded-md overflow-hidden text-sm">
+            <div className="grid grid-cols-[1fr_auto_auto_auto] gap-0 bg-muted/60 px-3 py-2 text-xs font-semibold text-muted-foreground">
+              <span>Employee</span>
+              <span className="w-32 text-center">Overtime</span>
+              <span className="w-28 text-center">Bonus (GHS)</span>
+              <span className="w-16 text-center">OT Type</span>
+            </div>
+            {employees.map((e) => {
+              const ov = overrides[e.id] ?? { overtimePay: '', overtimeHours: '', bonuses: '' };
+              const isFixed     = e.overtimeType === 'FIXED';
+              const isRateBased = e.overtimeType === 'RATE_BASED';
+              const hourlyRate  = isRateBased ? (Number(e.basicSalary) / 176) : 0;
+              const mult        = e.overtimeMultiplier ? Number(e.overtimeMultiplier) : 1.5;
+              const computed    = isRateBased && ov.overtimeHours ? fmt(Number(ov.overtimeHours) * hourlyRate * mult) : null;
+
+              return (
+                <div key={e.id} className="grid grid-cols-[1fr_auto_auto_auto] gap-0 px-3 py-2 border-t items-center">
+                  <div>
+                    <span className="font-medium">{e.firstName} {e.lastName}</span>
+                    <span className="text-muted-foreground text-xs ml-2">{e.employeeNumber}</span>
+                    {isFixed && e.overtimeFixedAmount && (
+                      <span className="text-xs text-blue-600 ml-2">Fixed: GHS {fmt(e.overtimeFixedAmount)}/period</span>
+                    )}
+                  </div>
+                  <div className="w-32 px-2">
+                    {isRateBased ? (
+                      <div>
+                        <Input
+                          type="number"
+                          className="h-7 text-xs"
+                          placeholder="hrs"
+                          value={ov.overtimeHours}
+                          onChange={(e2) => setOv(e.id, 'overtimeHours', e2.target.value)}
+                        />
+                        {computed && <p className="text-xs text-muted-foreground mt-0.5 text-center">≈ GHS {computed}</p>}
+                      </div>
+                    ) : (
+                      <Input
+                        type="number"
+                        className="h-7 text-xs"
+                        placeholder={isFixed ? String(e.overtimeFixedAmount ?? '0') : 'GHS'}
+                        value={ov.overtimePay}
+                        onChange={(e2) => setOv(e.id, 'overtimePay', e2.target.value)}
+                      />
+                    )}
+                  </div>
+                  <div className="w-28 px-2">
+                    <Input
+                      type="number"
+                      className="h-7 text-xs"
+                      placeholder="0.00"
+                      value={ov.bonuses}
+                      onChange={(e2) => setOv(e.id, 'bonuses', e2.target.value)}
+                    />
+                  </div>
+                  <div className="w-16 text-center">
+                    <Badge variant="outline" className="text-xs">
+                      {e.overtimeType === 'RATE_BASED' ? 'Rate' : e.overtimeType === 'FIXED' ? 'Fixed' : 'Manual'}
+                    </Badge>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div><label className="text-sm font-medium">Notes</label><Input value={form.notes} onChange={(e) => set('notes', e.target.value)} /></div>
       <div className="flex justify-end gap-2 pt-2">
         <Button variant="outline" onClick={onClose}>Cancel</Button>
@@ -1199,7 +1341,7 @@ function RunsTab({ organisationId }: { organisationId: string }) {
           <DialogTrigger asChild>
             <Button size="sm"><Play className="w-4 h-4 mr-1" />New Payroll Run</Button>
           </DialogTrigger>
-          <DialogContent className="max-w-lg">
+          <DialogContent className="max-w-3xl">
             <h2 className="text-lg font-semibold mb-4">Create Payroll Run</h2>
             <CreateRunDialog organisationId={organisationId} onClose={() => setCreateOpen(false)} />
           </DialogContent>
