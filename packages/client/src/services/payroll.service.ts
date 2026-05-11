@@ -64,6 +64,7 @@ export interface Employee {
   tier3EmployeeRate: string | null;
   tier3EmployerRate: string | null;
   salaryExpenseAccountId: string | null;
+  isResident: boolean;
   isActive: boolean;
   department: { id: string; name: string } | null;
   costCentre: { id: string; name: string } | null;
@@ -113,6 +114,7 @@ export interface Payslip {
   payeAmount: string;
   ssnitEmployee: string;
   tier3Employee: string;
+  overtimeTax: string;
   otherDeductions: string;
   totalDeductions: string;
   netPay: string;

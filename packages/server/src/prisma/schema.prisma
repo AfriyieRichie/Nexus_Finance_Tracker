@@ -1630,6 +1630,7 @@ model Employee {
   tier3EmployeeRate      Decimal?       @db.Decimal(6, 4)
   tier3EmployerRate      Decimal?       @db.Decimal(6, 4)
   salaryExpenseAccountId String?
+  isResident             Boolean        @default(true)
   isActive               Boolean        @default(true)
   createdAt              DateTime       @default(now())
   updatedAt              DateTime       @updatedAt
@@ -1753,6 +1754,7 @@ model Payslip {
   grossPay       Decimal @default(0) @db.Decimal(20, 4)
   // Employee deductions
   payeAmount      Decimal @default(0) @db.Decimal(20, 4)
+  overtimeTax     Decimal @default(0) @db.Decimal(20, 4)
   ssnitEmployee   Decimal @default(0) @db.Decimal(20, 4)
   tier3Employee   Decimal @default(0) @db.Decimal(20, 4)
   otherDeductions Decimal @default(0) @db.Decimal(20, 4)

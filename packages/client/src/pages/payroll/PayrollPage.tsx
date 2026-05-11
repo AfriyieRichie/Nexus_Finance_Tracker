@@ -359,6 +359,7 @@ function EmployeeDialog({ organisationId, emp, employees, onClose }: {
     startDate: new Date().toISOString().split('T')[0], endDate: '',
     jobTitle: '', basicSalary: '', bankName: '', bankAccountNumber: '', bankBranch: '',
     tier3EmployeeRate: '', tier3EmployerRate: '', salaryExpenseAccountId: '',
+    isResident: true,
   };
   const [form, setForm] = useState(emp ? {
     employeeNumber:        emp.employeeNumber,
@@ -381,9 +382,10 @@ function EmployeeDialog({ organisationId, emp, employees, onClose }: {
     tier3EmployeeRate:     emp.tier3EmployeeRate ? String(Number(emp.tier3EmployeeRate) * 100) : '',
     tier3EmployerRate:     emp.tier3EmployerRate ? String(Number(emp.tier3EmployerRate) * 100) : '',
     salaryExpenseAccountId: emp.salaryExpenseAccountId ?? '',
+    isResident:            emp.isResident ?? true,
   } : defaultForm);
 
-  const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const set = (k: string, v: string | boolean) => setForm((f) => ({ ...f, [k]: v }));
 
   const save = useMutation({
     mutationFn: () => {
@@ -452,6 +454,11 @@ function EmployeeDialog({ organisationId, emp, employees, onClose }: {
         <div><label className="text-sm font-medium">Bank Branch</label><Input value={form.bankBranch} onChange={(e) => set('bankBranch', e.target.value)} /></div>
         <div><label className="text-sm font-medium">Tier 3 Emp Rate (%)</label><Input type="number" step="0.5" value={form.tier3EmployeeRate} onChange={(e) => set('tier3EmployeeRate', e.target.value)} placeholder="0" /></div>
         <div><label className="text-sm font-medium">Tier 3 Er Rate (%)</label><Input type="number" step="0.5" value={form.tier3EmployerRate} onChange={(e) => set('tier3EmployerRate', e.target.value)} placeholder="0" /></div>
+        <div className="col-span-2 flex items-center gap-2 pt-1">
+          <input type="checkbox" id="isResident" checked={!!form.isResident} onChange={(e) => set('isResident', e.target.checked)} />
+          <label htmlFor="isResident" className="text-sm font-medium">Resident employee</label>
+          <span className="text-xs text-muted-foreground">(uncheck for non-resident — overtime taxed at 20%)</span>
+        </div>
         <div className="col-span-2">
           <label className="text-sm font-medium">Salary Expense Account</label>
           <AccountSelect
@@ -564,6 +571,7 @@ function PayslipRow({ slip }: { slip: Payslip }) {
                 <p className="font-semibold text-gray-700 mb-2">Deductions</p>
                 <div className="space-y-1">
                   <div className="flex justify-between text-red-600"><span>PAYE</span><span>GHS {fmt(slip.payeAmount)}</span></div>
+                  {Number(slip.overtimeTax) > 0 && <div className="flex justify-between text-red-600"><span>Overtime Tax</span><span>GHS {fmt(slip.overtimeTax)}</span></div>}
                   <div className="flex justify-between text-red-600"><span>SSNIT (Employee 5.5%)</span><span>GHS {fmt(slip.ssnitEmployee)}</span></div>
                   {Number(slip.tier3Employee) > 0 && <div className="flex justify-between text-red-600"><span>Tier 3 (Employee)</span><span>GHS {fmt(slip.tier3Employee)}</span></div>}
                   {Number(slip.otherDeductions) > 0 && <div className="flex justify-between text-red-600"><span>Other Deductions</span><span>GHS {fmt(slip.otherDeductions)}</span></div>}

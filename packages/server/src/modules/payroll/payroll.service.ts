@@ -44,6 +44,7 @@ export interface CreateEmployeeInput {
   tier3EmployeeRate?: number;
   tier3EmployerRate?: number;
   salaryExpenseAccountId?: string;
+  isResident?: boolean;
 }
 
 export interface UpdateEmployeeInput extends Partial<CreateEmployeeInput> {
@@ -253,6 +254,7 @@ export async function createEmployee(organisationId: string, input: CreateEmploy
       tier3EmployeeRate:     input.tier3EmployeeRate,
       tier3EmployerRate:     input.tier3EmployerRate,
       salaryExpenseAccountId: input.salaryExpenseAccountId,
+      isResident:            input.isResident ?? true,
     },
     include: {
       department:           { select: { id: true, name: true } },
@@ -290,6 +292,7 @@ export async function updateEmployee(organisationId: string, id: string, input: 
       ...(input.tier3EmployeeRate     !== undefined && { tier3EmployeeRate:     input.tier3EmployeeRate }),
       ...(input.tier3EmployerRate     !== undefined && { tier3EmployerRate:     input.tier3EmployerRate }),
       ...(input.salaryExpenseAccountId !== undefined && { salaryExpenseAccountId: input.salaryExpenseAccountId }),
+      ...(input.isResident            !== undefined && { isResident:            input.isResident }),
       ...(input.isActive              !== undefined && { isActive:              input.isActive }),
     },
     include: {
@@ -452,7 +455,10 @@ export async function createPayrollRun(
   // All active employees
   const employees = await prisma.employee.findMany({
     where:   { organisationId, isActive: true },
-    include: {
+    select: {
+      id: true, basicSalary: true, departmentId: true, costCentreId: true,
+      salaryExpenseAccountId: true, tier3EmployeeRate: true, tier3EmployerRate: true,
+      isResident: true,
       components: {
         where:   { isActive: true, effectiveFrom: { lte: paymentDate } },
         orderBy: { effectiveFrom: 'desc' },
@@ -532,27 +538,54 @@ export async function createPayrollRun(
 
     const grossPay = round4(basic + overtime + bonuses + allowances + otherEarnings);
 
-    // SSNIT
-    const ssnitEmployee = round4(grossPay * statutory.ssnitEmployeeRate);
-    const ssnitEmployer = round4(grossPay * (statutory.ssnitEmployerRate - statutory.tier2Rate));
-    const tier2Employer = round4(grossPay * statutory.tier2Rate);
+    // SSNIT & Tier 2 are on basic salary only (GRA: 5.5% / 13% / 5% of basic)
+    const ssnitEmployee = round4(basic * statutory.ssnitEmployeeRate);
+    const ssnitEmployer = round4(basic * (statutory.ssnitEmployerRate - statutory.tier2Rate));
+    const tier2Employer = round4(basic * statutory.tier2Rate);
 
-    // Tier 3
-    const t3EmpRate  = emp.tier3EmployeeRate ? Number(emp.tier3EmployeeRate) : 0;
-    const t3ErRate   = emp.tier3EmployerRate ? Number(emp.tier3EmployerRate) : 0;
-    const tier3Employee = round4(grossPay * t3EmpRate);
-    const tier3Employer = round4(grossPay * t3ErRate);
+    // Tier 3 / Provident Fund — on basic salary; PAYE deductible is combined
+    // employee + employer contribution capped at 16.5% of basic (GRA Act 896)
+    const t3EmpRate     = emp.tier3EmployeeRate ? Number(emp.tier3EmployeeRate) : 0;
+    const t3ErRate      = emp.tier3EmployerRate ? Number(emp.tier3EmployerRate) : 0;
+    const tier3Employee = round4(basic * t3EmpRate);
+    const tier3Employer = round4(basic * t3ErRate);
+    const tier3Deductible = round4(Math.min(tier3Employee + tier3Employer, basic * 0.165));
 
-    // PAYE on taxable income (gross - ssnitEmployee - tier3Employee)
-    const taxableIncome = round4(Math.max(0, grossPay - ssnitEmployee - tier3Employee));
+    // Overtime tax — GRA: separate flat-rate, NOT included in PAYE bands
+    // Junior staff threshold: annual qualifying income ≤ GHS 18,000 (monthly ≤ 1,500)
+    const isResident    = emp.isResident !== false;
+    const isJuniorStaff = (basic * 12) <= 18_000;
+    let overtimeTax     = 0;
+    let overtimeInPaye  = 0; // overtime added to PAYE taxable income for non-junior residents
+
+    if (overtime > 0) {
+      if (!isResident) {
+        // Non-resident: flat 20% on all overtime
+        overtimeTax = round4(overtime * 0.20);
+      } else if (isJuniorStaff) {
+        // Junior staff (≤ GHS 18k/yr): 5% on first 50% of basic, 10% on excess
+        const halfBasic   = round4(basic * 0.5);
+        const at5pct      = round4(Math.min(overtime, halfBasic));
+        const at10pct     = round4(Math.max(0, overtime - halfBasic));
+        overtimeTax       = round4(at5pct * 0.05 + at10pct * 0.10);
+      } else {
+        // Non-junior resident: overtime taxed via normal PAYE bands
+        overtimeInPaye    = overtime;
+      }
+    }
+
+    // PAYE on taxable employment income (overtime excluded for junior/non-resident)
+    const payeGross     = round4(basic + allowances + otherEarnings + bonuses + overtimeInPaye);
+    const taxableIncome = round4(Math.max(0, payeGross - ssnitEmployee - tier3Deductible));
     const payeAmount    = calculatePaye(taxableIncome, bands, statutory.personalRelief);
 
-    const totalEmployeeDeductions = round4(ssnitEmployee + tier3Employee + payeAmount + otherDeductions);
+    const totalEmployeeDeductions = round4(ssnitEmployee + tier3Employee + payeAmount + overtimeTax + otherDeductions);
     const netPay                  = round4(grossPay - totalEmployeeDeductions);
     const empEmployerCost         = round4(grossPay + ssnitEmployer + tier2Employer + tier3Employer);
 
-    // Statutory lines (employer side)
+    // Statutory deduction lines
     lines.push({ description: 'PAYE',          type: SalaryComponentType.EMPLOYEE_DEDUCTION, amount: payeAmount,    isEmployer: false, componentId: undefined });
+    if (overtimeTax > 0) lines.push({ description: 'Overtime Tax', type: SalaryComponentType.EMPLOYEE_DEDUCTION, amount: overtimeTax, isEmployer: false, componentId: undefined });
     lines.push({ description: 'SSNIT (Emp)',   type: SalaryComponentType.EMPLOYEE_DEDUCTION, amount: ssnitEmployee, isEmployer: false, componentId: undefined });
     if (tier3Employee > 0) lines.push({ description: 'Tier 3 (Emp)', type: SalaryComponentType.EMPLOYEE_DEDUCTION, amount: tier3Employee, isEmployer: false, componentId: undefined });
     lines.push({ description: 'SSNIT (Er)',    type: SalaryComponentType.EMPLOYER_CONTRIBUTION, amount: ssnitEmployer, isEmployer: true, componentId: undefined });
@@ -578,6 +611,7 @@ export async function createPayrollRun(
       otherEarnings,
       grossPay,
       payeAmount,
+      overtimeTax,
       ssnitEmployee,
       tier3Employee,
       otherDeductions,
