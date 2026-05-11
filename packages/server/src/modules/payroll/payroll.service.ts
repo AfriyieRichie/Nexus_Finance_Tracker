@@ -588,7 +588,7 @@ export async function createPayrollRun(
   for (const emp of employees) {
     const override = overrideMap.get(emp.id);
     const basic    = round4(Number(emp.basicSalary));
-    const bonuses  = round4(override?.bonuses ?? 0);
+    let   bonuses  = 0;
 
     // Overtime: manual flat override > employee config
     let overtime = 0;
@@ -610,15 +610,17 @@ export async function createPayrollRun(
     const lines: { description: string; type: SalaryComponentType; amount: number; isEmployer: boolean; componentId: string | undefined; loanId?: string }[] = [];
 
     lines.push({ description: 'Basic Salary', type: SalaryComponentType.BASIC_SALARY, amount: basic, isEmployer: false, componentId: undefined });
-    if (overtime  > 0) lines.push({ description: 'Overtime', type: SalaryComponentType.OVERTIME, amount: overtime, isEmployer: false, componentId: undefined });
-    if (bonuses   > 0) lines.push({ description: 'Bonus',    type: SalaryComponentType.BONUS,    amount: bonuses,  isEmployer: false, componentId: undefined });
+    if (overtime > 0) lines.push({ description: 'Overtime', type: SalaryComponentType.OVERTIME, amount: overtime, isEmployer: false, componentId: undefined });
 
     for (const ec of emp.components) {
-      const compType = ec.component.type;
+      const compType   = ec.component.type;
       const compAmount = ec.amount ? round4(Number(ec.amount)) : ec.rate ? round4(basic * Number(ec.rate)) : 0;
       if (compAmount === 0) continue;
 
-      if (compType === SalaryComponentType.ALLOWANCE) {
+      if (compType === SalaryComponentType.BONUS) {
+        bonuses = round4(bonuses + compAmount);
+        lines.push({ description: ec.component.name, type: compType, amount: compAmount, isEmployer: false, componentId: ec.component.id });
+      } else if (compType === SalaryComponentType.ALLOWANCE) {
         allowances = round4(allowances + compAmount);
         lines.push({ description: ec.component.name, type: compType, amount: compAmount, isEmployer: false, componentId: ec.component.id });
       } else if (compType === SalaryComponentType.OTHER_EARNING || compType === SalaryComponentType.COMMISSION) {
@@ -628,6 +630,13 @@ export async function createPayrollRun(
         otherDeductions = round4(otherDeductions + compAmount);
         lines.push({ description: ec.component.name, type: compType, amount: compAmount, isEmployer: false, componentId: ec.component.id });
       }
+    }
+
+    // Run-level bonus override (one-off performance bonus — no component ID)
+    const overrideBonuses = round4(override?.bonuses ?? 0);
+    if (overrideBonuses > 0) {
+      bonuses = round4(bonuses + overrideBonuses);
+      lines.push({ description: 'Bonus', type: SalaryComponentType.BONUS, amount: overrideBonuses, isEmployer: false, componentId: undefined });
     }
 
     // Active loan repayments
