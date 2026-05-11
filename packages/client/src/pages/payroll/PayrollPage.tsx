@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Users, Settings, Play, Download, ChevronDown, ChevronRight, CheckCircle, XCircle } from 'lucide-react';
+import { Users, Settings, Play, Download, ChevronDown, ChevronRight, CheckCircle, XCircle, Plus, Trash2 } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import * as payrollSvc from '@/services/payroll.service';
 import type { PayrollRun, Employee, SalaryComponent, Payslip, SalaryComponentType } from '@/services/payroll.service';
 import { listAccounts } from '@/services/accounts.service';
 import { listPeriods } from '@/services/periods.service';
+import { AccountSelect } from '@/components/ui/account-select';
+import type { AccountOption } from '@/components/ui/account-select';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -20,6 +22,22 @@ import { Skeleton } from '@/components/ui/skeleton';
 function fmt(n: string | number | null | undefined, dp = 2) {
   const v = Number(n ?? 0);
   return isNaN(v) ? '0.00' : v.toLocaleString('en-GH', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+}
+
+function toAccountOptions(accounts: ReturnType<typeof Array<{ id: string; code: string; name: string; class: string; isActive: boolean }>>[number][]): AccountOption[] {
+  return accounts.map((a) => ({ id: a.id, code: a.code, name: a.name, class: a.class, isActive: a.isActive }));
+}
+
+function nextEmployeeNumber(employees: Employee[]): string {
+  if (employees.length === 0) return 'EMP-0001';
+  const nums = employees
+    .map((e) => {
+      const m = e.employeeNumber.match(/(\d+)$/);
+      return m ? parseInt(m[1], 10) : 0;
+    })
+    .filter((n) => !isNaN(n));
+  const next = nums.length > 0 ? Math.max(...nums) + 1 : 1;
+  return `EMP-${String(next).padStart(4, '0')}`;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -41,6 +59,15 @@ const COMP_TYPE_LABELS: Record<SalaryComponentType, string> = {
   EMPLOYER_CONTRIBUTION: 'Employer Contribution',
 };
 
+const DEFAULT_PAYE_BANDS = [
+  { min: '0',     max: '490',   rate: '0'    },
+  { min: '490',   max: '600',   rate: '5'    },
+  { min: '600',   max: '730',   rate: '10'   },
+  { min: '730',   max: '3730',  rate: '17.5' },
+  { min: '3730',  max: '20130', rate: '25'   },
+  { min: '20130', max: '',      rate: '35'   },
+];
+
 // ─── Statutory Config Tab ─────────────────────────────────────────────────────
 
 function StatutoryTab({ organisationId }: { organisationId: string }) {
@@ -51,6 +78,7 @@ function StatutoryTab({ organisationId }: { organisationId: string }) {
   });
 
   const [open, setOpen] = useState(false);
+  const [editConfig, setEditConfig] = useState<typeof configs[number] | null>(null);
   const [form, setForm] = useState({
     taxYear: new Date().getFullYear().toString(),
     ssnitEmployeeRate: '5.5',
@@ -58,7 +86,39 @@ function StatutoryTab({ organisationId }: { organisationId: string }) {
     tier2Rate: '5',
     personalRelief: '0',
   });
+  const [bands, setBands] = useState(DEFAULT_PAYE_BANDS);
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  function openConfigure(cfg?: typeof configs[number]) {
+    if (cfg) {
+      setEditConfig(cfg);
+      setForm({
+        taxYear: String(cfg.taxYear),
+        ssnitEmployeeRate: String(Number(cfg.ssnitEmployeeRate) * 100),
+        ssnitEmployerRate: String(Number(cfg.ssnitEmployerRate) * 100),
+        tier2Rate: String(Number(cfg.tier2Rate) * 100),
+        personalRelief: String(Number(cfg.personalRelief)),
+      });
+      setBands(
+        (cfg.payeBands ?? DEFAULT_PAYE_BANDS.map(b => ({ min: b.min, max: b.max, rate: b.rate }))).map((b) => ({
+          min: String(b.min),
+          max: b.max === null || b.max === undefined ? '' : String(b.max),
+          rate: String(b.rate),
+        }))
+      );
+    } else {
+      setEditConfig(null);
+      setForm({ taxYear: new Date().getFullYear().toString(), ssnitEmployeeRate: '5.5', ssnitEmployerRate: '13', tier2Rate: '5', personalRelief: '0' });
+      setBands(DEFAULT_PAYE_BANDS);
+    }
+    setOpen(true);
+  }
+
+  function updateBand(i: number, key: 'min' | 'max' | 'rate', val: string) {
+    setBands((prev) => prev.map((b, idx) => idx === i ? { ...b, [key]: val } : b));
+  }
+  function addBand() { setBands((prev) => [...prev, { min: '', max: '', rate: '' }]); }
+  function removeBand(i: number) { setBands((prev) => prev.filter((_, idx) => idx !== i)); }
 
   const save = useMutation({
     mutationFn: () => payrollSvc.upsertStatutoryConfig(organisationId, {
@@ -67,6 +127,11 @@ function StatutoryTab({ organisationId }: { organisationId: string }) {
       ssnitEmployerRate: String(Number(form.ssnitEmployerRate) / 100),
       tier2Rate:         String(Number(form.tier2Rate)         / 100),
       personalRelief:    String(Number(form.personalRelief)),
+      payeBands:         bands.map((b) => ({
+        min:  Number(b.min),
+        max:  b.max === '' ? null : Number(b.max),
+        rate: Number(b.rate),
+      })),
     }),
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['payroll-statutory', organisationId] }); setOpen(false); },
   });
@@ -75,26 +140,7 @@ function StatutoryTab({ organisationId }: { organisationId: string }) {
     <div className="space-y-4">
       <div className="flex justify-between items-center">
         <p className="text-sm text-gray-500">Ghana GRA statutory rates per tax year. PAYE bands are seeded with 2024 defaults and can be overridden.</p>
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button size="sm"><Settings className="w-4 h-4 mr-1" />Configure Year</Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-md">
-            <h2 className="text-lg font-semibold mb-4">Statutory Configuration</h2>
-            <div className="space-y-3">
-              <div><label className="text-sm font-medium">Tax Year</label><Input value={form.taxYear} onChange={(e) => set('taxYear', e.target.value)} type="number" /></div>
-              <div><label className="text-sm font-medium">SSNIT Employee Rate (%)</label><Input value={form.ssnitEmployeeRate} onChange={(e) => set('ssnitEmployeeRate', e.target.value)} type="number" step="0.1" /></div>
-              <div><label className="text-sm font-medium">SSNIT Employer Rate (%)</label><Input value={form.ssnitEmployerRate} onChange={(e) => set('ssnitEmployerRate', e.target.value)} type="number" step="0.1" /></div>
-              <div><label className="text-sm font-medium">Tier 2 Rate (% of employer)</label><Input value={form.tier2Rate} onChange={(e) => set('tier2Rate', e.target.value)} type="number" step="0.1" /></div>
-              <div><label className="text-sm font-medium">Monthly Personal Relief (GHS)</label><Input value={form.personalRelief} onChange={(e) => set('personalRelief', e.target.value)} type="number" /></div>
-            </div>
-            <p className="text-xs text-gray-400 mt-2">PAYE bands are initialised to Ghana GRA 2024 defaults. Contact your admin to customise bands.</p>
-            <div className="flex justify-end gap-2 mt-4">
-              <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
-              <Button onClick={() => save.mutate()} disabled={save.isPending}>Save</Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <Button size="sm" onClick={() => openConfigure()}><Settings className="w-4 h-4 mr-1" />Configure Year</Button>
       </div>
 
       <Card>
@@ -106,10 +152,12 @@ function StatutoryTab({ organisationId }: { organisationId: string }) {
               <TableHead>SSNIT Er</TableHead>
               <TableHead>Tier 2</TableHead>
               <TableHead>Personal Relief</TableHead>
+              <TableHead>PAYE Bands</TableHead>
+              <TableHead />
             </TableRow></TableHeader>
             <TableBody>
               {configs.length === 0 && (
-                <TableRow><TableCell colSpan={5} className="text-center text-gray-400 py-6">No configurations yet — defaults (Ghana GRA 2024) apply</TableCell></TableRow>
+                <TableRow><TableCell colSpan={7} className="text-center text-gray-400 py-6">No configurations yet — defaults (Ghana GRA 2024) apply</TableCell></TableRow>
               )}
               {configs.map((c) => (
                 <TableRow key={c.id}>
@@ -118,12 +166,56 @@ function StatutoryTab({ organisationId }: { organisationId: string }) {
                   <TableCell>{(Number(c.ssnitEmployerRate) * 100).toFixed(1)}%</TableCell>
                   <TableCell>{(Number(c.tier2Rate) * 100).toFixed(1)}%</TableCell>
                   <TableCell>GHS {fmt(c.personalRelief)}</TableCell>
+                  <TableCell className="text-sm text-gray-500">{(c.payeBands ?? []).length} bands</TableCell>
+                  <TableCell>
+                    <Button size="sm" variant="ghost" onClick={() => openConfigure(c)}>Edit</Button>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
         </CardContent>
       </Card>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-lg">
+          <h2 className="text-lg font-semibold mb-4">{editConfig ? `Edit ${editConfig.taxYear} Configuration` : 'Statutory Configuration'}</h2>
+          <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
+            <div><label className="text-sm font-medium">Tax Year</label><Input value={form.taxYear} onChange={(e) => set('taxYear', e.target.value)} type="number" disabled={!!editConfig} /></div>
+            <div><label className="text-sm font-medium">SSNIT Employee Rate (%)</label><Input value={form.ssnitEmployeeRate} onChange={(e) => set('ssnitEmployeeRate', e.target.value)} type="number" step="0.1" /></div>
+            <div><label className="text-sm font-medium">SSNIT Employer Rate (%)</label><Input value={form.ssnitEmployerRate} onChange={(e) => set('ssnitEmployerRate', e.target.value)} type="number" step="0.1" /></div>
+            <div><label className="text-sm font-medium">Tier 2 Rate (% of employer)</label><Input value={form.tier2Rate} onChange={(e) => set('tier2Rate', e.target.value)} type="number" step="0.1" /></div>
+            <div><label className="text-sm font-medium">Monthly Personal Relief (GHS)</label><Input value={form.personalRelief} onChange={(e) => set('personalRelief', e.target.value)} type="number" /></div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-sm font-medium">PAYE Bands (monthly GHS)</label>
+                <Button type="button" size="sm" variant="outline" onClick={addBand}><Plus size={12} className="mr-1" />Add Band</Button>
+              </div>
+              <div className="border rounded text-xs overflow-hidden">
+                <div className="grid grid-cols-[1fr_1fr_1fr_auto] bg-muted/60 px-2 py-1.5 font-semibold text-muted-foreground gap-2">
+                  <span>From (GHS)</span><span>To (GHS)</span><span>Rate (%)</span><span />
+                </div>
+                {bands.map((band, i) => (
+                  <div key={i} className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 px-2 py-1 border-t items-center">
+                    <Input value={band.min} onChange={(e) => updateBand(i, 'min', e.target.value)} className="h-7 text-xs" type="number" />
+                    <Input value={band.max} placeholder="∞" onChange={(e) => updateBand(i, 'max', e.target.value)} className="h-7 text-xs" type="number" />
+                    <Input value={band.rate} onChange={(e) => updateBand(i, 'rate', e.target.value)} className="h-7 text-xs" type="number" step="0.5" />
+                    <button type="button" onClick={() => removeBand(i)} className="text-destructive hover:text-destructive/80 p-1">
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">Leave "To" blank for the top band (no upper limit).</p>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 mt-4">
+            <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
+            <Button onClick={() => save.mutate()} disabled={save.isPending}>Save</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -144,7 +236,7 @@ function SalaryComponentsTab({ organisationId }: { organisationId: string }) {
     queryFn:  () => listAccounts(organisationId, { pageSize: 300, isControlAccount: false, postingOnly: true }),
     enabled:  open,
   });
-  const allAccounts = accountsData?.accounts ?? [];
+  const allAccountOptions: AccountOption[] = toAccountOptions(accountsData?.accounts ?? []);
 
   const defaultForm = { code: '', name: '', type: 'ALLOWANCE' as SalaryComponentType, isTaxable: true, glAccountId: '', description: '' };
   const [form, setForm] = useState(defaultForm);
@@ -224,10 +316,12 @@ function SalaryComponentsTab({ organisationId }: { organisationId: string }) {
             </div>
             <div>
               <label className="text-sm font-medium">GL Account (optional)</label>
-              <Select value={form.glAccountId} onChange={(e) => set('glAccountId', e.target.value)}>
-                <option value="">— none —</option>
-                {allAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} {a.name}</option>)}
-              </Select>
+              <AccountSelect
+                value={form.glAccountId}
+                onChange={(id) => set('glAccountId', id)}
+                accounts={allAccountOptions}
+                placeholder="— none —"
+              />
             </div>
             <div><label className="text-sm font-medium">Description</label><Input value={form.description} onChange={(e) => set('description', e.target.value)} /></div>
           </div>
@@ -243,17 +337,23 @@ function SalaryComponentsTab({ organisationId }: { organisationId: string }) {
 
 // ─── Employee Tab ─────────────────────────────────────────────────────────────
 
-function EmployeeDialog({ organisationId, emp, onClose }: { organisationId: string; emp: Employee | null; onClose: () => void }) {
+function EmployeeDialog({ organisationId, emp, employees, onClose }: {
+  organisationId: string;
+  emp: Employee | null;
+  employees: Employee[];
+  onClose: () => void;
+}) {
   const qc = useQueryClient();
   const { data: accountsData } = useQuery({
     queryKey: ['accounts', organisationId, 'posting'],
     queryFn:  () => listAccounts(organisationId, { pageSize: 300, isControlAccount: false, postingOnly: true }),
   });
   const allAccounts = accountsData?.accounts ?? [];
-  const expenseAccounts = allAccounts.filter((a) => a.class === 'EXPENSE');
+  const expenseAccountOptions: AccountOption[] = toAccountOptions(allAccounts.filter((a) => a.class === 'EXPENSE'));
 
   const defaultForm = {
-    employeeNumber: '', firstName: '', lastName: '', email: '', phone: '',
+    employeeNumber: nextEmployeeNumber(employees),
+    firstName: '', lastName: '', email: '', phone: '',
     nationalId: '', tinNumber: '', ssnitNumber: '',
     employmentType: 'FULL_TIME', payFrequency: 'MONTHLY',
     startDate: new Date().toISOString().split('T')[0], endDate: '',
@@ -314,7 +414,11 @@ function EmployeeDialog({ organisationId, emp, onClose }: { organisationId: stri
   return (
     <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-2">
       <div className="grid grid-cols-2 gap-3">
-        {!emp && <div><label className="text-sm font-medium">Employee No.</label><Input value={form.employeeNumber} onChange={(e) => set('employeeNumber', e.target.value)} placeholder="EMP-001" /></div>}
+        <div>
+          <label className="text-sm font-medium">Employee No.</label>
+          <Input value={form.employeeNumber} onChange={(e) => set('employeeNumber', e.target.value)} placeholder="EMP-0001" />
+          {!emp && <p className="text-xs text-muted-foreground mt-0.5">Auto-generated — override if needed</p>}
+        </div>
         <div><label className="text-sm font-medium">First Name</label><Input value={form.firstName} onChange={(e) => set('firstName', e.target.value)} /></div>
         <div><label className="text-sm font-medium">Last Name</label><Input value={form.lastName} onChange={(e) => set('lastName', e.target.value)} /></div>
         <div><label className="text-sm font-medium">Email</label><Input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} /></div>
@@ -350,10 +454,12 @@ function EmployeeDialog({ organisationId, emp, onClose }: { organisationId: stri
         <div><label className="text-sm font-medium">Tier 3 Er Rate (%)</label><Input type="number" step="0.5" value={form.tier3EmployerRate} onChange={(e) => set('tier3EmployerRate', e.target.value)} placeholder="0" /></div>
         <div className="col-span-2">
           <label className="text-sm font-medium">Salary Expense Account</label>
-          <Select value={form.salaryExpenseAccountId} onChange={(e) => set('salaryExpenseAccountId', e.target.value)}>
-            <option value="">— use run default —</option>
-            {expenseAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} {a.name}</option>)}
-          </Select>
+          <AccountSelect
+            value={form.salaryExpenseAccountId}
+            onChange={(id) => set('salaryExpenseAccountId', id)}
+            accounts={expenseAccountOptions}
+            placeholder="— use run default —"
+          />
         </div>
       </div>
       <div className="flex justify-end gap-2 pt-2">
@@ -413,7 +519,7 @@ function EmployeesTab({ organisationId }: { organisationId: string }) {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-2xl">
           <h2 className="text-lg font-semibold mb-4">{editEmp ? 'Edit Employee' : 'New Employee'}</h2>
-          <EmployeeDialog organisationId={organisationId} emp={editEmp} onClose={() => setOpen(false)} />
+          <EmployeeDialog organisationId={organisationId} emp={editEmp} employees={employees} onClose={() => setOpen(false)} />
         </DialogContent>
       </Dialog>
     </div>
@@ -490,7 +596,7 @@ function CreateRunDialog({ organisationId, onClose }: { organisationId: string; 
   const { data: periodsData = [] } = useQuery({ queryKey: ['periods', organisationId], queryFn: () => listPeriods(organisationId) });
   const { data: accountsData } = useQuery({ queryKey: ['accounts', organisationId, 'posting'], queryFn: () => listAccounts(organisationId, { pageSize: 300, isControlAccount: false, postingOnly: true }) });
   const allAccounts = accountsData?.accounts ?? [];
-  const liabilityAccounts = allAccounts.filter((a) => a.class === 'LIABILITY');
+  const liabilityOptions: AccountOption[] = toAccountOptions(allAccounts.filter((a) => a.class === 'LIABILITY'));
 
   const openPeriods = periodsData.filter((p) => p.status === 'OPEN');
   const [form, setForm] = useState({
@@ -522,18 +628,20 @@ function CreateRunDialog({ organisationId, onClose }: { organisationId: string; 
       <div><label className="text-sm font-medium">Payment Date</label><Input type="date" value={form.paymentDate} onChange={(e) => set('paymentDate', e.target.value)} /></div>
       <div><label className="text-sm font-medium">Description</label><Input value={form.description} onChange={(e) => set('description', e.target.value)} placeholder="May 2025 Payroll" /></div>
       <p className="text-xs text-gray-500 font-semibold pt-1">GL Accounts for this run</p>
-      {[
+      {([
         { key: 'wagesPayableAccountId',   label: 'Wages Payable' },
         { key: 'payePayableAccountId',    label: 'PAYE Payable' },
         { key: 'ssnitPayableAccountId',   label: 'SSNIT Payable' },
         { key: 'pensionPayableAccountId', label: 'Pension Payable' },
-      ].map(({ key, label }) => (
+      ] as const).map(({ key, label }) => (
         <div key={key}>
           <label className="text-sm font-medium">{label}</label>
-          <Select value={(form as Record<string, string>)[key]} onChange={(e) => set(key, e.target.value)}>
-            <option value="">Select account…</option>
-            {liabilityAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} {a.name}</option>)}
-          </Select>
+          <AccountSelect
+            value={(form as Record<string, string>)[key]}
+            onChange={(id) => set(key, id)}
+            accounts={liabilityOptions}
+            placeholder="Select account…"
+          />
         </div>
       ))}
       <div><label className="text-sm font-medium">Notes</label><Input value={form.notes} onChange={(e) => set('notes', e.target.value)} /></div>
