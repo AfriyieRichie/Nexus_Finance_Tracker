@@ -485,7 +485,7 @@ function EmployeeDialog({ organisationId, emp, employees, onClose }: {
     }),
     onSuccess: () => { void refetchLoans(); setAddingLoan(false); setLoanForm(defaultLoanForm); setLoanError(null); },
     onError: (err: unknown) => {
-      setLoanError((err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? (err as Error)?.message ?? 'Failed to create loan');
+      setLoanError((err as { response?: { data?: { error?: { message?: string }; message?: string } } })?.response?.data?.error?.message ?? (err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? (err as Error)?.message ?? 'Failed to create loan');
     },
   });
 
@@ -535,7 +535,7 @@ function EmployeeDialog({ organisationId, emp, employees, onClose }: {
       }
     },
     onError: (err: unknown) => {
-      setSaveError((err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? (err as Error)?.message ?? 'Failed to save employee');
+      setSaveError((err as { response?: { data?: { error?: { message?: string }; message?: string } } })?.response?.data?.error?.message ?? (err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? (err as Error)?.message ?? 'Failed to save employee');
     },
   });
 
@@ -1143,7 +1143,7 @@ function CreateRunDialog({ organisationId, onClose }: { organisationId: string; 
     },
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['payroll-runs', organisationId] }); onClose(); },
     onError: (err: unknown) => {
-      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? (err as Error)?.message ?? 'Failed to create payroll run';
+      const msg = (err as { response?: { data?: { error?: { message?: string }; message?: string } } })?.response?.data?.error?.message ?? (err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? (err as Error)?.message ?? 'Failed to create payroll run';
       setRunError(msg);
     },
   });
@@ -1290,7 +1290,7 @@ function RunDetail({ organisationId, run }: { organisationId: string; run: Payro
   });
 
   function onWorkflowError(err: unknown) {
-    setWorkflowError((err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? (err as Error)?.message ?? 'Action failed');
+    setWorkflowError((err as { response?: { data?: { error?: { message?: string }; message?: string } } })?.response?.data?.error?.message ?? (err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? (err as Error)?.message ?? 'Action failed');
   }
 
   function onWorkflowSuccess() {
