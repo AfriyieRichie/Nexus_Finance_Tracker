@@ -119,6 +119,7 @@ export interface Payslip {
   ssnitEmployee: string;
   tier3Employee: string;
   overtimeTax: string;
+  bonusTax: string;
   otherDeductions: string;
   totalDeductions: string;
   netPay: string;

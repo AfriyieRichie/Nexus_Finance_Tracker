@@ -1774,6 +1774,7 @@ model Payslip {
   // Employee deductions
   payeAmount      Decimal @default(0) @db.Decimal(20, 4)
   overtimeTax     Decimal @default(0) @db.Decimal(20, 4)
+  bonusTax        Decimal @default(0) @db.Decimal(20, 4)
   ssnitEmployee   Decimal @default(0) @db.Decimal(20, 4)
   tier3Employee   Decimal @default(0) @db.Decimal(20, 4)
   otherDeductions Decimal @default(0) @db.Decimal(20, 4)

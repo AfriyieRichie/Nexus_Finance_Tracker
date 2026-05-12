@@ -670,42 +670,55 @@ export async function createPayrollRun(
     const tier3Employer = round4(basic * t3ErRate);
     const tier3Deductible = round4(Math.min(tier3Employee + tier3Employer, basic * 0.165));
 
-    // Overtime tax — GRA: separate flat-rate, NOT included in PAYE bands
-    // Junior staff threshold: annual qualifying income ≤ GHS 18,000 (monthly ≤ 1,500)
     const isResident    = emp.isResident !== false;
     const isJuniorStaff = (basic * 12) <= 18_000;
-    let overtimeTax     = 0;
-    let overtimeInPaye  = 0; // overtime added to PAYE taxable income for non-junior residents
 
+    // Overtime tax — GRA Act 896
+    let overtimeTax    = 0;
+    let overtimeInPaye = 0;
     if (overtime > 0) {
       if (!isResident) {
-        // Non-resident: flat 20% on all overtime
         overtimeTax = round4(overtime * 0.20);
       } else if (isJuniorStaff) {
-        // Junior staff (≤ GHS 18k/yr): 5% on first 50% of basic, 10% on excess
-        const halfBasic   = round4(basic * 0.5);
-        const at5pct      = round4(Math.min(overtime, halfBasic));
-        const at10pct     = round4(Math.max(0, overtime - halfBasic));
-        overtimeTax       = round4(at5pct * 0.05 + at10pct * 0.10);
+        const halfBasic = round4(basic * 0.5);
+        const at5pct    = round4(Math.min(overtime, halfBasic));
+        const at10pct   = round4(Math.max(0, overtime - halfBasic));
+        overtimeTax     = round4(at5pct * 0.05 + at10pct * 0.10);
       } else {
-        // Non-qualifying resident (senior staff or junior staff with income > GHS 18k):
-        // overtime is added to PAYE taxable income and taxed via the graduated schedule
         overtimeInPaye = overtime;
       }
     }
 
-    // PAYE on taxable employment income (overtime excluded for junior/non-resident)
-    const payeGross     = round4(basic + allowances + otherEarnings + bonuses + overtimeInPaye);
+    // Bonus tax — GRA: 5% on first 15% of annual basic; excess added to PAYE income
+    let bonusTax    = 0;
+    let bonusInPaye = 0;
+    if (bonuses > 0) {
+      if (!isResident) {
+        bonusTax = round4(bonuses * 0.20);
+      } else {
+        const annualThreshold = round4(basic * 12 * 0.15); // 15% of annual basic
+        const at5pct          = round4(Math.min(bonuses, annualThreshold));
+        const excess          = round4(Math.max(0, bonuses - annualThreshold));
+        bonusTax              = round4(at5pct * 0.05);
+        bonusInPaye           = excess;
+      }
+    }
+
+    // PAYE on taxable employment income
+    // Qualifying bonus (≤15% of annual basic) is excluded — it has its own flat tax
+    // Excess bonus and non-qualifying overtime are included in the PAYE base
+    const payeGross     = round4(basic + allowances + otherEarnings + bonusInPaye + overtimeInPaye);
     const taxableIncome = round4(Math.max(0, payeGross - ssnitEmployee - tier3Deductible));
     const payeAmount    = calculatePaye(taxableIncome, bands, statutory.personalRelief);
 
-    const totalEmployeeDeductions = round4(ssnitEmployee + tier3Employee + payeAmount + overtimeTax + otherDeductions);
+    const totalEmployeeDeductions = round4(ssnitEmployee + tier3Employee + payeAmount + overtimeTax + bonusTax + otherDeductions);
     const netPay                  = round4(grossPay - totalEmployeeDeductions);
     const empEmployerCost         = round4(grossPay + ssnitEmployer + tier2Employer + tier3Employer);
 
     // Statutory deduction lines
     lines.push({ description: 'PAYE',          type: SalaryComponentType.EMPLOYEE_DEDUCTION, amount: payeAmount,    isEmployer: false, componentId: undefined });
     if (overtimeTax > 0) lines.push({ description: 'Overtime Tax', type: SalaryComponentType.EMPLOYEE_DEDUCTION, amount: overtimeTax, isEmployer: false, componentId: undefined });
+    if (bonusTax    > 0) lines.push({ description: 'Bonus Tax',    type: SalaryComponentType.EMPLOYEE_DEDUCTION, amount: bonusTax,    isEmployer: false, componentId: undefined });
     lines.push({ description: 'SSNIT (Emp)',   type: SalaryComponentType.EMPLOYEE_DEDUCTION, amount: ssnitEmployee, isEmployer: false, componentId: undefined });
     if (tier3Employee > 0) lines.push({ description: 'Tier 3 (Emp)', type: SalaryComponentType.EMPLOYEE_DEDUCTION, amount: tier3Employee, isEmployer: false, componentId: undefined });
     lines.push({ description: 'SSNIT (Er)',    type: SalaryComponentType.EMPLOYER_CONTRIBUTION, amount: ssnitEmployer, isEmployer: true, componentId: undefined });
@@ -732,6 +745,7 @@ export async function createPayrollRun(
       grossPay,
       payeAmount,
       overtimeTax,
+      bonusTax,
       ssnitEmployee,
       tier3Employee,
       otherDeductions,

@@ -1080,6 +1080,7 @@ function PayslipRow({ slip }: { slip: Payslip }) {
                 <div className="space-y-1">
                   <div className="flex justify-between text-red-600"><span>PAYE</span><span>GHS {fmt(slip.payeAmount)}</span></div>
                   {Number(slip.overtimeTax) > 0 && <div className="flex justify-between text-red-600"><span>Overtime Tax</span><span>GHS {fmt(slip.overtimeTax)}</span></div>}
+                  {Number(slip.bonusTax)   > 0 && <div className="flex justify-between text-red-600"><span>Bonus Tax</span><span>GHS {fmt(slip.bonusTax)}</span></div>}
                   <div className="flex justify-between text-red-600"><span>SSNIT (Employee 5.5%)</span><span>GHS {fmt(slip.ssnitEmployee)}</span></div>
                   {Number(slip.tier3Employee) > 0 && <div className="flex justify-between text-red-600"><span>Tier 3 (Employee)</span><span>GHS {fmt(slip.tier3Employee)}</span></div>}
                   {Number(slip.otherDeductions) > 0 && <div className="flex justify-between text-red-600"><span>Other Deductions</span><span>GHS {fmt(slip.otherDeductions)}</span></div>}
