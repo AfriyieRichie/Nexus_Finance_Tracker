@@ -530,6 +530,10 @@ export async function createPayrollRun(
   if (!period) throw new NotFoundError('Accounting period not found');
 
   const paymentDate = new Date(input.paymentDate);
+  // For @db.Date comparisons use lt(nextDay) rather than lte(paymentDate) to
+  // avoid timezone cast issues when effectiveFrom equals the payment date
+  const paymentDateNextDay = new Date(paymentDate);
+  paymentDateNextDay.setDate(paymentDateNextDay.getDate() + 1);
   const taxYear     = paymentDate.getFullYear();
   const statutory   = await getOrDefaultStatutoryConfig(organisationId, taxYear);
   const bands       = statutory.payeBands;
@@ -542,7 +546,7 @@ export async function createPayrollRun(
       salaryExpenseAccountId: true, tier3EmployeeRate: true, tier3EmployerRate: true,
       isResident: true, overtimeType: true, overtimeFixedAmount: true, overtimeMultiplier: true,
       components: {
-        where:   { isActive: true, effectiveFrom: { lte: paymentDate } },
+        where:   { isActive: true, effectiveFrom: { lt: paymentDateNextDay } },
         orderBy: { effectiveFrom: 'desc' },
         include: { component: { select: { id: true, code: true, name: true, type: true, isTaxable: true } } },
       },
