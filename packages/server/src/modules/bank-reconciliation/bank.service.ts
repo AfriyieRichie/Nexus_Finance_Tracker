@@ -47,7 +47,13 @@ export async function importStatement(organisationId: string, input: ImportState
   const existing = await prisma.bankStatement.findFirst({
     where: { bankAccountId: input.bankAccountId, statementDate: new Date(input.statementDate) },
   });
-  if (existing) throw new ConflictError('A statement for this date already exists for this account');
+  if (existing) {
+    if (existing.isLocked) {
+      throw new ConflictError('A locked reconciliation already exists for this date — unlock it first before reimporting');
+    }
+    // Delete unreconciled/ghost statement so the import can proceed (cascade deletes lines too)
+    await prisma.bankStatement.delete({ where: { id: existing.id } });
+  }
 
   return prisma.bankStatement.create({
     data: {
