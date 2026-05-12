@@ -1180,51 +1180,89 @@ export interface ChangesInEquityOptions {
 
 export async function getChangesInEquity(organisationId: string, options: ChangesInEquityOptions = {}) {
   const org = await verifyOrg(organisationId);
-  const periodFilter = buildPeriodFilter(options.fromDate, options.toDate, options.periodId);
 
-  const equityAgg = await aggregateByClass(organisationId, [AccountClass.EQUITY], periodFilter);
-  const equityIds = [...equityAgg.keys()];
-  const equityAccounts = equityIds.length ? await prisma.account.findMany({
-    where: { id: { in: equityIds }, organisationId, isDeleted: false },
-    select: { id: true, code: true, name: true, class: true, subClass: true, type: true, level: true },
-    orderBy: { code: 'asc' },
-  }) : [];
+  // Resolve dates (periodId → concrete from/to)
+  let fromDate = options.fromDate;
+  let toDate   = options.toDate;
+  if (options.periodId) {
+    const p = await prisma.accountingPeriod.findUnique({
+      where:  { id: options.periodId },
+      select: { startDate: true, endDate: true },
+    });
+    if (p) {
+      fromDate = p.startDate.toISOString().slice(0, 10);
+      toDate   = p.endDate.toISOString().slice(0, 10);
+    }
+  }
 
-  const openingFilter: Prisma.LedgerEntryWhereInput = options.fromDate
-    ? { transactionDate: { lt: new Date(options.fromDate + 'T00:00:00Z') } }
-    : options.periodId ? await (async () => {
-        const p = await prisma.accountingPeriod.findUnique({ where: { id: options.periodId }, select: { startDate: true } });
-        return p ? { transactionDate: { lt: p.startDate } } : {};
-      })() : {};
+  const periodFilter:  Prisma.LedgerEntryWhereInput = buildPeriodFilter(fromDate, toDate);
+  const openingFilter: Prisma.LedgerEntryWhereInput = fromDate
+    ? { transactionDate: { lt: new Date(fromDate + 'T00:00:00Z') } }
+    : {};
+  const closingFilter: Prisma.LedgerEntryWhereInput = toDate
+    ? buildDateFilter(toDate)
+    : {};
+
+  // Equity GL accounts with activity in the period
+  const equityAgg  = await aggregateByClass(organisationId, [AccountClass.EQUITY], periodFilter);
+  const equityIds  = [...equityAgg.keys()];
+  const equityAccounts = equityIds.length
+    ? await prisma.account.findMany({
+        where:   { id: { in: equityIds }, organisationId, isDeleted: false },
+        select:  { id: true, code: true, name: true, class: true, subClass: true, type: true, level: true },
+        orderBy: { code: 'asc' },
+      })
+    : [];
 
   const openingEquityAgg = await aggregateByClass(organisationId, [AccountClass.EQUITY], openingFilter);
-  const pnl = await getIncomeStatement(organisationId, options);
-  const profitForPeriod = new Prisma.Decimal(pnl.profitForPeriod);
 
-  let totalOpening = new Prisma.Decimal(0);
+  // Accumulated P&L before the period (retained earnings not yet closed to equity GL)
+  const priorNetPnL = await computeNetPnL(organisationId, openingFilter);
+
+  // P&L for the period (Total Comprehensive Income row)
+  const profitForPeriod = await computeNetPnL(organisationId, periodFilter);
+
+  let totalGLOpening = new Prisma.Decimal(0);
   let totalMovements = new Prisma.Decimal(0);
-  let totalClosing = new Prisma.Decimal(0);
 
-  const movements = equityAccounts.map((acc) => {
+  const components = equityAccounts.map((acc) => {
     const openingSums = openingEquityAgg.get(acc.id);
     const openingBal  = openingSums ? openingSums.credit.sub(openingSums.debit) : new Prisma.Decimal(0);
     const periodSums  = equityAgg.get(acc.id);
     const periodMov   = periodSums ? periodSums.credit.sub(periodSums.debit) : new Prisma.Decimal(0);
     const closingBal  = openingBal.add(periodMov);
-    totalOpening    = totalOpening.add(openingBal);
+    totalGLOpening  = totalGLOpening.add(openingBal);
     totalMovements  = totalMovements.add(periodMov);
-    totalClosing    = totalClosing.add(closingBal);
     return { accountId: acc.id, code: acc.code, name: acc.name, openingBalance: openingBal.toFixed(2), movements: periodMov.toFixed(2), closingBalance: closingBal.toFixed(2) };
   });
 
-  totalClosing = totalClosing.add(profitForPeriod);
+  // Opening equity = equity GL opening + prior accumulated P&L
+  const totalOpening = totalGLOpening.add(priorNetPnL);
+  // Closing equity from SOCE = opening + equity GL movements + period P&L
+  const totalClosing = totalOpening.add(totalMovements).add(profitForPeriod);
+
+  // Balance sheet equity as of toDate (for reconciliation tie-out)
+  const bsEquityAgg = await aggregateByClass(organisationId, [AccountClass.EQUITY], closingFilter);
+  const bsNetPnL    = await computeNetPnL(organisationId, closingFilter);
+  let bsEquityTotal = bsNetPnL;
+  for (const [, sums] of bsEquityAgg.entries()) {
+    bsEquityTotal = bsEquityTotal.add(sums.credit.sub(sums.debit));
+  }
+  const isReconciled = totalClosing.sub(bsEquityTotal).abs().lt(new Prisma.Decimal('0.02'));
 
   return {
     organisation: { id: org.id, name: org.name, currency: org.baseCurrency },
-    period: { fromDate: options.fromDate ?? null, toDate: options.toDate ?? null, periodId: options.periodId ?? null },
-    components: movements,
+    period: { fromDate: fromDate ?? null, toDate: toDate ?? null, periodId: options.periodId ?? null },
+    components,
     profitForPeriod: profitForPeriod.toFixed(2),
-    totals: { openingEquity: totalOpening.toFixed(2), movementsDuringPeriod: totalMovements.toFixed(2), closingEquity: totalClosing.toFixed(2) },
+    priorNetPnL:     priorNetPnL.toFixed(2),
+    totals: {
+      openingEquity:          totalOpening.toFixed(2),
+      movementsDuringPeriod:  totalMovements.add(profitForPeriod).toFixed(2),
+      closingEquity:          totalClosing.toFixed(2),
+    },
+    closingEquityFromBS: bsEquityTotal.toFixed(2),
+    isReconciled,
   };
 }
 

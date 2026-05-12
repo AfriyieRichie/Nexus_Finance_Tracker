@@ -338,10 +338,24 @@ export async function getCashFlow(
   return res.data.data as CashFlowResult;
 }
 
+export interface ChangesInEquityResult {
+  organisation: { id: string; name: string; currency: string };
+  period: { fromDate: string | null; toDate: string | null; periodId: string | null };
+  components: Array<{
+    accountId: string; code: string; name: string;
+    openingBalance: string; movements: string; closingBalance: string;
+  }>;
+  profitForPeriod: string;
+  priorNetPnL: string;
+  totals: { openingEquity: string; movementsDuringPeriod: string; closingEquity: string };
+  closingEquityFromBS: string;
+  isReconciled: boolean;
+}
+
 export async function getChangesInEquity(
   organisationId: string,
   params?: { fromDate?: string; toDate?: string; periodId?: string },
 ) {
   const res = await api.get(`/organisations/${organisationId}/reports/changes-in-equity`, { params });
-  return res.data.data;
+  return res.data.data as ChangesInEquityResult;
 }
