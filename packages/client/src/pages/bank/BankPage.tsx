@@ -359,7 +359,7 @@ function ImportStatementDialog({ organisationId, bankAccountId, onSuccess }: { o
             </p>
           )}
 
-          {mutation.isError && <p className="text-xs text-destructive">{(mutation.error as any)?.response?.data?.message ?? 'Import failed'}</p>}
+          {mutation.isError && <p className="text-xs text-destructive">{(mutation.error as any)?.response?.data?.error?.message ?? (mutation.error as any)?.response?.data?.message ?? 'Import failed'}</p>}
 
           <div className="flex justify-end gap-2 pt-1">
             <DialogClose asChild><Button variant="outline" size="sm">Cancel</Button></DialogClose>
