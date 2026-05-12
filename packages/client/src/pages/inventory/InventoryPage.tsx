@@ -226,6 +226,56 @@ function NewItemDialog({ organisationId }: { organisationId: string }) {
   );
 }
 
+// ─── PostGLDialog ─────────────────────────────────────────────────────────────
+
+function PostGLDialog({ organisationId, movement, onSuccess }: { organisationId: string; movement: inv.InventoryMovement; onSuccess: () => void }) {
+  const [open, setOpen] = useState(false);
+  const { data: accountsData } = useQuery({ queryKey: ['accounts', organisationId, 'posting'], queryFn: () => listAccounts(organisationId, { pageSize: 300, isControlAccount: false, postingOnly: true }), enabled: open });
+  const { data: periods } = useQuery({ queryKey: ['periods', organisationId, 'open'], queryFn: () => listPeriods(organisationId, { status: 'OPEN' }), enabled: open });
+  const [contraAccountId, setContraAccountId] = useState('');
+  const [periodId, setPeriodId] = useState('');
+
+  const mutation = useMutation({
+    mutationFn: () => inv.repostMovementGL(organisationId, movement.id, { contraAccountId, periodId }),
+    onSuccess: () => { onSuccess(); setOpen(false); setContraAccountId(''); setPeriodId(''); },
+  });
+
+  const allAccounts = (accountsData?.accounts ?? []).filter((a) => a.isActive);
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button size="sm" variant="outline" className="h-6 px-2 text-xs text-orange-600 border-orange-300">Post GL</Button>
+      </DialogTrigger>
+      <DialogContent title="Post GL Journal" description={`Retroactively post the GL journal for ${movement.item?.code} — ${MOVEMENT_LABELS[movement.movementType]} of ${fmt(movement.quantity)} @ ${fmt(movement.unitCost)} = ${fmt(movement.totalCost)}`}>
+        <div className="space-y-3">
+          <div className="rounded-md bg-orange-50 border border-orange-200 p-3 text-xs text-orange-700">
+            This movement was processed without a GL entry. Select the contra account and period to post the journal now.
+          </div>
+          <div>
+            <label className="text-xs font-medium mb-1 block">Contra Account *</label>
+            <AccountSelect value={contraAccountId} onChange={setContraAccountId} accounts={allAccounts} placeholder="Select account…" />
+          </div>
+          <div>
+            <label className="text-xs font-medium mb-1 block">Accounting Period *</label>
+            <Select value={periodId} onChange={(e) => setPeriodId(e.target.value)} className="h-8 text-xs w-full">
+              <option value="">Select period…</option>
+              {(periods ?? []).map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </Select>
+          </div>
+          {mutation.isError && <p className="text-xs text-destructive">{(mutation.error as any)?.response?.data?.error?.message ?? 'Failed to post GL'}</p>}
+          <div className="flex justify-end gap-2 pt-1">
+            <DialogClose asChild><Button variant="outline" size="sm">Cancel</Button></DialogClose>
+            <Button size="sm" disabled={!contraAccountId || !periodId || mutation.isPending} onClick={() => mutation.mutate()}>
+              {mutation.isPending ? 'Posting…' : 'Post Journal'}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─── CreateMovementDialog ─────────────────────────────────────────────────────
 
 function CreateMovementDialog({ organisationId, item, onSuccess }: { organisationId: string; item: inv.InventoryItem; onSuccess: () => void }) {
@@ -696,6 +746,13 @@ export function InventoryPage() {
                                 <XCircle size={11} />
                               </Button>
                             </div>
+                          )}
+                          {m.status === 'POSTED' && !m.journalEntryId && (
+                            <PostGLDialog
+                              organisationId={orgId}
+                              movement={m}
+                              onSuccess={() => void qc.invalidateQueries({ queryKey: ['inv-movements', orgId] })}
+                            />
                           )}
                         </TableCell>
                       </TableRow>

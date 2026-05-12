@@ -144,6 +144,14 @@ export const rejectMovement = asyncHandler(async (req: Request, res: Response) =
   return sendSuccess(res, movement, 'Movement rejected');
 });
 
+export const repostMovementGL = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId, movementId } = req.params;
+  const userId: string = (req as Request & { user?: { id: string } }).user?.id ?? '';
+  const { contraAccountId, periodId } = req.body as { contraAccountId: string; periodId: string };
+  const result = await inventoryService.repostMovementGL(organisationId, movementId, userId, { contraAccountId, periodId });
+  return sendCreated(res, result, 'GL journal posted for movement');
+});
+
 // ─── Stocktake ────────────────────────────────────────────────────────────────
 
 export const listStocktakeSessions = asyncHandler(async (req: Request, res: Response) => {

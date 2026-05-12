@@ -23,6 +23,7 @@ inventoryRouter.get('/movements', requireRole(UserRole.REPORT_VIEWER), ctrl.list
 inventoryRouter.post('/movements', requireRole(UserRole.ACCOUNTANT), ctrl.createMovement);
 inventoryRouter.post('/movements/:movementId/approve', requireRole(UserRole.FINANCE_MANAGER), ctrl.approveMovement);
 inventoryRouter.post('/movements/:movementId/reject', requireRole(UserRole.FINANCE_MANAGER), ctrl.rejectMovement);
+inventoryRouter.post('/movements/:movementId/repost-gl', requireRole(UserRole.FINANCE_MANAGER), ctrl.repostMovementGL);
 
 // ── Stocktake ─────────────────────────────────────────────────────────────────
 inventoryRouter.get('/stocktake', requireRole(UserRole.REPORT_VIEWER), ctrl.listStocktakeSessions);

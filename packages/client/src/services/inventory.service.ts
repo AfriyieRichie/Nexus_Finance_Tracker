@@ -113,6 +113,9 @@ export const approveMovement = (orgId: string, movementId: string) =>
 export const rejectMovement = (orgId: string, movementId: string) =>
   api.post(`/organisations/${orgId}/inventory/movements/${movementId}/reject`).then((r) => r.data.data as InventoryMovement);
 
+export const repostMovementGL = (orgId: string, movementId: string, data: { contraAccountId: string; periodId: string }) =>
+  api.post(`/organisations/${orgId}/inventory/movements/${movementId}/repost-gl`, data).then((r) => r.data.data as { journalEntryId: string; journalNumber: string; amount: string });
+
 // ── Stocktake ─────────────────────────────────────────────────────────────────
 export const listStocktakeSessions = (orgId: string) =>
   api.get(`/organisations/${orgId}/inventory/stocktake`).then((r) => r.data.data as StocktakeSession[]);

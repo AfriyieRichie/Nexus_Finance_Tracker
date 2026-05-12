@@ -1152,6 +1152,89 @@ export async function cancelStocktakeSession(
   });
 }
 
+// ─── Retroactive GL posting ───────────────────────────────────────────────────
+
+export async function repostMovementGL(
+  organisationId: string,
+  movementId: string,
+  userId: string,
+  input: { contraAccountId: string; periodId: string },
+) {
+  const movement = await prisma.inventoryMovement.findFirst({
+    where: { id: movementId, organisationId },
+    include: { item: true },
+  });
+  if (!movement) throw new NotFoundError('Inventory movement');
+  if (movement.status !== MovementStatus.POSTED) {
+    throw new ValidationError('Only POSTED movements can have their GL retroactively posted');
+  }
+  if (movement.journalEntryId) {
+    throw new ValidationError('GL journal has already been posted for this movement');
+  }
+
+  const item = movement.item;
+  if (!item.inventoryAccountId) {
+    throw new ValidationError(
+      'This item has no Inventory GL account configured. Edit the item in Setup to link one first.',
+    );
+  }
+
+  const org = await prisma.organisation.findUnique({
+    where: { id: organisationId },
+    select: { baseCurrency: true },
+  });
+  const currency = org?.baseCurrency ?? 'USD';
+
+  const qty = new Prisma.Decimal(movement.quantity);
+  const isInbound = INBOUND_TYPES.includes(movement.movementType);
+  const unitCost = new Prisma.Decimal(movement.unitCost ?? 0);
+  const totalCost = qty.mul(unitCost);
+
+  let debitAccountId: string;
+  let creditAccountId: string;
+  const lineDescription =
+    movement.description ??
+    `Retroactive GL: ${movement.movementType} ${item.code} x${qty.toFixed(4)} @ ${unitCost.toFixed(4)}`;
+
+  if (isInbound) {
+    debitAccountId = item.inventoryAccountId;
+    creditAccountId = input.contraAccountId;
+  } else if (movement.movementType === MovementType.ISSUE) {
+    debitAccountId = item.cogsAccountId ?? input.contraAccountId;
+    creditAccountId = item.inventoryAccountId;
+  } else {
+    debitAccountId = input.contraAccountId;
+    creditAccountId = item.inventoryAccountId;
+  }
+
+  const transactionDateStr = movement.transactionDate.toISOString().slice(0, 10);
+
+  const je = await journalService.createAndPostSystemEntry(
+    organisationId,
+    {
+      type: 'ADJUSTMENT',
+      reference: movement.reference ?? undefined,
+      description: lineDescription,
+      entryDate: transactionDateStr,
+      periodId: input.periodId,
+      currency,
+      exchangeRate: 1,
+      lines: [
+        { accountId: debitAccountId, description: lineDescription, debitAmount: totalCost.toNumber(), creditAmount: 0, exchangeRate: 1 },
+        { accountId: creditAccountId, description: lineDescription, debitAmount: 0, creditAmount: totalCost.toNumber(), exchangeRate: 1 },
+      ],
+    },
+    userId,
+  );
+
+  await prisma.inventoryMovement.update({
+    where: { id: movementId },
+    data: { journalEntryId: je.id },
+  });
+
+  return { journalEntryId: je.id, journalNumber: je.journalNumber, amount: totalCost.toFixed(2) };
+}
+
 // ─── Valuation ────────────────────────────────────────────────────────────────
 
 export async function getValuationReport(organisationId: string, asAt?: string) {
