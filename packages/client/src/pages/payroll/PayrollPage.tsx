@@ -785,7 +785,7 @@ function EmployeeDialog({ organisationId, emp, employees, onClose }: {
                     <Select value={compForm.componentId} onChange={(e) => setC('componentId', e.target.value)}>
                       <option value="">— select —</option>
                       {allComponents
-                        .filter((c) => c.isActive && c.type !== 'BASIC_SALARY')
+                        .filter((c) => c.isActive && c.type !== 'BASIC_SALARY' && c.type !== 'OVERTIME')
                         .map((c) => (
                           <option key={c.id} value={c.id}>{c.name} — {COMP_TYPE_LABELS[c.type]}</option>
                         ))}
