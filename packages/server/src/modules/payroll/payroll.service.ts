@@ -696,9 +696,9 @@ export async function createPayrollRun(
       if (!isResident) {
         bonusTax = round4(bonuses * 0.20);
       } else {
-        const annualThreshold = round4(basic * 12 * 0.15); // 15% of annual basic
-        const at5pct          = round4(Math.min(bonuses, annualThreshold));
-        const excess          = round4(Math.max(0, bonuses - annualThreshold));
+        const monthlyThreshold = round4(basic * 0.15); // 15% of monthly basic salary
+        const at5pct           = round4(Math.min(bonuses, monthlyThreshold));
+        const excess           = round4(Math.max(0, bonuses - monthlyThreshold));
         bonusTax              = round4(at5pct * 0.05);
         bonusInPaye           = excess;
       }
