@@ -26,17 +26,22 @@ export function auditLogger(req: Request, res: Response, next: NextFunction): vo
       const organisationId =
         req.params.organisationId ?? (req.body as Record<string, unknown>)?.organisationId as string | undefined;
 
+      const mod        = extractModule(req.path);
+      const entityType = extractEntityType(req.path);
+      const action     = `${req.method}:${[mod, entityType].filter(Boolean).join('/')}`.toUpperCase();
+
       prisma.auditLog
         .create({
           data: {
-            userId: user?.sub ?? null,
+            userId:         user?.sub ?? null,
             organisationId: organisationId ?? null,
-            action: `${req.method}:${req.path}`,
-            entityType: extractEntityType(req.path),
-            entityId: extractEntityId(req, body),
-            newValue: sanitiseForAudit(body) as Prisma.InputJsonValue,
-            ipAddress: req.ip ?? null,
-            userAgent: req.headers['user-agent'] ?? null,
+            action,
+            module:         mod?.toUpperCase() ?? null,
+            entityType:     entityType.toUpperCase(),
+            entityId:       extractEntityId(req, body),
+            newValue:       sanitiseForAudit(body) as Prisma.InputJsonValue,
+            ipAddress:      req.ip ?? null,
+            userAgent:      req.headers['user-agent'] ?? null,
           },
         })
         .catch((err: unknown) => logger.error('Audit log write failed', { err }));
@@ -47,9 +52,17 @@ export function auditLogger(req: Request, res: Response, next: NextFunction): vo
   next();
 }
 
+// URL shape: /v1/organisations/:orgId/:module/:entity[/:id[/...]]
+// segments:    0    1              2       3        4       5
+function extractModule(path: string): string | null {
+  const segments = path.split('/').filter(Boolean);
+  const mod = segments[3]; // e.g. 'payroll', 'ar', 'journals'
+  return mod ?? null;
+}
+
 function extractEntityType(path: string): string {
   const segments = path.split('/').filter(Boolean);
-  return segments[1] ?? segments[0] ?? 'unknown';
+  return segments[4] ?? segments[3] ?? segments[1] ?? 'unknown';
 }
 
 function extractEntityId(req: Request, body: unknown): string | null {
