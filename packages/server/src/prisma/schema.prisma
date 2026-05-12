@@ -405,6 +405,7 @@ model Organisation {
   payrollRuns             PayrollRun[]
   payslips                Payslip[]
   payrollStatutoryConfigs PayrollStatutoryConfig[]
+  employeeLoans           EmployeeLoan[]
   invoices                Invoice[]
   supplierInvoices        SupplierInvoice[]
   approvalDelegations     ApprovalDelegation[]

@@ -365,7 +365,7 @@ export async function listLoans(organisationId: string, employeeId: string) {
   const emp = await prisma.employee.findFirst({ where: { id: employeeId, organisationId } });
   if (!emp) throw new NotFoundError('Employee not found');
 
-  return (prisma as any).employeeLoan.findMany({
+  return prisma.employeeLoan.findMany({
     where:   { employeeId, organisationId },
     orderBy: { createdAt: 'desc' },
     include: { glAccount: { select: { id: true, code: true, name: true } } },
@@ -385,7 +385,7 @@ export async function createLoan(
   if (input.instalmentAmount <= 0) throw new ValidationError('Instalment amount must be positive');
   if (input.instalmentAmount > input.principalAmount) throw new ValidationError('Instalment cannot exceed principal');
 
-  return (prisma as any).employeeLoan.create({
+  return prisma.employeeLoan.create({
     data: {
       organisationId,
       employeeId,
@@ -403,10 +403,10 @@ export async function createLoan(
 }
 
 export async function updateLoan(organisationId: string, id: string, input: UpdateLoanInput) {
-  const loan = await (prisma as any).employeeLoan.findFirst({ where: { id, organisationId } });
+  const loan = await prisma.employeeLoan.findFirst({ where: { id, organisationId } });
   if (!loan) throw new NotFoundError('Loan not found');
 
-  return (prisma as any).employeeLoan.update({
+  return prisma.employeeLoan.update({
     where: { id },
     data: {
       ...(input.status            !== undefined && { status:            input.status }),
@@ -640,7 +640,7 @@ export async function createPayrollRun(
     }
 
     // Active loan repayments
-    const activeLoans = await (prisma as any).employeeLoan.findMany({
+    const activeLoans = await prisma.employeeLoan.findMany({
       where: { employeeId: emp.id, status: 'ACTIVE', startDate: { lte: paymentDate } },
     });
     for (const loan of activeLoans) {
@@ -938,10 +938,10 @@ export async function payPayrollRun(organisationId: string, id: string, userId: 
     if (line.loanId) loanTotals.set(line.loanId, (loanTotals.get(line.loanId) ?? 0) + Number(line.amount));
   }
   for (const [loanId, repaid] of loanTotals.entries()) {
-    const loan = await (prisma as any).employeeLoan.findUnique({ where: { id: loanId } });
+    const loan = await prisma.employeeLoan.findUnique({ where: { id: loanId } });
     if (!loan) continue;
     const newBalance = round4(Math.max(0, Number(loan.balance) - repaid));
-    await (prisma as any).employeeLoan.update({
+    await prisma.employeeLoan.update({
       where: { id: loanId },
       data:  { balance: newBalance, status: newBalance === 0 ? 'COMPLETED' : 'ACTIVE' },
     });
