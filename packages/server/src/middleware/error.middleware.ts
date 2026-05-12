@@ -41,6 +41,30 @@ export function errorMiddleware(
       });
       return;
     }
+    if (err.code === 'P2003') {
+      res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'A required reference is missing or invalid' },
+      });
+      return;
+    }
+    // All other known Prisma errors
+    logger.error('Unhandled Prisma error', { code: err.code, meta: err.meta });
+    res.status(400).json({
+      success: false,
+      error: { code: 'DATABASE_ERROR', message: 'A database constraint was violated' },
+    });
+    return;
+  }
+
+  // Prisma validation errors (wrong types passed to Prisma client)
+  if (err instanceof Prisma.PrismaClientValidationError) {
+    logger.error('Prisma validation error', { error: err.message });
+    res.status(400).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: 'Invalid data submitted to the database' },
+    });
+    return;
   }
 
   // Our operational errors

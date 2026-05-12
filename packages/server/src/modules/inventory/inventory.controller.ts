@@ -125,30 +125,26 @@ export const listMovements = asyncHandler(async (req: Request, res: Response) =>
 
 export const createMovement = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId } = req.params;
-  const userId: string = (req as Request & { user?: { id: string } }).user?.id ?? '';
-  const movement = await inventoryService.createMovement(organisationId, userId, req.body);
+  const movement = await inventoryService.createMovement(organisationId, req.user!.sub, req.body);
   return sendCreated(res, movement, 'Movement created');
 });
 
 export const approveMovement = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId, movementId } = req.params;
-  const userId: string = (req as Request & { user?: { id: string } }).user?.id ?? '';
-  const movement = await inventoryService.approveMovement(organisationId, movementId, userId);
+  const movement = await inventoryService.approveMovement(organisationId, movementId, req.user!.sub);
   return sendSuccess(res, movement, 'Movement approved');
 });
 
 export const rejectMovement = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId, movementId } = req.params;
-  const userId: string = (req as Request & { user?: { id: string } }).user?.id ?? '';
-  const movement = await inventoryService.rejectMovement(organisationId, movementId, userId);
+  const movement = await inventoryService.rejectMovement(organisationId, movementId, req.user!.sub);
   return sendSuccess(res, movement, 'Movement rejected');
 });
 
 export const repostMovementGL = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId, movementId } = req.params;
-  const userId: string = (req as Request & { user?: { id: string } }).user?.id ?? '';
   const { contraAccountId, periodId } = req.body as { contraAccountId: string; periodId: string };
-  const result = await inventoryService.repostMovementGL(organisationId, movementId, userId, { contraAccountId, periodId });
+  const result = await inventoryService.repostMovementGL(organisationId, movementId, req.user!.sub, { contraAccountId, periodId });
   return sendCreated(res, result, 'GL journal posted for movement');
 });
 
@@ -162,8 +158,7 @@ export const listStocktakeSessions = asyncHandler(async (req: Request, res: Resp
 
 export const createStocktakeSession = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId } = req.params;
-  const userId: string = (req as Request & { user?: { id: string } }).user?.id ?? '';
-  const session = await inventoryService.createStocktakeSession(organisationId, userId, req.body);
+  const session = await inventoryService.createStocktakeSession(organisationId, req.user!.sub, req.body);
   return sendCreated(res, session, 'Stocktake session created');
 });
 
@@ -188,12 +183,11 @@ export const updateStocktakeCount = asyncHandler(async (req: Request, res: Respo
 
 export const postStocktakeVariances = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId, sessionId } = req.params;
-  const userId: string = (req as Request & { user?: { id: string } }).user?.id ?? '';
   const { periodId } = req.body as { periodId: string };
   const session = await inventoryService.postStocktakeVariances(
     organisationId,
     sessionId,
-    userId,
+    req.user!.sub,
     periodId,
   );
   return sendSuccess(res, session, 'Stocktake variances posted');
@@ -228,7 +222,6 @@ export const getStockBalance = asyncHandler(async (req: Request, res: Response) 
 
 export const receiveStock = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId, itemId } = req.params;
-  const userId: string = (req as Request & { user?: { id: string } }).user?.id ?? '';
   const { quantity, unitCost, periodId, contraAccountId, reference } = req.body as {
     quantity: number;
     unitCost: number;
@@ -236,7 +229,7 @@ export const receiveStock = asyncHandler(async (req: Request, res: Response) => 
     contraAccountId?: string;
     reference?: string;
   };
-  const movement = await inventoryService.createMovement(organisationId, userId, {
+  const movement = await inventoryService.createMovement(organisationId, req.user!.sub, {
     itemId,
     movementType: MovementType.RECEIPT,
     quantity: Number(quantity),
@@ -251,14 +244,13 @@ export const receiveStock = asyncHandler(async (req: Request, res: Response) => 
 
 export const issueStock = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId, itemId } = req.params;
-  const userId: string = (req as Request & { user?: { id: string } }).user?.id ?? '';
   const { quantity, periodId, contraAccountId, reference } = req.body as {
     quantity: number;
     periodId?: string;
     contraAccountId?: string;
     reference?: string;
   };
-  const movement = await inventoryService.createMovement(organisationId, userId, {
+  const movement = await inventoryService.createMovement(organisationId, req.user!.sub, {
     itemId,
     movementType: MovementType.ISSUE,
     quantity: Number(quantity),

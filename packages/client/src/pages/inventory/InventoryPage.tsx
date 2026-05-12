@@ -340,6 +340,7 @@ function PostGLDialog({ organisationId, movement, onSuccess }: { organisationId:
         <div className="space-y-3">
           <div className="rounded-md bg-orange-50 border border-orange-200 p-3 text-xs text-orange-700">
             This movement was processed without a GL entry. Select the contra account and period to post the journal now.
+            <br /><strong>Important:</strong> The item must have an <em>Inventory Control Account</em> linked — use the Edit button on the Stock Items tab first.
           </div>
           <div>
             <label className="text-xs font-medium mb-1 block">Contra Account *</label>
