@@ -684,8 +684,9 @@ export async function createPayrollRun(
         const at10pct     = round4(Math.max(0, overtime - halfBasic));
         overtimeTax       = round4(at5pct * 0.05 + at10pct * 0.10);
       } else {
-        // Non-junior resident: overtime taxed via normal PAYE bands
-        overtimeInPaye    = overtime;
+        // Non-qualifying resident (senior staff or junior staff with income > GHS 18k):
+        // overtime is never added to basic salary (unlike bonus) — taxed at 10% flat
+        overtimeTax = round4(overtime * 0.10);
       }
     }
 

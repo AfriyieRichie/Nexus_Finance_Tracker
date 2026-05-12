@@ -681,38 +681,51 @@ function EmployeeDialog({ organisationId, emp, employees, onClose }: {
             {/* Overtime Configuration */}
             <div className="col-span-2 pt-2 border-t">
               <p className="text-sm font-semibold mb-2">Overtime Configuration</p>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="col-span-2">
-                  <label className="text-xs font-medium">Overtime Type</label>
-                  <Select value={form.overtimeType} onChange={(e) => set('overtimeType', e.target.value)}>
-                    <option value="NONE">None — enter manually at each payroll run</option>
-                    <option value="FIXED">Fixed Amount — same amount every period</option>
-                    <option value="RATE_BASED">Rate-Based — hours × hourly rate × multiplier</option>
-                  </Select>
-                </div>
-                {form.overtimeType === 'FIXED' && (
-                  <div className="col-span-2">
-                    <label className="text-xs font-medium">Fixed Overtime Amount (GHS / period)</label>
-                    <Input type="number" value={form.overtimeFixedAmount} onChange={(e) => set('overtimeFixedAmount', e.target.value)} placeholder="0.00" />
+              {Number(form.basicSalary) > 1500 ? (
+                <div className="flex items-center gap-2 px-3 py-2.5 rounded-md bg-amber-50 border border-amber-200">
+                  <XCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <div>
+                    <p className="text-xs font-semibold text-amber-800">Not Qualified for Overtime Tax Treatment</p>
+                    <p className="text-xs text-amber-700 mt-0.5">
+                      GRA overtime rates (5% / 10%) apply only to junior staff with monthly basic ≤ GHS 1,500
+                      (annual ≤ GHS 18,000). This employee's basic salary exceeds the threshold.
+                    </p>
                   </div>
-                )}
-                {form.overtimeType === 'RATE_BASED' && (
-                  <>
-                    <div>
-                      <label className="text-xs font-medium">Overtime Multiplier (e.g. 1.5 = time-and-a-half)</label>
-                      <Input type="number" step="0.25" value={form.overtimeMultiplier} onChange={(e) => set('overtimeMultiplier', e.target.value)} placeholder="1.5" />
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="col-span-2">
+                    <label className="text-xs font-medium">Overtime Type</label>
+                    <Select value={form.overtimeType} onChange={(e) => set('overtimeType', e.target.value)}>
+                      <option value="NONE">None — enter manually at each payroll run</option>
+                      <option value="FIXED">Fixed Amount — same amount every period</option>
+                      <option value="RATE_BASED">Rate-Based — hours × hourly rate × multiplier</option>
+                    </Select>
+                  </div>
+                  {form.overtimeType === 'FIXED' && (
+                    <div className="col-span-2">
+                      <label className="text-xs font-medium">Fixed Overtime Amount (GHS / period)</label>
+                      <Input type="number" value={form.overtimeFixedAmount} onChange={(e) => set('overtimeFixedAmount', e.target.value)} placeholder="0.00" />
                     </div>
-                    {form.basicSalary && (
-                      <div className="flex items-end pb-1">
-                        <p className="text-xs text-muted-foreground">
-                          Hourly rate: <span className="font-semibold">GHS {fmt(Number(form.basicSalary) / 176)}</span>
-                          <br />Based on 22 working days × 8 hrs = 176 hrs/month
-                        </p>
+                  )}
+                  {form.overtimeType === 'RATE_BASED' && (
+                    <>
+                      <div>
+                        <label className="text-xs font-medium">Overtime Multiplier (e.g. 1.5 = time-and-a-half)</label>
+                        <Input type="number" step="0.25" value={form.overtimeMultiplier} onChange={(e) => set('overtimeMultiplier', e.target.value)} placeholder="1.5" />
                       </div>
-                    )}
-                  </>
-                )}
-              </div>
+                      {form.basicSalary && (
+                        <div className="flex items-end pb-1">
+                          <p className="text-xs text-muted-foreground">
+                            Hourly rate: <span className="font-semibold">GHS {fmt(Number(form.basicSalary) / 176)}</span>
+                            <br />Based on 22 working days × 8 hrs = 176 hrs/month
+                          </p>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}
