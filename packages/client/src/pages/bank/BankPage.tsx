@@ -255,28 +255,36 @@ function ImportStatementDialog({ organisationId, bankAccountId, onSuccess }: { o
       try {
         const rows = parseCSV(text);
         if (rows.length === 0) { setParseError('CSV is empty or could not be parsed. Expected columns: Date, Description, Reference, Debit, Credit'); return; }
-        const lines: ParsedLine[] = rows.map((row, i) => {
-          const dateVal = row['Date'] || row['date'] || row['Transaction Date'] || row['TransactionDate'] || '';
-          const desc = row['Description'] || row['Narration'] || row['description'] || '';
-          const ref = row['Reference'] || row['Ref'] || row['reference'] || '';
-          const debit = parseFloat(row['Debit'] || row['Withdrawal'] || row['Dr'] || '0') || 0;
-          const credit = parseFloat(row['Credit'] || row['Deposit'] || row['Cr'] || '0') || 0;
-          const dateMatch = dateVal.match(/(\d{4}-\d{2}-\d{2})|(\d{2}\/\d{2}\/\d{4})|(\d{2}-\d{2}-\d{4})/);
-          let transactionDate = dateVal;
-          if (dateMatch) {
-            if (dateVal.includes('/')) {
-              const [d, m, y] = dateVal.split('/');
-              transactionDate = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
-            } else if (dateVal.match(/^\d{2}-\d{2}-\d{4}$/)) {
-              const [d, m, y] = dateVal.split('-');
-              transactionDate = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
-            }
-          }
-          const error = !transactionDate.match(/^\d{4}-\d{2}-\d{2}$/) ? `Row ${i + 2}: Invalid date "${dateVal}"` :
-            !desc ? `Row ${i + 2}: Description is required` :
-            (debit === 0 && credit === 0) ? `Row ${i + 2}: Both debit and credit are zero` : undefined;
-          return { transactionDate, description: desc, reference: ref, debitAmount: debit, creditAmount: credit, error };
-        });
+        const parseAmt = (v: string) => parseFloat((v || '0').replace(/,/g, '')) || 0;
+        const normaliseDate = (raw: string): string => {
+          const v = raw.trim();
+          // YYYY-MM-DD — already ISO
+          if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+          // DD/MM/YYYY
+          if (/^\d{2}\/\d{2}\/\d{4}$/.test(v)) { const [d, m, y] = v.split('/'); return `${y}-${m}-${d}`; }
+          // DD-MM-YYYY (4-digit year)
+          if (/^\d{2}-\d{2}-\d{4}$/.test(v)) { const [d, m, y] = v.split('-'); return `${y}-${m}-${d}`; }
+          // DD-MM-YY (2-digit year, e.g. 07-04-26 → 2026-04-07)
+          if (/^\d{2}-\d{2}-\d{2}$/.test(v)) { const [d, m, y] = v.split('-'); return `20${y}-${m}-${d}`; }
+          // DD/MM/YY
+          if (/^\d{2}\/\d{2}\/\d{2}$/.test(v)) { const [d, m, y] = v.split('/'); return `20${y}-${m}-${d}`; }
+          return v;
+        };
+        const allEmpty = (row: Record<string, string>) => Object.values(row).every((v) => !v.trim());
+        const lines: ParsedLine[] = rows
+          .filter((row) => !allEmpty(row))
+          .map((row, i) => {
+            const dateVal = row['Date'] || row['date'] || row['Book Date'] || row['Transaction Date'] || row['TransactionDate'] || row['Value Date'] || row['Posted Date'] || '';
+            const desc    = row['Description'] || row['Descript'] || row['Narration'] || row['description'] || row['Details'] || '';
+            const ref     = row['Reference'] || row['Ref'] || row['reference'] || '';
+            const debit   = parseAmt(row['Debit']  || row['Withdrawal'] || row['Dr'] || '');
+            const credit  = parseAmt(row['Credit'] || row['Deposit']    || row['Cr'] || '');
+            const transactionDate = normaliseDate(dateVal);
+            const error = !transactionDate.match(/^\d{4}-\d{2}-\d{2}$/) ? `Row ${i + 2}: Invalid date "${dateVal}"` :
+              !desc ? `Row ${i + 2}: Description is required` :
+              (debit === 0 && credit === 0) ? `Row ${i + 2}: Both debit and credit are zero` : undefined;
+            return { transactionDate, description: desc, reference: ref, debitAmount: debit, creditAmount: credit, error };
+          });
         setParsedLines(lines);
       } catch {
         setParseError('Failed to parse CSV file.');
