@@ -274,6 +274,9 @@ export const createPayrollRun = (
 ) =>
   api.post(`/organisations/${organisationId}/payroll/runs`, data).then((r) => r.data.data as PayrollRun);
 
+export const deletePayrollRun = (organisationId: string, id: string) =>
+  api.delete(`/organisations/${organisationId}/payroll/runs/${id}`);
+
 export const submitPayrollRun = (organisationId: string, id: string) =>
   api.post(`/organisations/${organisationId}/payroll/runs/${id}/submit`).then((r) => r.data.data as PayrollRun);
 

@@ -34,6 +34,7 @@ payrollRouter.patch('/employees/:employeeId/loans/:loanId',    requireRole(FINAN
 payrollRouter.get('/runs',                      requireRole(REPORT_VIEWER),   ctrl.listPayrollRuns);
 payrollRouter.post('/runs',                     requireRole(ACCOUNTANT),      ctrl.createPayrollRun);
 payrollRouter.get('/runs/:id',                  requireRole(REPORT_VIEWER),   ctrl.getPayrollRun);
+payrollRouter.delete('/runs/:id',               requireRole(ACCOUNTANT),      ctrl.deletePayrollRun);
 payrollRouter.post('/runs/:id/submit',          requireRole(ACCOUNTANT),      ctrl.submitPayrollRun);
 payrollRouter.post('/runs/:id/approve',         requireRole(FINANCE_MANAGER), ctrl.approvePayrollRun);
 payrollRouter.post('/runs/:id/pay',             requireRole(FINANCE_MANAGER), ctrl.payPayrollRun);

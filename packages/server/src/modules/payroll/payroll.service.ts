@@ -804,6 +804,18 @@ export async function createPayrollRun(
   return run!;
 }
 
+export async function deletePayrollRun(organisationId: string, id: string) {
+  const run = await prisma.payrollRun.findFirst({ where: { id, organisationId } });
+  if (!run) throw new NotFoundError('Payroll run not found');
+  if (run.status !== PayrollRunStatus.DRAFT) throw new ValidationError('Only DRAFT runs can be deleted');
+
+  // Cascade: lines → payslips → run
+  const payslipIds = await prisma.payslip.findMany({ where: { payrollRunId: id }, select: { id: true } });
+  await prisma.payslipLine.deleteMany({ where: { payslipId: { in: payslipIds.map((p) => p.id) } } });
+  await prisma.payslip.deleteMany({ where: { payrollRunId: id } });
+  await prisma.payrollRun.delete({ where: { id } });
+}
+
 // ─── Three-Person Workflow ────────────────────────────────────────────────────
 
 export async function submitPayrollRun(organisationId: string, id: string, userId: string) {

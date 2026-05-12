@@ -1302,6 +1302,7 @@ function RunDetail({ organisationId, run }: { organisationId: string; run: Payro
   const submit  = useMutation({ mutationFn: () => payrollSvc.submitPayrollRun(organisationId, run.id),  onSuccess: onWorkflowSuccess, onError: onWorkflowError });
   const approve = useMutation({ mutationFn: () => payrollSvc.approvePayrollRun(organisationId, run.id), onSuccess: onWorkflowSuccess, onError: onWorkflowError });
   const pay     = useMutation({ mutationFn: () => payrollSvc.payPayrollRun(organisationId, run.id),     onSuccess: onWorkflowSuccess, onError: onWorkflowError });
+  const del     = useMutation({ mutationFn: () => payrollSvc.deletePayrollRun(organisationId, run.id),  onSuccess: onWorkflowSuccess, onError: onWorkflowError });
 
   async function downloadCSV() {
     try {
@@ -1338,6 +1339,13 @@ function RunDetail({ organisationId, run }: { organisationId: string; run: Payro
       <div className="flex gap-2 flex-wrap">
         {run.status === 'DRAFT' && (
           <Button size="sm" onClick={() => submit.mutate()} disabled={submit.isPending}>Submit for Approval</Button>
+        )}
+        {run.status === 'DRAFT' && (
+          <Button size="sm" variant="outline" className="text-red-600 border-red-300 hover:bg-red-50"
+            onClick={() => { if (window.confirm('Delete this draft run? This cannot be undone.')) del.mutate(); }}
+            disabled={del.isPending}>
+            <Trash2 className="w-4 h-4 mr-1" />Delete Draft
+          </Button>
         )}
         {run.status === 'SUBMITTED' && (
           <Button size="sm" onClick={() => approve.mutate()} disabled={approve.isPending} className="bg-yellow-600 hover:bg-yellow-700 text-white">Approve</Button>

@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { asyncHandler } from '../../utils/asyncHandler';
-import { sendSuccess, sendCreated, sendPaginated } from '../../utils/response';
+import { sendSuccess, sendCreated, sendNoContent, sendPaginated } from '../../utils/response';
 import { ValidationError } from '../../utils/errors';
 import * as svc from './payroll.service';
 
@@ -119,6 +119,11 @@ export const createPayrollRun = asyncHandler(async (req: Request, res: Response)
   }
   const data = await svc.createPayrollRun(req.params.organisationId, req.user!.sub, req.body);
   return sendCreated(res, data, 'Payroll run created');
+});
+
+export const deletePayrollRun = asyncHandler(async (req: Request, res: Response) => {
+  await svc.deletePayrollRun(req.params.organisationId, req.params.id);
+  return sendNoContent(res);
 });
 
 export const submitPayrollRun = asyncHandler(async (req: Request, res: Response) => {
