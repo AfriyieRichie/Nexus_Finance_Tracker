@@ -876,11 +876,38 @@ export async function payPayrollRun(organisationId: string, id: string, userId: 
   const org = await prisma.organisation.findUnique({ where: { id: organisationId }, select: { baseCurrency: true } });
   const currency = org?.baseCurrency ?? 'GHS';
 
+  // Fetch loan repayment lines for this run (needed before journal is built)
+  const loanRepaymentLines = await prisma.payslipLine.findMany({
+    where:   { payslip: { payrollRunId: id }, loanId: { not: null } },
+    select:  { loanId: true, amount: true },
+  });
+  const loanTotals = new Map<string, number>();
+  for (const line of loanRepaymentLines) {
+    if (line.loanId) loanTotals.set(line.loanId, (loanTotals.get(line.loanId) ?? 0) + Number(line.amount));
+  }
+  // Group loan repayments by GL account
+  const loanGlGroups = new Map<string, number>();
+  for (const [loanId, repaid] of loanTotals.entries()) {
+    const loan = await prisma.employeeLoan.findUnique({ where: { id: loanId }, select: { glAccountId: true } });
+    if (loan?.glAccountId) {
+      loanGlGroups.set(loan.glAccountId, round4((loanGlGroups.get(loan.glAccountId) ?? 0) + repaid));
+    }
+  }
+
+  // Aggregate overtime tax + bonus tax from payslips (all remitted to GRA alongside PAYE)
+  const payslipTaxes = await prisma.payslip.aggregate({
+    where: { payrollRunId: id },
+    _sum:  { overtimeTax: true, bonusTax: true },
+  });
+  const totalOvertimeTax = round4(Number(payslipTaxes._sum.overtimeTax ?? 0));
+  const totalBonusTax    = round4(Number(payslipTaxes._sum.bonusTax    ?? 0));
+
   // Build GL posting lines:
-  // DR Salary Expense (per dept/CC): total gross + employer SSNIT + tier2 + tier3
-  // CR PAYE Payable
-  // CR SSNIT Payable
+  // DR Salary Expense (per dept/CC): total employer cost
+  // CR PAYE Payable (PAYE + overtime tax + bonus tax — all remitted to GRA)
+  // CR SSNIT Payable (employee + employer)
   // CR Pension Payable (Tier2 + Tier3)
+  // CR Employee Loans Receivable (loan repayments, by GL account)
   // CR Wages Payable (net pay)
 
   type JLine = { accountId: string; description: string; debitAmount: number; creditAmount: number; currency: string; exchangeRate: number };
@@ -897,19 +924,24 @@ export async function payPayrollRun(organisationId: string, id: string, userId: 
     lines.push({ accountId: acctId, description: 'Salary expense', debitAmount: amount, creditAmount: 0, currency, exchangeRate: 1 });
   }
 
-  // CR PAYE payable
-  if (Number(run.totalPaye) > 0) {
-    lines.push({ accountId: run.payePayableAccountId,    description: 'PAYE payable',    debitAmount: 0, creditAmount: Number(run.totalPaye),            currency, exchangeRate: 1 });
+  // CR PAYE payable (PAYE + overtime tax + bonus tax — all remitted to GRA)
+  const totalGraTax = round4(Number(run.totalPaye) + totalOvertimeTax + totalBonusTax);
+  if (totalGraTax > 0) {
+    lines.push({ accountId: run.payePayableAccountId, description: 'PAYE payable', debitAmount: 0, creditAmount: totalGraTax, currency, exchangeRate: 1 });
   }
   // CR SSNIT payable (employee + employer)
   const totalSsnit = round4(Number(run.totalSsnitEmployee) + Number(run.totalSsnitEmployer));
   if (totalSsnit > 0) {
-    lines.push({ accountId: run.ssnitPayableAccountId,   description: 'SSNIT payable',   debitAmount: 0, creditAmount: totalSsnit,                       currency, exchangeRate: 1 });
+    lines.push({ accountId: run.ssnitPayableAccountId,   description: 'SSNIT payable',   debitAmount: 0, creditAmount: totalSsnit,   currency, exchangeRate: 1 });
   }
   // CR Pension payable (Tier 2 + Tier 3 employee + Tier 3 employer)
   const totalPension = round4(Number(run.totalTier2) + Number(run.totalTier3Employee) + Number(run.totalTier3Employer));
   if (totalPension > 0) {
-    lines.push({ accountId: run.pensionPayableAccountId, description: 'Pension payable', debitAmount: 0, creditAmount: totalPension,                     currency, exchangeRate: 1 });
+    lines.push({ accountId: run.pensionPayableAccountId, description: 'Pension payable', debitAmount: 0, creditAmount: totalPension, currency, exchangeRate: 1 });
+  }
+  // CR Employee Loans Receivable (one line per GL account)
+  for (const [glAccountId, amount] of loanGlGroups.entries()) {
+    lines.push({ accountId: glAccountId, description: 'Loan repayment recovery', debitAmount: 0, creditAmount: amount, currency, exchangeRate: 1 });
   }
   // CR Wages payable (net pay)
   lines.push({ accountId: run.wagesPayableAccountId, description: 'Net wages payable', debitAmount: 0, creditAmount: Number(run.totalNetPay), currency, exchangeRate: 1 });
@@ -947,15 +979,7 @@ export async function payPayrollRun(organisationId: string, id: string, userId: 
     }),
   ]);
 
-  // Reduce loan balances for repayments in this run
-  const loanLines = await prisma.payslipLine.findMany({
-    where: { payslip: { payrollRunId: id }, loanId: { not: null } },
-    select: { loanId: true, amount: true },
-  });
-  const loanTotals = new Map<string, number>();
-  for (const line of loanLines) {
-    if (line.loanId) loanTotals.set(line.loanId, (loanTotals.get(line.loanId) ?? 0) + Number(line.amount));
-  }
+  // Reduce loan balances using the totals already computed above
   for (const [loanId, repaid] of loanTotals.entries()) {
     const loan = await prisma.employeeLoan.findUnique({ where: { id: loanId } });
     if (!loan) continue;
