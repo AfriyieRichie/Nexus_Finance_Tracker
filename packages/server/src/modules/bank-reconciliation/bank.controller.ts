@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { asyncHandler } from '../../utils/asyncHandler';
-import { sendSuccess, sendCreated, sendPaginated, buildPagination } from '../../utils/response';
+import { sendSuccess, sendCreated } from '../../utils/response';
 import {
   createBankAccountSchema, importStatementSchema, matchLineSchema, listStatementsSchema,
   confirmReconciliationSchema, createJournalFromLineSchema,
@@ -24,8 +24,7 @@ export const importStatement = asyncHandler(async (req: Request, res: Response) 
 
 export const listStatements = asyncHandler(async (req: Request, res: Response) => {
   const query = listStatementsSchema.parse(req.query);
-  const { statements, total, page, pageSize } = await svc.listStatements(req.params.organisationId, query);
-  return sendPaginated(res, statements, buildPagination(page, pageSize, total));
+  return sendSuccess(res, await svc.listStatements(req.params.organisationId, query));
 });
 
 export const getStatement = asyncHandler(async (req: Request, res: Response) => {
