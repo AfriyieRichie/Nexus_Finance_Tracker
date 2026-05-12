@@ -123,8 +123,8 @@ function NewItemDialog({ organisationId }: { organisationId: string }) {
   });
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
-  const invAccounts = (accountsData?.accounts ?? []).filter((a) => a.type === 'INVENTORY' && a.isActive);
-  const expAccounts = (accountsData?.accounts ?? []).filter((a) => (a.type === 'COST_OF_SALES' || a.class === 'EXPENSE') && a.isActive);
+  const invAccounts = (accountsData?.accounts ?? []).filter((a) => (a.class === 'ASSET' || a.type === 'INVENTORY') && a.isActive);
+  const expAccounts = (accountsData?.accounts ?? []).filter((a) => (a.class === 'EXPENSE' || a.type === 'COST_OF_SALES') && a.isActive);
 
   const mutation = useMutation({
     mutationFn: () => inv.createItem(organisationId, {
@@ -193,31 +193,120 @@ function NewItemDialog({ organisationId }: { organisationId: string }) {
               <Input type="number" value={form.reorderQuantity} onChange={(e) => set('reorderQuantity', e.target.value)} placeholder="Suggested PO qty" className="h-8 text-xs" />
             </div>
           </div>
-          {invAccounts.length > 0 && (
-            <div><label className="text-xs font-medium mb-1 block">Inventory Control Account</label>
-              <AccountSelect
-                value={form.inventoryAccountId}
-                onChange={(id) => set('inventoryAccountId', id)}
-                accounts={invAccounts}
-                placeholder="Select…"
-              />
-            </div>
-          )}
-          {expAccounts.length > 0 && (
-            <div><label className="text-xs font-medium mb-1 block">COGS / Cost of Sales Account</label>
-              <AccountSelect
-                value={form.cogsAccountId}
-                onChange={(id) => set('cogsAccountId', id)}
-                accounts={expAccounts}
-                placeholder="Select…"
-              />
-            </div>
-          )}
+          <div><label className="text-xs font-medium mb-1 block">Inventory Control Account</label>
+            <AccountSelect
+              value={form.inventoryAccountId}
+              onChange={(id) => set('inventoryAccountId', id)}
+              accounts={invAccounts}
+              placeholder="Select asset account…"
+            />
+          </div>
+          <div><label className="text-xs font-medium mb-1 block">COGS / Cost of Sales Account</label>
+            <AccountSelect
+              value={form.cogsAccountId}
+              onChange={(id) => set('cogsAccountId', id)}
+              accounts={expAccounts}
+              placeholder="Select expense account…"
+            />
+          </div>
           {mutation.isError && <p className="text-xs text-destructive">{(mutation.error as any)?.response?.data?.message ?? 'Error creating item'}</p>}
           <div className="flex justify-end gap-2 pt-1">
             <DialogClose asChild><Button variant="outline" size="sm">Cancel</Button></DialogClose>
             <Button size="sm" disabled={!form.code || !form.name || mutation.isPending} onClick={() => mutation.mutate()}>
               {mutation.isPending ? 'Saving…' : 'Save Item'}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── EditItemDialog ───────────────────────────────────────────────────────────
+
+function EditItemDialog({ organisationId, item, onSuccess }: { organisationId: string; item: inv.InventoryItem; onSuccess: () => void }) {
+  const [open, setOpen] = useState(false);
+  const { data: accountsData } = useQuery({ queryKey: ['accounts', organisationId, 'posting'], queryFn: () => listAccounts(organisationId, { pageSize: 300, isControlAccount: false, postingOnly: true }), enabled: open });
+  const { data: categories } = useQuery({ queryKey: ['inv-categories', organisationId], queryFn: () => inv.listCategories(organisationId), enabled: open });
+
+  const invAccounts = (accountsData?.accounts ?? []).filter((a) => (a.class === 'ASSET' || a.type === 'INVENTORY') && a.isActive);
+  const expAccounts = (accountsData?.accounts ?? []).filter((a) => (a.class === 'EXPENSE' || a.type === 'COST_OF_SALES') && a.isActive);
+
+  const [form, setForm] = useState({
+    name: item.name,
+    description: item.description ?? '',
+    categoryId: item.categoryId ?? '',
+    unit: item.unit,
+    reorderLevel: item.reorderLevel ?? '',
+    reorderQuantity: item.reorderQuantity ?? '',
+    inventoryAccountId: item.inventoryAccountId ?? '',
+    cogsAccountId: item.cogsAccountId ?? '',
+  });
+  const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  const mutation = useMutation({
+    mutationFn: () => inv.updateItem(organisationId, item.id, {
+      name: form.name,
+      description: form.description || undefined,
+      categoryId: form.categoryId || undefined,
+      unit: form.unit,
+      reorderLevel: form.reorderLevel ? Number(form.reorderLevel) : undefined,
+      reorderQuantity: form.reorderQuantity ? Number(form.reorderQuantity) : undefined,
+      inventoryAccountId: form.inventoryAccountId || undefined,
+      cogsAccountId: form.cogsAccountId || undefined,
+    }),
+    onSuccess: () => { onSuccess(); setOpen(false); },
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (v) setForm({ name: item.name, description: item.description ?? '', categoryId: item.categoryId ?? '', unit: item.unit, reorderLevel: item.reorderLevel ?? '', reorderQuantity: item.reorderQuantity ?? '', inventoryAccountId: item.inventoryAccountId ?? '', cogsAccountId: item.cogsAccountId ?? '' }); }}>
+      <DialogTrigger asChild>
+        <Button size="sm" variant="ghost" className="h-7 text-xs px-2">Edit</Button>
+      </DialogTrigger>
+      <DialogContent title={`Edit ${item.code}`} description="Update item details and GL account links.">
+        <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="text-xs font-medium mb-1 block">Name *</label>
+              <Input value={form.name} onChange={(e) => set('name', e.target.value)} className="h-8 text-xs" />
+            </div>
+            <div><label className="text-xs font-medium mb-1 block">Unit</label>
+              <Select value={form.unit} onChange={(e) => set('unit', e.target.value)} className="h-8 text-xs">
+                {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+              </Select>
+            </div>
+          </div>
+          <div><label className="text-xs font-medium mb-1 block">Category</label>
+            <Select value={form.categoryId} onChange={(e) => set('categoryId', e.target.value)} className="h-8 text-xs">
+              <option value="">No category</option>
+              {(categories ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </Select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="text-xs font-medium mb-1 block">Reorder Level</label>
+              <Input type="number" value={form.reorderLevel} onChange={(e) => set('reorderLevel', e.target.value)} placeholder="Alert threshold" className="h-8 text-xs" />
+            </div>
+            <div><label className="text-xs font-medium mb-1 block">Reorder Quantity</label>
+              <Input type="number" value={form.reorderQuantity} onChange={(e) => set('reorderQuantity', e.target.value)} placeholder="Suggested PO qty" className="h-8 text-xs" />
+            </div>
+          </div>
+          <div className="border-t pt-3">
+            <p className="text-xs font-semibold mb-2">GL Account Links</p>
+            <div className="space-y-3">
+              <div><label className="text-xs font-medium mb-1 block">Inventory Control Account</label>
+                <AccountSelect value={form.inventoryAccountId} onChange={(id) => set('inventoryAccountId', id)} accounts={invAccounts} placeholder="Select asset account…" />
+                <p className="text-[10px] text-muted-foreground mt-0.5">Required for GL posting on receipts. Must be an asset account.</p>
+              </div>
+              <div><label className="text-xs font-medium mb-1 block">COGS / Cost of Sales Account</label>
+                <AccountSelect value={form.cogsAccountId} onChange={(id) => set('cogsAccountId', id)} accounts={expAccounts} placeholder="Select expense account…" />
+                <p className="text-[10px] text-muted-foreground mt-0.5">Used when stock is issued. Leave blank to use contra account.</p>
+              </div>
+            </div>
+          </div>
+          {mutation.isError && <p className="text-xs text-destructive">{(mutation.error as any)?.response?.data?.message ?? 'Error updating item'}</p>}
+          <div className="flex justify-end gap-2 pt-1">
+            <DialogClose asChild><Button variant="outline" size="sm">Cancel</Button></DialogClose>
+            <Button size="sm" disabled={!form.name || mutation.isPending} onClick={() => mutation.mutate()}>
+              {mutation.isPending ? 'Saving…' : 'Save Changes'}
             </Button>
           </div>
         </div>
@@ -674,11 +763,18 @@ export function InventoryPage() {
                           <TableCell className="text-right text-xs">{fmt(value)}</TableCell>
                           <TableCell><Badge variant={item.isActive ? 'success' : 'secondary'}>{item.isActive ? 'Active' : 'Inactive'}</Badge></TableCell>
                           <TableCell>
-                            <CreateMovementDialog
-                              organisationId={orgId}
-                              item={item}
-                              onSuccess={() => void qc.invalidateQueries({ queryKey: ['inventory', orgId] })}
-                            />
+                            <div className="flex items-center gap-1">
+                              <EditItemDialog
+                                organisationId={orgId}
+                                item={item}
+                                onSuccess={() => void qc.invalidateQueries({ queryKey: ['inventory', orgId] })}
+                              />
+                              <CreateMovementDialog
+                                organisationId={orgId}
+                                item={item}
+                                onSuccess={() => void qc.invalidateQueries({ queryKey: ['inventory', orgId] })}
+                              />
+                            </div>
                           </TableCell>
                         </TableRow>
                       );
