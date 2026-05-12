@@ -3,12 +3,12 @@ import {
   LayoutDashboard, BookOpen, FileText, BarChart3, TrendingUp, Building2,
   ChevronDown, LogOut, Settings, Scale, Banknote, Users, ShoppingCart,
   Package, Landmark, Archive, PiggyBank, Receipt, CheckCircle, Shield,
-  Bell, UserCog,
+  Bell, UserCog, RefreshCw,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth.store';
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient, useIsFetching } from '@tanstack/react-query';
 import { getUnreadCount } from '@/services/approvals.service';
 import type { UserRole } from '@/services/users.types';
 
@@ -111,6 +111,9 @@ export function Sidebar() {
   const userRole = activeOrg?.role as UserRole | undefined;
   const isSuperAdmin = user?.isSuperAdmin ?? false;
 
+  const qc = useQueryClient();
+  const isFetching = useIsFetching();
+
   const { data: unreadCount = 0 } = useQuery({
     queryKey: ['notifications-unread', activeOrganisationId],
     queryFn: () => getUnreadCount(activeOrganisationId ?? ''),
@@ -139,6 +142,13 @@ export function Sidebar() {
           <BarChart3 size={14} className="text-primary-foreground" />
         </div>
         <span className="font-semibold text-sm tracking-tight flex-1">Nexus Accounting</span>
+        <button
+          onClick={() => void qc.invalidateQueries()}
+          title="Refresh data"
+          className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground"
+        >
+          <RefreshCw size={15} className={isFetching ? 'animate-spin' : ''} />
+        </button>
         <NavLink to="/approvals" className="relative p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground">
           <Bell size={15} />
           {unreadCount > 0 && (
