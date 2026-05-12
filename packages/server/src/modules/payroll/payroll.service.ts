@@ -685,8 +685,8 @@ export async function createPayrollRun(
         overtimeTax       = round4(at5pct * 0.05 + at10pct * 0.10);
       } else {
         // Non-qualifying resident (senior staff or junior staff with income > GHS 18k):
-        // overtime is never added to basic salary (unlike bonus) — taxed at 10% flat
-        overtimeTax = round4(overtime * 0.10);
+        // overtime is added to PAYE taxable income and taxed via the graduated schedule
+        overtimeInPaye = overtime;
       }
     }
 
