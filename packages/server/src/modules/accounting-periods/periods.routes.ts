@@ -12,6 +12,7 @@ periodsRouter.use(requireAuth);
 // Read
 periodsRouter.get('/', requireRole(UserRole.REPORT_VIEWER), periodsController.listPeriods);
 periodsRouter.get('/current', requireRole(UserRole.REPORT_VIEWER), periodsController.getCurrentPeriod);
+periodsRouter.get('/overdue', requireRole(UserRole.REPORT_VIEWER), periodsController.getOverduePeriods);
 periodsRouter.get('/:periodId', requireRole(UserRole.REPORT_VIEWER), periodsController.getPeriod);
 
 // Create fiscal year — Finance Manager and above

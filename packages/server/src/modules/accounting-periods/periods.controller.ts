@@ -53,6 +53,12 @@ export const lockPeriod = asyncHandler(async (req: Request, res: Response) => {
   return sendSuccess(res, period, 'Period permanently locked');
 });
 
+export const getOverduePeriods = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId } = req.params;
+  const periods = await periodsService.getOverduePeriods(organisationId);
+  return sendSuccess(res, periods);
+});
+
 export const yearEndClose = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId } = req.params;
   const { fiscalYear } = req.body as { fiscalYear?: number };

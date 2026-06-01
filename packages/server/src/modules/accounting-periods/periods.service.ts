@@ -228,6 +228,27 @@ export async function lockPeriod(organisationId: string, periodId: string, userI
   });
 }
 
+// ─── Overdue Open Periods ─────────────────────────────────────────────────────
+// A period is overdue when it is still OPEN but its end date was more than
+// OVERDUE_GRACE_DAYS ago (default: 20 calendar days).
+
+const OVERDUE_GRACE_DAYS = 20;
+
+export async function getOverduePeriods(organisationId: string) {
+  const cutoff = new Date();
+  cutoff.setUTCHours(0, 0, 0, 0);
+  cutoff.setUTCDate(cutoff.getUTCDate() - OVERDUE_GRACE_DAYS);
+
+  return prisma.accountingPeriod.findMany({
+    where: {
+      organisationId,
+      status: PeriodStatus.OPEN,
+      endDate: { lt: cutoff },
+    },
+    orderBy: { endDate: 'asc' },
+  });
+}
+
 // ─── Year-End Close ───────────────────────────────────────────────────────────
 
 export async function yearEndClose(

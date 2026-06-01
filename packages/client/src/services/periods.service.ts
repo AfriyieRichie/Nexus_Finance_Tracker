@@ -45,3 +45,8 @@ export async function yearEndClose(organisationId: string, fiscalYear: number) {
   const res = await api.post(`/organisations/${organisationId}/periods/year-end-close`, { fiscalYear });
   return res.data.data as { locked: number };
 }
+
+export async function getOverduePeriods(organisationId: string) {
+  const res = await api.get(`/organisations/${organisationId}/periods/overdue`);
+  return res.data.data as AccountingPeriod[];
+}
