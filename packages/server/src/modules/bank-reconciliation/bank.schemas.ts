@@ -20,6 +20,7 @@ export const importStatementSchema = z.object({
     creditAmount: z.number().nonnegative().default(0),
     reference: z.string().optional(),
   })).min(1),
+  skipContinuityCheck: z.boolean().default(false),
 });
 
 export const matchLineSchema = z.object({
@@ -33,8 +34,14 @@ export const listStatementsSchema = z.object({
   pageSize: z.coerce.number().int().positive().default(20),
 });
 
+export const autoMatchSchema = z.object({
+  windowDays: z.coerce.number().int().min(0).max(10).default(3),
+  amountTolerance: z.coerce.number().min(0).max(10).default(0.01),
+});
+
 export const confirmReconciliationSchema = z.object({
   force: z.boolean().default(false),
+  allowImbalance: z.boolean().default(false),
 });
 
 export const createJournalFromLineSchema = z.object({
@@ -59,6 +66,7 @@ export type CreateBankAccountInput = z.infer<typeof createBankAccountSchema>;
 export type ImportStatementInput = z.infer<typeof importStatementSchema>;
 export type MatchLineInput = z.infer<typeof matchLineSchema>;
 export type ListStatementsQuery = z.infer<typeof listStatementsSchema>;
+export type AutoMatchInput = z.infer<typeof autoMatchSchema>;
 export type ConfirmReconciliationInput = z.infer<typeof confirmReconciliationSchema>;
 export type CreateJournalFromLineInput = z.infer<typeof createJournalFromLineSchema>;
 export type UnlockReconciliationInput = z.infer<typeof unlockReconciliationSchema>;

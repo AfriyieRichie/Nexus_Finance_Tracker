@@ -4,7 +4,7 @@ import { ConflictError, NotFoundError, ValidationError } from '../../utils/error
 import * as journalService from '../journals/journal.service';
 import type {
   CreateBankAccountInput, ImportStatementInput, MatchLineInput, ListStatementsQuery,
-  ConfirmReconciliationInput, CreateJournalFromLineInput,
+  AutoMatchInput, ConfirmReconciliationInput, CreateJournalFromLineInput,
   UnlockReconciliationInput, GetUnmatchedEntriesQuery,
 } from './bank.schemas';
 
@@ -51,8 +51,33 @@ export async function importStatement(organisationId: string, input: ImportState
     if (existing.isLocked) {
       throw new ConflictError('A locked reconciliation already exists for this date — unlock it first before reimporting');
     }
-    // Delete unreconciled/ghost statement so the import can proceed (cascade deletes lines too)
     await prisma.bankStatement.delete({ where: { id: existing.id } });
+  }
+
+  // ── Opening balance continuity check ─────────────────────────────────────
+  // The opening balance of this statement must equal the closing balance of
+  // the most recent prior locked statement for this bank account.
+  if (!input.skipContinuityCheck) {
+    const prior = await prisma.bankStatement.findFirst({
+      where: {
+        bankAccountId: input.bankAccountId,
+        isLocked: true,
+        statementDate: { lt: new Date(input.statementDate) },
+      },
+      orderBy: { statementDate: 'desc' },
+      select: { closingBalance: true, statementDate: true },
+    });
+    if (prior) {
+      const expectedOpening = Number(prior.closingBalance);
+      const actualOpening   = input.openingBalance;
+      if (Math.abs(expectedOpening - actualOpening) > 0.01) {
+        throw new ValidationError(
+          `Opening balance continuity error: the prior statement (${prior.statementDate.toISOString().split('T')[0]}) ` +
+          `closed at ${expectedOpening.toFixed(2)}, but you entered an opening balance of ${actualOpening.toFixed(2)}. ` +
+          `Correct the opening balance or re-submit with skipContinuityCheck: true to override.`,
+        );
+      }
+    }
   }
 
   return prisma.bankStatement.create({
@@ -145,7 +170,11 @@ export async function unmatchLine(organisationId: string, lineId: string) {
   });
 }
 
-export async function autoMatch(organisationId: string, statementId: string) {
+export async function autoMatch(
+  organisationId: string,
+  statementId: string,
+  options: AutoMatchInput = { windowDays: 3, amountTolerance: 0.01 },
+) {
   const stmt = await prisma.bankStatement.findFirst({
     where: { id: statementId, bankAccount: { organisationId } },
     include: { lines: { where: { isMatched: false } }, bankAccount: true },
@@ -153,28 +182,67 @@ export async function autoMatch(organisationId: string, statementId: string) {
   if (!stmt) throw new NotFoundError('Statement not found');
   if (stmt.isLocked) throw new ValidationError('Statement is locked');
 
+  // IDs already matched in this statement (to avoid double-matching)
+  const alreadyMatchedIds = (
+    await prisma.bankStatementLine.findMany({
+      where: { statement: { bankAccount: { organisationId } }, matchedEntryId: { not: null } },
+      select: { matchedEntryId: true },
+    })
+  ).map((l) => l.matchedEntryId).filter(Boolean) as string[];
+
+  const { windowDays, amountTolerance } = options;
   let matched = 0;
 
   for (const line of stmt.lines) {
-    const amount = line.creditAmount.greaterThan(0) ? line.creditAmount : line.debitAmount;
-    const isCredit = line.creditAmount.greaterThan(0);
+    const isCredit  = line.creditAmount.greaterThan(0);
+    const amount    = isCredit ? Number(line.creditAmount) : Number(line.debitAmount);
+    const lineDate  = line.transactionDate;
 
-    const entry = await prisma.ledgerEntry.findFirst({
+    // Date window
+    const dateFrom = new Date(lineDate);
+    dateFrom.setDate(dateFrom.getDate() - windowDays);
+    const dateTo = new Date(lineDate);
+    dateTo.setDate(dateTo.getDate() + windowDays);
+
+    // Amount window expressed as Decimal range
+    const amountLow  = new Prisma.Decimal(amount - amountTolerance);
+    const amountHigh = new Prisma.Decimal(amount + amountTolerance);
+
+    // Fetch candidates within date/amount window, not yet matched
+    const candidates = await prisma.ledgerEntry.findMany({
       where: {
         organisationId,
         accountId: stmt.bankAccount.accountId,
-        transactionDate: line.transactionDate,
-        ...(isCredit ? { creditAmount: amount } : { debitAmount: amount }),
+        transactionDate: { gte: dateFrom, lte: dateTo },
+        id: alreadyMatchedIds.length > 0 ? { notIn: alreadyMatchedIds } : undefined,
+        ...(isCredit
+          ? { creditAmount: { gte: amountLow, lte: amountHigh } }
+          : { debitAmount: { gte: amountLow, lte: amountHigh } }),
       },
+      orderBy: { transactionDate: 'asc' },
     });
 
-    if (entry) {
-      await prisma.bankStatementLine.update({
-        where: { id: line.id },
-        data: { isMatched: true, matchedEntryId: entry.id },
-      });
-      matched++;
-    }
+    if (candidates.length === 0) continue;
+
+    // Pick best candidate: prefer exact date, then nearest date, then nearest amount
+    const best = candidates.reduce((prev, cur) => {
+      const prevDiff = Math.abs(prev.transactionDate.getTime() - lineDate.getTime());
+      const curDiff  = Math.abs(cur.transactionDate.getTime()  - lineDate.getTime());
+      if (curDiff < prevDiff) return cur;
+      if (curDiff === prevDiff) {
+        const prevAmtDiff = Math.abs(Number(isCredit ? prev.creditAmount : prev.debitAmount) - amount);
+        const curAmtDiff  = Math.abs(Number(isCredit ? cur.creditAmount  : cur.debitAmount)  - amount);
+        return curAmtDiff < prevAmtDiff ? cur : prev;
+      }
+      return prev;
+    });
+
+    await prisma.bankStatementLine.update({
+      where: { id: line.id },
+      data: { isMatched: true, matchedEntryId: best.id },
+    });
+    alreadyMatchedIds.push(best.id);
+    matched++;
   }
 
   return { matched, unmatched: stmt.lines.length - matched };
@@ -226,12 +294,21 @@ export async function confirmReconciliation(
 ) {
   const stmt = await prisma.bankStatement.findFirst({
     where: { id: statementId, bankAccount: { organisationId } },
-    include: { lines: { where: { isMatched: true } } },
+    include: { lines: true, bankAccount: { include: { account: true } } },
   });
   if (!stmt) throw new NotFoundError('Statement not found');
   if (stmt.isLocked) throw new ConflictError('This reconciliation is already confirmed and locked');
 
-  // Segregation of duties: the confirming user must not have posted any matched transactions
+  // ── 1. All lines must be matched ─────────────────────────────────────────
+  const unmatchedCount = stmt.lines.filter((l) => !l.isMatched).length;
+  if (unmatchedCount > 0) {
+    throw new ValidationError(
+      `${unmatchedCount} statement line(s) are still unmatched. ` +
+      `Match or create journals for all lines before confirming.`,
+    );
+  }
+
+  // ── 2. Segregation of duties ──────────────────────────────────────────────
   if (!input.force) {
     const matchedJournalEntryIds = stmt.lines
       .map((l) => l.journalEntryId ?? l.matchedEntryId)
@@ -250,6 +327,45 @@ export async function confirmReconciliation(
           `SEGREGATION_VIOLATION:You posted journal ${conflict.journalNumber} which is matched in this reconciliation. A different user must confirm. Pass force=true to override (supervisor only).`,
         );
       }
+    }
+  }
+
+  // ── 3. Mathematical balance check (adjusted bank balance = GL balance) ────
+  if (!input.allowImbalance) {
+    const accountId = stmt.bankAccount.accountId;
+    const asAt      = stmt.statementDate;
+
+    const agg = await prisma.ledgerEntry.aggregate({
+      where: { organisationId, accountId, transactionDate: { lte: asAt } },
+      _sum: { debitAmount: true, creditAmount: true },
+    });
+    const glBalance = (agg._sum.debitAmount ?? new Prisma.Decimal(0))
+      .minus(agg._sum.creditAmount ?? new Prisma.Decimal(0));
+
+    const allMatchedIds = stmt.lines.map((l) => l.matchedEntryId).filter(Boolean) as string[];
+    const outstanding   = await prisma.ledgerEntry.findMany({
+      where: {
+        organisationId,
+        accountId,
+        transactionDate: { lte: asAt },
+        id: allMatchedIds.length > 0 ? { notIn: allMatchedIds } : undefined,
+      },
+      select: { debitAmount: true, creditAmount: true },
+    });
+
+    const depositsInTransit    = outstanding.reduce((s, e) => s.plus(e.debitAmount),  new Prisma.Decimal(0));
+    const outstandingPayments  = outstanding.reduce((s, e) => s.plus(e.creditAmount), new Prisma.Decimal(0));
+    const adjustedBankBalance  = stmt.closingBalance.plus(depositsInTransit).minus(outstandingPayments);
+    const difference           = adjustedBankBalance.minus(glBalance).abs();
+
+    if (difference.greaterThan(0.01)) {
+      throw new ValidationError(
+        `BALANCE_MISMATCH:Reconciliation does not balance. ` +
+        `Adjusted bank balance: ${adjustedBankBalance.toFixed(2)}, ` +
+        `GL balance: ${glBalance.toFixed(2)}, ` +
+        `Difference: ${adjustedBankBalance.minus(glBalance).toFixed(2)}. ` +
+        `Investigate and resolve the difference, or re-submit with allowImbalance: true to force-confirm.`,
+      );
     }
   }
 

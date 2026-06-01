@@ -704,21 +704,28 @@ function CreateJournalDialog({ organisationId, line, onSuccess }: { organisation
 function ConfirmReconciliationButton({ organisationId, statementId, unmatchedLines, onSuccess }: { organisationId: string; statementId: string; unmatchedLines: number; onSuccess: () => void }) {
   const [open, setOpen] = useState(false);
   const [force, setForce] = useState(false);
+  const [allowImbalance, setAllowImbalance] = useState(false);
   const [segregationError, setSegregationError] = useState('');
+  const [balanceError, setBalanceError] = useState('');
 
   const mutation = useMutation({
-    mutationFn: (f: boolean) => api.post(`/organisations/${organisationId}/bank/statements/${statementId}/confirm`, { force: f }).then((r) => r.data.data),
+    mutationFn: (opts: { force: boolean; allowImbalance: boolean }) =>
+      api.post(`/organisations/${organisationId}/bank/statements/${statementId}/confirm`, opts).then((r) => r.data.data),
     onSuccess: () => { onSuccess(); setOpen(false); },
     onError: (err: any) => {
       const msg: string = err?.response?.data?.message ?? '';
       if (msg.startsWith('SEGREGATION_VIOLATION:')) {
         setSegregationError(msg.replace('SEGREGATION_VIOLATION:', ''));
+      } else if (msg.startsWith('BALANCE_MISMATCH:')) {
+        setBalanceError(msg.replace('BALANCE_MISMATCH:', ''));
       }
     },
   });
 
+  function reset() { setSegregationError(''); setBalanceError(''); setForce(false); setAllowImbalance(false); }
+
   return (
-    <Dialog open={open} onOpenChange={(v) => { setOpen(v); setSegregationError(''); setForce(false); }}>
+    <Dialog open={open} onOpenChange={(v) => { setOpen(v); reset(); }}>
       <DialogTrigger asChild>
         <Button size="sm" variant="default" disabled={unmatchedLines > 0}>
           <Lock size={14} /> Confirm & Lock
@@ -745,15 +752,29 @@ function ConfirmReconciliationButton({ organisationId, statementId, unmatchedLin
             </div>
           )}
 
-          {mutation.isError && !segregationError && (
+          {balanceError && (
+            <div className="rounded-md border border-red-200 bg-red-50 dark:bg-red-950/20 p-3 space-y-2">
+              <div className="flex items-start gap-2 text-destructive">
+                <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                <p className="text-xs">{balanceError}</p>
+              </div>
+              <label className="flex items-center gap-2 text-xs cursor-pointer">
+                <input type="checkbox" checked={allowImbalance} onChange={(e) => setAllowImbalance(e.target.checked)} />
+                I acknowledge the imbalance — force-confirm anyway (supervisor only)
+              </label>
+            </div>
+          )}
+
+          {mutation.isError && !segregationError && !balanceError && (
             <p className="text-xs text-destructive">{(mutation.error as any)?.response?.data?.message ?? 'Error confirming reconciliation'}</p>
           )}
 
           <div className="flex justify-end gap-2">
             <DialogClose asChild><Button variant="outline" size="sm">Cancel</Button></DialogClose>
-            <Button size="sm" variant="destructive" disabled={mutation.isPending || unmatchedLines > 0}
-              onClick={() => { setSegregationError(''); mutation.mutate(force); }}>
-              {mutation.isPending ? 'Locking…' : segregationError ? 'Override & Lock' : 'Confirm & Lock'}
+            <Button size="sm" variant="destructive"
+              disabled={mutation.isPending || unmatchedLines > 0 || (!!balanceError && !allowImbalance) || (!!segregationError && !force)}
+              onClick={() => { reset(); mutation.mutate({ force, allowImbalance }); }}>
+              {mutation.isPending ? 'Locking…' : (segregationError || balanceError) ? 'Override & Lock' : 'Confirm & Lock'}
             </Button>
           </div>
         </div>

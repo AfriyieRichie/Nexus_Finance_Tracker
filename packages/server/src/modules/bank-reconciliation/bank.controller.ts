@@ -3,7 +3,7 @@ import { asyncHandler } from '../../utils/asyncHandler';
 import { sendSuccess, sendCreated } from '../../utils/response';
 import {
   createBankAccountSchema, importStatementSchema, matchLineSchema, listStatementsSchema,
-  confirmReconciliationSchema, createJournalFromLineSchema,
+  autoMatchSchema, confirmReconciliationSchema, createJournalFromLineSchema,
   unlockReconciliationSchema, getUnmatchedEntriesSchema,
 } from './bank.schemas';
 import * as svc from './bank.service';
@@ -41,7 +41,8 @@ export const unmatchLine = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const autoMatch = asyncHandler(async (req: Request, res: Response) => {
-  return sendSuccess(res, await svc.autoMatch(req.params.organisationId, req.params.statementId), 'Auto-match complete');
+  const options = autoMatchSchema.parse(req.body);
+  return sendSuccess(res, await svc.autoMatch(req.params.organisationId, req.params.statementId, options), 'Auto-match complete');
 });
 
 export const getReconciliationSummary = asyncHandler(async (req: Request, res: Response) => {
@@ -50,13 +51,13 @@ export const getReconciliationSummary = asyncHandler(async (req: Request, res: R
 
 export const confirmReconciliation = asyncHandler(async (req: Request, res: Response) => {
   const input = confirmReconciliationSchema.parse(req.body);
-  const userId = (req as any).user?.id ?? 'system';
+  const userId = req.user!.sub;
   return sendSuccess(res, await svc.confirmReconciliation(req.params.organisationId, req.params.statementId, userId, input), 'Reconciliation confirmed and locked');
 });
 
 export const createJournalFromLine = asyncHandler(async (req: Request, res: Response) => {
   const input = createJournalFromLineSchema.parse(req.body);
-  const userId = (req as any).user?.id ?? 'system';
+  const userId = req.user!.sub;
   return sendCreated(res, await svc.createJournalFromLine(req.params.organisationId, req.params.lineId, userId, input), 'Journal created and line matched');
 });
 
@@ -69,7 +70,7 @@ export const getUnmatchedLedgerEntries = asyncHandler(async (req: Request, res: 
 
 export const unlockReconciliation = asyncHandler(async (req: Request, res: Response) => {
   const input = unlockReconciliationSchema.parse(req.body);
-  const userId = (req as any).user?.id ?? 'system';
+  const userId = req.user!.sub;
   return sendSuccess(res, await svc.unlockReconciliation(req.params.organisationId, req.params.statementId, userId, input), 'Reconciliation unlocked');
 });
 
