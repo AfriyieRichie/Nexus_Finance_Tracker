@@ -6,7 +6,7 @@ import {
   runDepreciationSchema, reverseDepreciationSchema,
   disposeAssetSchema, revalueAssetSchema, impairAssetSchema,
   createCategorySchema, updateCategorySchema, bulkCreateAssetsSchema,
-  setAssetStatusSchema,
+  setAssetStatusSchema, reverseImpairmentSchema, depreciationScheduleSchema,
 } from './assets.schemas';
 import * as svc from './assets.service';
 
@@ -86,4 +86,14 @@ export const bulkCreateAssets = asyncHandler(async (req: Request, res: Response)
   const input = bulkCreateAssetsSchema.parse(req.body);
   const result = await svc.bulkCreateAssets(req.params.organisationId, input);
   return sendCreated(res, result, `${result.created} assets imported successfully`);
+});
+
+export const reverseImpairment = asyncHandler(async (req: Request, res: Response) => {
+  const input = reverseImpairmentSchema.parse(req.body);
+  return sendSuccess(res, await svc.reverseImpairment(req.params.organisationId, req.params.assetId, req.user!.sub, input), 'Impairment reversal recorded');
+});
+
+export const getDepreciationSchedule = asyncHandler(async (req: Request, res: Response) => {
+  const query = depreciationScheduleSchema.parse(req.query);
+  return sendSuccess(res, await svc.getDepreciationSchedule(req.params.organisationId, req.params.assetId, query));
 });

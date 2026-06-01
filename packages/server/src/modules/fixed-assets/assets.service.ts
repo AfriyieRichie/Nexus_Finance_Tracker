@@ -7,7 +7,7 @@ import type {
   RunDepreciationInput, ReverseDepreciationInput,
   DisposeAssetInput, RevalueAssetInput, ImpairAssetInput,
   CreateCategoryInput, UpdateCategoryInput, BulkCreateAssetsInput,
-  SetAssetStatusInput,
+  SetAssetStatusInput, ReverseImpairmentInput, DepreciationScheduleQuery,
 } from './assets.schemas';
 
 // ─── Depreciation Formulas ───────────────────────────────────────────────────
@@ -30,9 +30,12 @@ function computeMonthlyDeprn(
       return depreciableAmount.dividedBy(usefulLifeMonths);
 
     case 'REDUCING_BALANCE': {
-      // Use user-defined annual rate if provided; otherwise double-declining (2/n)
-      const rate = reducingBalanceRate ?? new Prisma.Decimal(2).dividedBy(usefulLifeMonths);
-      return carryingValue.times(rate).dividedBy(12);
+      if (reducingBalanceRate) {
+        // User-defined annual rate → convert to monthly
+        return carryingValue.times(reducingBalanceRate).dividedBy(12);
+      }
+      // Double-declining: 2/usefulLifeMonths is already a monthly rate (n in months)
+      return carryingValue.times(2).dividedBy(usefulLifeMonths);
     }
 
     case 'SUM_OF_YEARS_DIGITS': {
@@ -147,6 +150,7 @@ export async function createCategory(organisationId: string, input: CreateCatego
       depreciationExpenseAccountId:     input.depreciationExpenseAccountId     ?? null,
       accumulatedDepreciationAccountId: input.accumulatedDepreciationAccountId ?? null,
       gainLossOnDisposalAccountId:      input.gainLossOnDisposalAccountId      ?? null,
+      retainedEarningsAccountId:        input.retainedEarningsAccountId        ?? null,
     },
   });
 }
@@ -175,6 +179,7 @@ export async function updateCategory(organisationId: string, categoryId: string,
       ...(input.depreciationExpenseAccountId     !== undefined && { depreciationExpenseAccountId:     input.depreciationExpenseAccountId }),
       ...(input.accumulatedDepreciationAccountId !== undefined && { accumulatedDepreciationAccountId: input.accumulatedDepreciationAccountId }),
       ...(input.gainLossOnDisposalAccountId      !== undefined && { gainLossOnDisposalAccountId:      input.gainLossOnDisposalAccountId }),
+      ...(input.retainedEarningsAccountId        !== undefined && { retainedEarningsAccountId:        input.retainedEarningsAccountId }),
     },
   });
 }
@@ -379,6 +384,7 @@ export async function runDepreciation(
         select: {
           depreciationExpenseAccountId: true,
           accumulatedDepreciationAccountId: true,
+          retainedEarningsAccountId: true,
         },
       },
     },
@@ -431,6 +437,17 @@ export async function runDepreciation(
 
     if (deprnAmount === null || deprnAmount.lessThanOrEqualTo(0)) continue;
 
+    // First-period proration: fraction of month the asset was in service
+    let finalDeprnAmount = deprnAmount;
+    if (asset.depreciationMonthsElapsed === 0) {
+      const acq = asset.acquisitionDate;
+      const totalDays = new Date(acq.getFullYear(), acq.getMonth() + 1, 0).getDate();
+      const daysActive = totalDays - acq.getDate() + 1;
+      const prorated = deprnAmount.times(daysActive).dividedBy(totalDays);
+      finalDeprnAmount = prorated.greaterThan(maxDeprn) ? maxDeprn : prorated;
+    }
+    if (finalDeprnAmount.lessThanOrEqualTo(0)) continue;
+
     // Account resolution: asset → category → error (no arbitrary fallbacks)
     const deprnExpAccount = asset.deprnAccountId ?? asset.assetCategory?.depreciationExpenseAccountId ?? null;
     const accDeprnAccount = asset.accDeprnAccountId ?? asset.assetCategory?.accumulatedDepreciationAccountId ?? null;
@@ -445,8 +462,8 @@ export async function runDepreciation(
       continue;
     }
 
-    entries.push({ assetId: asset.id, assetCode: asset.code, assetName: asset.name, amount: deprnAmount.toFixed(2) });
-    runTotal = runTotal.plus(deprnAmount);
+    entries.push({ assetId: asset.id, assetCode: asset.code, assetName: asset.name, amount: finalDeprnAmount.toFixed(2) });
+    runTotal = runTotal.plus(finalDeprnAmount);
 
     if (!input.preview) {
       const je = await journalService.createAndPostSystemEntry(
@@ -459,26 +476,61 @@ export async function runDepreciation(
           currency,
           exchangeRate: 1,
           lines: [
-            { accountId: deprnExpAccount, description: `Depreciation – ${asset.name}`, debitAmount: Number(deprnAmount), creditAmount: 0, currency, exchangeRate: 1 },
-            { accountId: accDeprnAccount, description: `Accum. Depreciation – ${asset.name}`, debitAmount: 0, creditAmount: Number(deprnAmount), currency, exchangeRate: 1 },
+            { accountId: deprnExpAccount, description: `Depreciation – ${asset.name}`, debitAmount: Number(finalDeprnAmount), creditAmount: 0, currency, exchangeRate: 1 },
+            { accountId: accDeprnAccount, description: `Accum. Depreciation – ${asset.name}`, debitAmount: 0, creditAmount: Number(finalDeprnAmount), currency, exchangeRate: 1 },
           ],
         },
         userId,
       );
 
-      const newCarrying = asset.carryingValue.minus(deprnAmount);
+      const newCarrying = asset.carryingValue.minus(finalDeprnAmount);
       const newStatus = newCarrying.lessThanOrEqualTo(asset.residualValue) ? 'FULLY_DEPRECIATED' as const : 'ACTIVE' as const;
+
+      // IAS 16.41 — revaluation surplus transfer to retained earnings
+      let surplusTransfer = new Prisma.Decimal(0);
+      let retainedEarningsId: string | null | undefined = null;
+      if (asset.revaluationSurplusRemaining.greaterThan(0) && asset.revaluationReserveAccountId) {
+        const remainingPeriods = Math.max(1, asset.usefulLifeMonths - asset.depreciationMonthsElapsed);
+        surplusTransfer = asset.revaluationSurplusRemaining.dividedBy(remainingPeriods);
+        retainedEarningsId = asset.assetCategory?.retainedEarningsAccountId
+          ?? (await prisma.account.findFirst({
+              where: { organisationId, class: 'EQUITY', isActive: true, isDeleted: false, name: { contains: 'retained', mode: 'insensitive' } },
+              select: { id: true },
+            }))?.id;
+      }
 
       await prisma.fixedAsset.update({
         where: { id: asset.id },
         data: {
-          accumulatedDeprn: asset.accumulatedDeprn.plus(deprnAmount),
+          accumulatedDeprn: asset.accumulatedDeprn.plus(finalDeprnAmount),
           carryingValue: newCarrying,
           lastDeprnDate: asOfDate,
           depreciationMonthsElapsed: { increment: 1 },
           status: newStatus,
+          ...(surplusTransfer.greaterThan(0) && {
+            revaluationSurplusRemaining: asset.revaluationSurplusRemaining.minus(surplusTransfer),
+          }),
         },
       });
+
+      if (surplusTransfer.greaterThan(0) && asset.revaluationReserveAccountId && retainedEarningsId) {
+        await journalService.createAndPostSystemEntry(
+          organisationId,
+          {
+            type: 'ADJUSTMENT',
+            description: `Revaluation surplus transfer – ${asset.name}`,
+            entryDate,
+            periodId: input.periodId,
+            currency,
+            exchangeRate: 1,
+            lines: [
+              { accountId: asset.revaluationReserveAccountId, description: `Transfer revaluation surplus – ${asset.name}`, debitAmount: Number(surplusTransfer), creditAmount: 0, currency, exchangeRate: 1 },
+              { accountId: retainedEarningsId, description: `Realised revaluation surplus – ${asset.name}`, debitAmount: 0, creditAmount: Number(surplusTransfer), currency, exchangeRate: 1 },
+            ],
+          },
+          userId,
+        );
+      }
 
       // Track run entry for reversal support
       (entries[entries.length - 1] as PreviewEntry & { journalEntryId?: string }).journalEntryId = je.id;
@@ -618,8 +670,71 @@ export async function disposeAsset(
   });
   if (!period) throw new ValidationError('Period not found or closed');
 
+  const [org, category] = await Promise.all([
+    prisma.organisation.findUnique({ where: { id: organisationId }, select: { baseCurrency: true } }),
+    asset.categoryId ? prisma.assetCategory.findFirst({
+      where: { id: asset.categoryId, organisationId },
+      select: { depreciationExpenseAccountId: true, accumulatedDepreciationAccountId: true, gainLossOnDisposalAccountId: true },
+    }) : Promise.resolve(null),
+  ]);
+  const currency = org?.baseCurrency ?? 'USD';
+
+  type JL = { accountId: string; description: string; debitAmount: number; creditAmount: number; currency: string; exchangeRate: number };
+
+  // ── Partial-period depreciation to disposal date (IAS 16 proration) ──────
+  let currentCarryingValue = asset.carryingValue;
+  let currentAccumulatedDeprn = asset.accumulatedDeprn;
+  let currentElapsed = asset.depreciationMonthsElapsed;
+
+  const disposalDateObj = new Date(input.disposalDate + 'T00:00:00');
+  const partialStart = asset.lastDeprnDate
+    ? (() => { const d = new Date(asset.lastDeprnDate); d.setDate(d.getDate() + 1); return d; })()
+    : asset.acquisitionDate;
+
+  const deprnExpAccount = asset.deprnAccountId ?? category?.depreciationExpenseAccountId ?? null;
+  const accDeprnAccount = asset.accDeprnAccountId ?? category?.accumulatedDepreciationAccountId ?? null;
+
+  if (partialStart <= disposalDateObj && deprnExpAccount && accDeprnAccount) {
+    const daysInMonth = new Date(disposalDateObj.getFullYear(), disposalDateObj.getMonth() + 1, 0).getDate();
+    const rawDays = Math.floor((disposalDateObj.getTime() - partialStart.getTime()) / 86400000) + 1;
+    const daysUsed = Math.min(rawDays, daysInMonth);
+    const factor = new Prisma.Decimal(daysUsed).dividedBy(daysInMonth);
+
+    const rawDeprn = computeMonthlyDeprn(
+      asset.acquisitionCost, asset.residualValue, asset.usefulLifeMonths,
+      asset.depreciationMethod, currentCarryingValue, currentElapsed,
+      undefined, asset.unitsOfProductionTotal ?? undefined, asset.reducingBalanceRate ?? undefined,
+    );
+    const maxPartial = currentCarryingValue.minus(asset.residualValue);
+    let partialDeprn = rawDeprn.times(factor);
+    if (partialDeprn.greaterThan(maxPartial)) partialDeprn = maxPartial;
+
+    if (partialDeprn.greaterThan(0)) {
+      await journalService.createAndPostSystemEntry(
+        organisationId,
+        {
+          type: 'DEPRECIATION',
+          description: `Depreciation to disposal date – ${asset.name}`,
+          entryDate: input.disposalDate,
+          periodId: input.periodId,
+          currency,
+          exchangeRate: 1,
+          lines: [
+            { accountId: deprnExpAccount, description: `Depreciation to disposal – ${asset.name}`, debitAmount: Number(partialDeprn), creditAmount: 0, currency, exchangeRate: 1 },
+            { accountId: accDeprnAccount, description: `Accum. depreciation to disposal – ${asset.name}`, debitAmount: 0, creditAmount: Number(partialDeprn), currency, exchangeRate: 1 },
+          ],
+        },
+        userId,
+      );
+      currentCarryingValue = currentCarryingValue.minus(partialDeprn);
+      currentAccumulatedDeprn = currentAccumulatedDeprn.plus(partialDeprn);
+      currentElapsed += 1;
+    }
+  }
+
+  // ── Disposal journal ──────────────────────────────────────────────────────
   const proceeds = new Prisma.Decimal(input.disposalProceeds);
-  const gainOrLoss = proceeds.minus(asset.carryingValue);
+  const gainOrLoss = proceeds.minus(currentCarryingValue);
 
   const assetAccountId = asset.assetAccountId ?? (await prisma.account.findFirst({
     where: { organisationId, type: 'FIXED_ASSET', isActive: true, isDeleted: false, isControlAccount: false },
@@ -628,15 +743,11 @@ export async function disposeAsset(
   }))?.id;
   if (!assetAccountId) throw new ValidationError('No fixed asset account configured');
 
-  const org = await prisma.organisation.findUnique({ where: { id: organisationId }, select: { baseCurrency: true } });
-  const currency = org?.baseCurrency ?? 'USD';
-
-  type JL = { accountId: string; description: string; debitAmount: number; creditAmount: number; currency: string; exchangeRate: number };
   const journalLines: JL[] = [];
 
-  if (asset.accumulatedDeprn.greaterThan(0)) {
-    const accAcct = asset.accDeprnAccountId ?? assetAccountId;
-    journalLines.push({ accountId: accAcct, description: 'Remove accumulated depreciation', debitAmount: Number(asset.accumulatedDeprn), creditAmount: 0, currency, exchangeRate: 1 });
+  if (currentAccumulatedDeprn.greaterThan(0)) {
+    const accAcct = asset.accDeprnAccountId ?? category?.accumulatedDepreciationAccountId ?? assetAccountId;
+    journalLines.push({ accountId: accAcct, description: 'Remove accumulated depreciation', debitAmount: Number(currentAccumulatedDeprn), creditAmount: 0, currency, exchangeRate: 1 });
   }
 
   journalLines.push({ accountId: assetAccountId, description: `Remove asset at cost – ${asset.name}`, debitAmount: 0, creditAmount: Number(asset.acquisitionCost), currency, exchangeRate: 1 });
@@ -646,15 +757,7 @@ export async function disposeAsset(
   }
 
   if (!gainOrLoss.isZero()) {
-    // Prefer the category's dedicated gain/loss on disposal account
-    const categoryGainLossId = asset.categoryId
-      ? (await prisma.assetCategory.findFirst({
-          where: { id: asset.categoryId, organisationId },
-          select: { gainLossOnDisposalAccountId: true },
-        }))?.gainLossOnDisposalAccountId
-      : null;
-
-    const gainLossAccountId = categoryGainLossId ?? (await prisma.account.findFirst({
+    const gainLossAccountId = category?.gainLossOnDisposalAccountId ?? (await prisma.account.findFirst({
       where: { organisationId, type: gainOrLoss.greaterThan(0) ? 'REVENUE_ACCOUNT' : 'EXPENSE_ACCOUNT', isActive: true, isDeleted: false, isControlAccount: false },
       orderBy: { code: 'asc' },
       select: { id: true },
@@ -680,13 +783,20 @@ export async function disposeAsset(
 
   await prisma.fixedAsset.update({
     where: { id: assetId },
-    data: { status: 'DISPOSED', disposalDate: new Date(input.disposalDate), disposalProceeds: proceeds },
+    data: {
+      status: 'DISPOSED',
+      disposalDate: disposalDateObj,
+      disposalProceeds: proceeds,
+      carryingValue: currentCarryingValue,
+      accumulatedDeprn: currentAccumulatedDeprn,
+      depreciationMonthsElapsed: currentElapsed,
+    },
   });
 
   return {
     assetId,
     disposalDate: input.disposalDate,
-    carryingValue: asset.carryingValue.toFixed(2),
+    carryingValue: currentCarryingValue.toFixed(2),
     proceeds: proceeds.toFixed(2),
     gainOrLoss: gainOrLoss.toFixed(2),
   };
@@ -763,6 +873,13 @@ export async function revalueAsset(
     userId,
   );
 
+  // Compute updated revaluation surplus remaining (add surplus / reduce deficit)
+  const newSurplusRemaining = isSurplus
+    ? asset.revaluationSurplusRemaining.plus(surplusDeficit)
+    : asset.revaluationSurplusRemaining.greaterThan(absAmount)
+      ? asset.revaluationSurplusRemaining.minus(absAmount)
+      : new Prisma.Decimal(0);
+
   // On revaluation, reset accumulated depreciation (gross-up method — set cost = fair value, accum deprn = 0)
   await prisma.fixedAsset.update({
     where: { id: assetId },
@@ -772,6 +889,8 @@ export async function revalueAsset(
       impairmentLoss: new Prisma.Decimal(0),
       carryingValue: fairValue,
       depreciationMonthsElapsed: 0,
+      revaluationSurplusRemaining: newSurplusRemaining,
+      ...(isSurplus && { revaluationReserveAccountId: reserveAccountId }),
     },
   });
 
@@ -880,4 +999,162 @@ export async function impairAsset(
   });
 
   return { impairment, newCarryingValue: newCarryingValue.toFixed(2), journalEntryId: je.id };
+}
+
+// ─── Impairment Reversal (IAS 36.111) ────────────────────────────────────────
+
+export async function reverseImpairment(
+  organisationId: string,
+  assetId: string,
+  userId: string,
+  input: ReverseImpairmentInput,
+) {
+  const asset = await prisma.fixedAsset.findFirst({
+    where: { id: assetId, organisationId, isDeleted: false },
+  });
+  if (!asset) throw new NotFoundError('Asset not found');
+  if (asset.status === 'DISPOSED') throw new ValidationError('Cannot reverse impairment on a disposed asset');
+  if (asset.impairmentLoss.lessThanOrEqualTo(0)) throw new ValidationError('This asset has no impairment loss to reverse');
+
+  const reversalAmount = new Prisma.Decimal(input.reversalAmount);
+
+  // IAS 36.117: ceiling = carrying value that would have existed had no impairment been recognised
+  // Approximated as: acquisitionCost − accumulatedDeprn (conservative and auditor-accepted)
+  const ceiling = asset.acquisitionCost.minus(asset.accumulatedDeprn);
+  const maxReversal = asset.impairmentLoss.lessThan(ceiling.minus(asset.carryingValue))
+    ? asset.impairmentLoss
+    : ceiling.minus(asset.carryingValue);
+
+  if (maxReversal.lessThanOrEqualTo(0)) throw new ValidationError('Carrying value already equals or exceeds the IAS 36 ceiling — no reversal is possible');
+  if (reversalAmount.greaterThan(maxReversal)) {
+    throw new ValidationError(
+      `Reversal amount (${reversalAmount.toFixed(2)}) exceeds the permitted maximum of ${maxReversal.toFixed(2)} ` +
+      `(lesser of total impairment loss ${asset.impairmentLoss.toFixed(2)} and IAS 36 ceiling headroom)`,
+    );
+  }
+
+  const period = await prisma.accountingPeriod.findFirst({
+    where: { id: input.periodId, organisationId, status: 'OPEN' },
+  });
+  if (!period) throw new ValidationError('Period not found or closed');
+
+  const newCarryingValue = asset.carryingValue.plus(reversalAmount);
+  const org = await prisma.organisation.findUnique({ where: { id: organisationId }, select: { baseCurrency: true } });
+  const currency = org?.baseCurrency ?? 'USD';
+
+  const impairmentAccountId = input.impairmentAccountId ?? (await prisma.account.findFirst({
+    where: { organisationId, class: 'EXPENSE', isActive: true, isDeleted: false, name: { contains: 'impairment', mode: 'insensitive' } },
+    select: { id: true },
+  }))?.id ?? (await prisma.account.findFirst({
+    where: { organisationId, class: 'EXPENSE', isActive: true, isDeleted: false, isControlAccount: false },
+    orderBy: { code: 'asc' },
+    select: { id: true },
+  }))?.id;
+
+  const assetAccountId = asset.assetAccountId ?? (await prisma.account.findFirst({
+    where: { organisationId, type: 'FIXED_ASSET', isActive: true, isDeleted: false, isControlAccount: false },
+    orderBy: { code: 'asc' },
+    select: { id: true },
+  }))?.id;
+
+  if (!impairmentAccountId || !assetAccountId) throw new ValidationError('Cannot resolve impairment or fixed asset GL accounts');
+
+  const je = await journalService.createAndPostSystemEntry(
+    organisationId,
+    {
+      type: 'ADJUSTMENT',
+      description: `Impairment reversal – ${asset.name} (IAS 36.111)`,
+      entryDate: input.reversalDate,
+      periodId: input.periodId,
+      currency,
+      exchangeRate: 1,
+      lines: [
+        { accountId: assetAccountId, description: `Impairment reversal – ${asset.name}`, debitAmount: Number(reversalAmount), creditAmount: 0, currency, exchangeRate: 1 },
+        { accountId: impairmentAccountId, description: `Reverse impairment loss – ${asset.name}`, debitAmount: 0, creditAmount: Number(reversalAmount), currency, exchangeRate: 1 },
+      ],
+    },
+    userId,
+  );
+
+  await prisma.fixedAsset.update({
+    where: { id: assetId },
+    data: {
+      carryingValue: newCarryingValue,
+      impairmentLoss: asset.impairmentLoss.minus(reversalAmount),
+      status: 'ACTIVE',
+    },
+  });
+
+  const reversal = await prisma.assetImpairmentReversal.create({
+    data: {
+      organisationId,
+      assetId,
+      reversalDate: new Date(input.reversalDate),
+      reversalAmount,
+      previousImpairmentLoss: asset.impairmentLoss,
+      newCarryingValue,
+      journalEntryId: je.id,
+      notes: input.notes,
+      createdBy: userId,
+    },
+  });
+
+  return { reversal, newCarryingValue: newCarryingValue.toFixed(2), journalEntryId: je.id };
+}
+
+// ─── Depreciation Schedule / Projection ──────────────────────────────────────
+
+export async function getDepreciationSchedule(
+  organisationId: string,
+  assetId: string,
+  query: DepreciationScheduleQuery,
+) {
+  const asset = await prisma.fixedAsset.findFirst({
+    where: { id: assetId, organisationId, isDeleted: false },
+  });
+  if (!asset) throw new NotFoundError('Asset not found');
+  if (asset.status === 'DISPOSED') throw new ValidationError('Asset is disposed — no future depreciation');
+
+  const schedule: { period: number; amount: string; cumulativeDeprn: string; carryingValue: string }[] = [];
+  let carrying = asset.carryingValue;
+  let accumulated = asset.accumulatedDeprn;
+  let elapsed = asset.depreciationMonthsElapsed;
+  const residual = asset.residualValue;
+
+  for (let i = 1; i <= query.months; i++) {
+    const maxDeprn = carrying.minus(residual);
+    if (maxDeprn.lessThanOrEqualTo(0)) break;
+
+    const raw = computeMonthlyDeprn(
+      asset.acquisitionCost, residual, asset.usefulLifeMonths,
+      asset.depreciationMethod, carrying, elapsed,
+      undefined, asset.unitsOfProductionTotal ?? undefined,
+      asset.reducingBalanceRate ?? undefined,
+    );
+    const amount = raw.greaterThan(maxDeprn) ? maxDeprn : raw;
+
+    carrying = carrying.minus(amount);
+    accumulated = accumulated.plus(amount);
+    elapsed += 1;
+
+    schedule.push({
+      period: i,
+      amount: amount.toFixed(2),
+      cumulativeDeprn: accumulated.toFixed(2),
+      carryingValue: carrying.toFixed(2),
+    });
+
+    if (carrying.lessThanOrEqualTo(residual)) break;
+  }
+
+  return {
+    assetId,
+    assetCode: asset.code,
+    assetName: asset.name,
+    depreciationMethod: asset.depreciationMethod,
+    currentCarryingValue: asset.carryingValue.toFixed(2),
+    residualValue: residual.toFixed(2),
+    periodsRemaining: asset.usefulLifeMonths - asset.depreciationMonthsElapsed,
+    schedule,
+  };
 }

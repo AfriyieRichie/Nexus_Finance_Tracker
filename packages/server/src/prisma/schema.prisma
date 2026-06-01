@@ -384,8 +384,9 @@ model Organisation {
   fixedAssets        FixedAsset[]
   assetCategories    AssetCategory[]
   depreciationRuns   DepreciationRun[]
-  assetRevaluations  AssetRevaluation[]
-  assetImpairments   AssetImpairment[]
+  assetRevaluations        AssetRevaluation[]
+  assetImpairments         AssetImpairment[]
+  assetImpairmentReversals AssetImpairmentReversal[]
   bankAccounts       BankAccount[]
   inventoryItems       InventoryItem[]
   inventoryCategories  InventoryCategory[]
@@ -1025,7 +1026,9 @@ model FixedAsset {
   status                    AssetStatus        @default(ACTIVE)
   disposalDate              DateTime?          @db.Date
   disposalProceeds          Decimal?           @db.Decimal(20, 4)
-  reducingBalanceRate       Decimal?           @db.Decimal(8, 6)
+  reducingBalanceRate            Decimal?           @db.Decimal(8, 6)
+  revaluationSurplusRemaining   Decimal            @default(0) @db.Decimal(20, 4)
+  revaluationReserveAccountId   String?
   assetAccountId            String?
   deprnAccountId            String?
   accDeprnAccountId         String?
@@ -1034,11 +1037,12 @@ model FixedAsset {
   createdAt                 DateTime           @default(now())
   updatedAt                 DateTime           @updatedAt
 
-  organisation     Organisation          @relation(fields: [organisationId], references: [id])
-  assetCategory    AssetCategory?        @relation(fields: [categoryId], references: [id])
-  revaluations     AssetRevaluation[]
-  impairments      AssetImpairment[]
-  deprnRunEntries  DepreciationRunEntry[]
+  organisation         Organisation            @relation(fields: [organisationId], references: [id])
+  assetCategory        AssetCategory?          @relation(fields: [categoryId], references: [id])
+  revaluations         AssetRevaluation[]
+  impairments          AssetImpairment[]
+  impairmentReversals  AssetImpairmentReversal[]
+  deprnRunEntries      DepreciationRunEntry[]
 
   @@unique([organisationId, code])
   @@index([organisationId, status])
@@ -1059,6 +1063,7 @@ model AssetCategory {
   depreciationExpenseAccountId      String?
   accumulatedDepreciationAccountId  String?
   gainLossOnDisposalAccountId       String?
+  retainedEarningsAccountId         String?
   isActive                  Boolean            @default(true)
   isDeleted                 Boolean            @default(false)
   createdAt                 DateTime           @default(now())
@@ -1112,6 +1117,27 @@ model AssetImpairment {
   @@index([assetId])
   @@index([organisationId])
   @@map("asset_impairments")
+}
+
+model AssetImpairmentReversal {
+  id                     String   @id @default(uuid())
+  organisationId         String
+  assetId                String
+  reversalDate           DateTime @db.Date
+  reversalAmount         Decimal  @db.Decimal(20, 4)
+  previousImpairmentLoss Decimal  @db.Decimal(20, 4)
+  newCarryingValue       Decimal  @db.Decimal(20, 4)
+  journalEntryId         String?
+  notes                  String?
+  createdBy              String
+  createdAt              DateTime @default(now())
+
+  asset        FixedAsset   @relation(fields: [assetId], references: [id])
+  organisation Organisation @relation(fields: [organisationId], references: [id])
+
+  @@index([assetId])
+  @@index([organisationId])
+  @@map("asset_impairment_reversals")
 }
 
 model DepreciationRun {

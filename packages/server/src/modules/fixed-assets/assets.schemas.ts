@@ -92,6 +92,7 @@ export const createCategorySchema = z.object({
   depreciationExpenseAccountId:     z.string().uuid().optional().nullable(),
   accumulatedDepreciationAccountId: z.string().uuid().optional().nullable(),
   gainLossOnDisposalAccountId:      z.string().uuid().optional().nullable(),
+  retainedEarningsAccountId:        z.string().uuid().optional().nullable(),
 });
 
 export const updateCategorySchema = createCategorySchema.partial();
@@ -110,6 +111,18 @@ export const bulkCreateAssetsSchema = z.object({
     .max(500),
 });
 
+export const reverseImpairmentSchema = z.object({
+  reversalDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  reversalAmount: z.number().positive(),
+  periodId: z.string().uuid(),
+  impairmentAccountId: z.string().uuid().optional(),
+  notes: z.string().optional(),
+});
+
+export const depreciationScheduleSchema = z.object({
+  months: z.coerce.number().int().positive().max(600).default(60),
+});
+
 export type CreateAssetInput = z.infer<typeof createAssetSchema>;
 export type UpdateAssetInput = z.infer<typeof updateAssetSchema>;
 export type ListAssetsQuery = z.infer<typeof listAssetsSchema>;
@@ -122,3 +135,5 @@ export type CreateCategoryInput = z.infer<typeof createCategorySchema>;
 export type UpdateCategoryInput = z.infer<typeof updateCategorySchema>;
 export type BulkCreateAssetsInput = z.infer<typeof bulkCreateAssetsSchema>;
 export type SetAssetStatusInput = z.infer<typeof setAssetStatusSchema>;
+export type ReverseImpairmentInput = z.infer<typeof reverseImpairmentSchema>;
+export type DepreciationScheduleQuery = z.infer<typeof depreciationScheduleSchema>;

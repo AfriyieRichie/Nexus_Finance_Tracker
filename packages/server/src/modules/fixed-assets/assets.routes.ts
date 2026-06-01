@@ -26,6 +26,8 @@ router.put('/:assetId', requireRole(UserRole.FINANCE_MANAGER), ctrl.updateAsset)
 router.post('/:assetId/dispose', requireRole(UserRole.FINANCE_MANAGER), ctrl.disposeAsset);
 router.post('/:assetId/revalue', requireRole(UserRole.FINANCE_MANAGER), ctrl.revalueAsset);
 router.post('/:assetId/impair', requireRole(UserRole.FINANCE_MANAGER), ctrl.impairAsset);
+router.post('/:assetId/impairment-reversal', requireRole(UserRole.FINANCE_MANAGER), ctrl.reverseImpairment);
+router.get('/:assetId/depreciation-schedule', requireRole(UserRole.REPORT_VIEWER), ctrl.getDepreciationSchedule);
 router.patch('/:assetId/status', requireRole(UserRole.FINANCE_MANAGER), ctrl.setAssetStatus);
 
 export { router as assetsRouter };
