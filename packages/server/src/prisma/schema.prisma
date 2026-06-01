@@ -353,13 +353,14 @@ model RefreshToken {
 // ============================================================
 
 model Organisation {
-  id              String   @id @default(uuid())
-  name            String
-  legalName       String?
-  registrationNo  String?
-  taxId           String?
-  baseCurrency    String   @default("USD")
-  fiscalYearStart Int      @default(1)
+  id                  String   @id @default(uuid())
+  name                String
+  legalName           String?
+  registrationNo      String?
+  taxId               String?
+  vatRegistrationNo   String?
+  baseCurrency        String   @default("USD")
+  fiscalYearStart     Int      @default(1)
   address         Json?
   phone           String?
   email           String?

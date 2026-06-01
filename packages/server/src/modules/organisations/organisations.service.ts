@@ -60,6 +60,18 @@ export async function updateOrganisation(
   const org = await prisma.organisation.findUnique({ where: { id: organisationId } });
   if (!org) throw new NotFoundError('Organisation');
 
+  if (input.baseCurrency && input.baseCurrency !== org.baseCurrency) {
+    const postedCount = await prisma.journalEntry.count({
+      where: { organisationId, status: 'POSTED' },
+    });
+    if (postedCount > 0) {
+      throw new ForbiddenError(
+        'Base currency cannot be changed after transactions have been posted. ' +
+        `This organisation has ${postedCount} posted journal entr${postedCount === 1 ? 'y' : 'ies'}.`,
+      );
+    }
+  }
+
   return prisma.organisation.update({ where: { id: organisationId }, data: input });
 }
 

@@ -6,6 +6,7 @@ export const createOrganisationSchema = z.object({
   legalName: z.string().max(200).trim().optional(),
   registrationNo: z.string().max(100).trim().optional(),
   taxId: z.string().max(100).trim().optional(),
+  vatRegistrationNo: z.string().max(100).trim().optional(),
   baseCurrency: z.string().length(3).toUpperCase().default('USD'),
   fiscalYearStart: z.number().int().min(1).max(12).default(1),
   industry: z.string().max(100).optional(),
