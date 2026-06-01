@@ -43,6 +43,7 @@ inventoryRouter.get('/:itemId', requireRole(UserRole.REPORT_VIEWER), ctrl.getIte
 inventoryRouter.get('/:itemId/balance', requireRole(UserRole.REPORT_VIEWER), ctrl.getStockBalance);
 inventoryRouter.patch('/:itemId', requireRole(UserRole.FINANCE_MANAGER), ctrl.updateItem);
 inventoryRouter.delete('/:itemId', requireRole(UserRole.FINANCE_MANAGER), ctrl.deleteItem);
+inventoryRouter.post('/:itemId/nrv-writedown', requireRole(UserRole.FINANCE_MANAGER), ctrl.nrvWriteDown);
 
 // ── Legacy shims ──────────────────────────────────────────────────────────────
 inventoryRouter.post('/:itemId/receive', requireRole(UserRole.ACCOUNTANT), ctrl.receiveStock);

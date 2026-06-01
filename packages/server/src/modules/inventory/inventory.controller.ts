@@ -9,6 +9,22 @@ import {
   buildPagination,
 } from '../../utils/response';
 import * as inventoryService from './inventory.service';
+import {
+  createCategorySchema,
+  updateCategorySchema,
+  createLocationSchema,
+  updateLocationSchema,
+  createItemSchema,
+  updateItemSchema,
+  listItemsSchema,
+  createMovementSchema,
+  listMovementsSchema,
+  repostGLSchema,
+  createStocktakeSchema,
+  updateStocktakeCountSchema,
+  postStocktakeSchema,
+  nrvWriteDownSchema,
+} from './inventory.schemas';
 
 // ─── Categories ───────────────────────────────────────────────────────────────
 
@@ -20,13 +36,15 @@ export const listCategories = asyncHandler(async (req: Request, res: Response) =
 
 export const createCategory = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId } = req.params;
-  const category = await inventoryService.createCategory(organisationId, req.body);
+  const input = createCategorySchema.parse(req.body);
+  const category = await inventoryService.createCategory(organisationId, input);
   return sendCreated(res, category, 'Category created');
 });
 
 export const updateCategory = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId, categoryId } = req.params;
-  const category = await inventoryService.updateCategory(organisationId, categoryId, req.body);
+  const input = updateCategorySchema.parse(req.body);
+  const category = await inventoryService.updateCategory(organisationId, categoryId, input);
   return sendSuccess(res, category, 'Category updated');
 });
 
@@ -40,13 +58,15 @@ export const listLocations = asyncHandler(async (req: Request, res: Response) =>
 
 export const createLocation = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId } = req.params;
-  const location = await inventoryService.createLocation(organisationId, req.body);
+  const input = createLocationSchema.parse(req.body);
+  const location = await inventoryService.createLocation(organisationId, input);
   return sendCreated(res, location, 'Location created');
 });
 
 export const updateLocation = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId, locationId } = req.params;
-  const location = await inventoryService.updateLocation(organisationId, locationId, req.body);
+  const input = updateLocationSchema.parse(req.body);
+  const location = await inventoryService.updateLocation(organisationId, locationId, input);
   return sendSuccess(res, location, 'Location updated');
 });
 
@@ -54,25 +74,11 @@ export const updateLocation = asyncHandler(async (req: Request, res: Response) =
 
 export const listItems = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId } = req.params;
-  const {
-    search,
-    categoryId,
-    isActive,
-    isLowStock,
-    page,
-    pageSize,
-  } = req.query as Record<string, string | undefined>;
+  const query = listItemsSchema.parse(req.query);
 
   const { items, total, page: pg, pageSize: ps } = await inventoryService.listItems(
     organisationId,
-    {
-      search,
-      categoryId,
-      isActive: isActive !== undefined ? isActive === 'true' : undefined,
-      isLowStock: isLowStock === 'true',
-      page: page ? parseInt(page, 10) : undefined,
-      pageSize: pageSize ? parseInt(pageSize, 10) : undefined,
-    },
+    query,
   );
 
   return sendPaginated(res, items, buildPagination(pg, ps, total));
@@ -86,13 +92,15 @@ export const getItem = asyncHandler(async (req: Request, res: Response) => {
 
 export const createItem = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId } = req.params;
-  const item = await inventoryService.createItem(organisationId, req.body);
+  const input = createItemSchema.parse(req.body);
+  const item = await inventoryService.createItem(organisationId, input);
   return sendCreated(res, item, 'Inventory item created');
 });
 
 export const updateItem = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId, itemId } = req.params;
-  const item = await inventoryService.updateItem(organisationId, itemId, req.body);
+  const input = updateItemSchema.parse(req.body);
+  const item = await inventoryService.updateItem(organisationId, itemId, input);
   return sendSuccess(res, item, 'Inventory item updated');
 });
 
@@ -106,18 +114,11 @@ export const deleteItem = asyncHandler(async (req: Request, res: Response) => {
 
 export const listMovements = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId } = req.params;
-  const { itemId, movementType, status, page, pageSize } =
-    req.query as Record<string, string | undefined>;
+  const query = listMovementsSchema.parse(req.query);
 
   const { movements, total, page: pg, pageSize: ps } = await inventoryService.listMovements(
     organisationId,
-    {
-      itemId,
-      movementType: movementType as MovementType | undefined,
-      status: status as inventoryService.ListMovementsParams['status'],
-      page: page ? parseInt(page, 10) : undefined,
-      pageSize: pageSize ? parseInt(pageSize, 10) : undefined,
-    },
+    query,
   );
 
   return sendPaginated(res, movements, buildPagination(pg, ps, total));
@@ -125,7 +126,8 @@ export const listMovements = asyncHandler(async (req: Request, res: Response) =>
 
 export const createMovement = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId } = req.params;
-  const movement = await inventoryService.createMovement(organisationId, req.user!.sub, req.body);
+  const input = createMovementSchema.parse(req.body);
+  const movement = await inventoryService.createMovement(organisationId, req.user!.sub, input);
   return sendCreated(res, movement, 'Movement created');
 });
 
@@ -143,8 +145,8 @@ export const rejectMovement = asyncHandler(async (req: Request, res: Response) =
 
 export const repostMovementGL = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId, movementId } = req.params;
-  const { contraAccountId, periodId } = req.body as { contraAccountId: string; periodId: string };
-  const result = await inventoryService.repostMovementGL(organisationId, movementId, req.user!.sub, { contraAccountId, periodId });
+  const input = repostGLSchema.parse(req.body);
+  const result = await inventoryService.repostMovementGL(organisationId, movementId, req.user!.sub, input);
   return sendCreated(res, result, 'GL journal posted for movement');
 });
 
@@ -158,7 +160,8 @@ export const listStocktakeSessions = asyncHandler(async (req: Request, res: Resp
 
 export const createStocktakeSession = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId } = req.params;
-  const session = await inventoryService.createStocktakeSession(organisationId, req.user!.sub, req.body);
+  const input = createStocktakeSchema.parse(req.body);
+  const session = await inventoryService.createStocktakeSession(organisationId, req.user!.sub, input);
   return sendCreated(res, session, 'Stocktake session created');
 });
 
@@ -170,25 +173,26 @@ export const getStocktakeSession = asyncHandler(async (req: Request, res: Respon
 
 export const updateStocktakeCount = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId, sessionId, itemId } = req.params;
-  const { countedQuantity, notes } = req.body as { countedQuantity: number; notes?: string };
+  const input = updateStocktakeCountSchema.parse(req.body);
   const count = await inventoryService.updateStocktakeCount(
     organisationId,
     sessionId,
     itemId,
-    Number(countedQuantity),
-    notes,
+    input.countedQuantity,
+    input.notes,
   );
   return sendSuccess(res, count, 'Count updated');
 });
 
 export const postStocktakeVariances = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId, sessionId } = req.params;
-  const { periodId } = req.body as { periodId: string };
+  const input = postStocktakeSchema.parse(req.body);
   const session = await inventoryService.postStocktakeVariances(
     organisationId,
     sessionId,
     req.user!.sub,
-    periodId,
+    input.periodId,
+    input.contraAccountId,
   );
   return sendSuccess(res, session, 'Stocktake variances posted');
 });
@@ -197,6 +201,15 @@ export const cancelStocktakeSession = asyncHandler(async (req: Request, res: Res
   const { organisationId, sessionId } = req.params;
   const session = await inventoryService.cancelStocktakeSession(organisationId, sessionId);
   return sendSuccess(res, session, 'Stocktake session cancelled');
+});
+
+// ─── NRV Write-down ───────────────────────────────────────────────────────────
+
+export const nrvWriteDown = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId, itemId } = req.params;
+  const input = nrvWriteDownSchema.parse(req.body);
+  const result = await inventoryService.writeDownToNRV(organisationId, itemId, req.user!.sub, input);
+  return sendCreated(res, result, 'NRV write-down posted');
 });
 
 // ─── Valuation ────────────────────────────────────────────────────────────────

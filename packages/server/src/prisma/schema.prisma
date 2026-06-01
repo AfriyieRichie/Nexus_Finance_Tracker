@@ -1255,8 +1255,9 @@ model InventoryItem {
   quantityOnHand     Decimal    @default(0) @db.Decimal(20, 4)
   reorderLevel       Decimal?   @db.Decimal(20, 4)
   reorderQuantity    Decimal?   @db.Decimal(20, 4)
-  inventoryAccountId String?
-  cogsAccountId      String?
+  inventoryAccountId              String?
+  cogsAccountId                   String?
+  purchasePriceVarianceAccountId  String?
   isActive           Boolean    @default(true)
   isDeleted          Boolean    @default(false)
   createdAt          DateTime   @default(now())

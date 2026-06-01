@@ -38,6 +38,7 @@ export interface CreateItemInput {
   reorderQuantity?: number;
   inventoryAccountId?: string;
   cogsAccountId?: string;
+  purchasePriceVarianceAccountId?: string;
 }
 
 export type UpdateItemInput = Partial<CreateItemInput>;
@@ -266,6 +267,7 @@ export async function createItem(organisationId: string, input: CreateItemInput)
         input.reorderQuantity != null ? new Prisma.Decimal(input.reorderQuantity) : null,
       inventoryAccountId: input.inventoryAccountId ?? null,
       cogsAccountId: input.cogsAccountId ?? null,
+      purchasePriceVarianceAccountId: input.purchasePriceVarianceAccountId ?? null,
     },
     include: {
       inventoryCategory: { select: { id: true, name: true } },
@@ -333,6 +335,9 @@ export async function updateItem(
         inventoryAccountId: input.inventoryAccountId,
       }),
       ...(input.cogsAccountId !== undefined && { cogsAccountId: input.cogsAccountId }),
+      ...(input.purchasePriceVarianceAccountId !== undefined && {
+        purchasePriceVarianceAccountId: input.purchasePriceVarianceAccountId,
+      }),
     },
     include: {
       inventoryCategory: { select: { id: true, name: true } },
@@ -683,31 +688,54 @@ async function processMovement(movementId: string, userId: string): Promise<void
   const currency = org?.baseCurrency ?? 'USD';
   const transactionDateStr = movement.transactionDate.toISOString().slice(0, 10);
 
-  let debitAccountId: string;
-  let creditAccountId: string;
+  type JL = { accountId: string; description: string; debitAmount: number; creditAmount: number; exchangeRate: number };
+  let journalLines: JL[];
   let lineDescription: string;
 
   if (isInbound) {
-    debitAccountId = item.inventoryAccountId!;
-    creditAccountId = movement.contraAccountId!;
-    lineDescription =
-      movement.description ??
-      `Inventory receipt: ${item.code} x${qty.toFixed(4)} @ ${capturedEffectiveUnitCost.toFixed(4)}`;
-  } else if (movement.movementType === MovementType.ISSUE) {
-    debitAccountId = item.cogsAccountId ?? movement.contraAccountId!;
-    creditAccountId = item.inventoryAccountId!;
-    lineDescription =
-      movement.description ??
-      `Inventory issue: ${item.code} x${qty.toFixed(4)} @ ${capturedEffectiveUnitCost.toFixed(4)}`;
-  } else {
-    debitAccountId = movement.contraAccountId!;
-    creditAccountId = item.inventoryAccountId!;
-    lineDescription =
-      movement.description ??
-      `Inventory ${movement.movementType.toLowerCase().replace(/_/g, ' ')}: ${item.code} x${qty.toFixed(4)}`;
-  }
+    lineDescription = movement.description ?? `Inventory receipt: ${item.code} x${qty.toFixed(4)} @ ${capturedEffectiveUnitCost.toFixed(4)}`;
 
-  const totalCostNum = capturedTotalCost.toNumber();
+    // Standard Cost: post inventory at standard, contra at actual, PPV bridges the gap
+    if (item.costMethod === 'STANDARD' && item.purchasePriceVarianceAccountId) {
+      const actualUnitCost = movement.unitCost != null ? new Prisma.Decimal(movement.unitCost) : capturedEffectiveUnitCost;
+      const stdTotal = capturedTotalCost; // standard × qty
+      const actualTotal = qty.mul(actualUnitCost);
+      const ppv = actualTotal.minus(stdTotal); // positive = paid more than standard
+
+      journalLines = [
+        { accountId: item.inventoryAccountId!, description: lineDescription, debitAmount: stdTotal.toNumber(), creditAmount: 0, exchangeRate: 1 },
+        ...(ppv.isZero() ? [] : [{
+          accountId: item.purchasePriceVarianceAccountId,
+          description: `Purchase price variance: ${item.code} (${ppv.greaterThan(0) ? 'unfavourable' : 'favourable'})`,
+          debitAmount: ppv.greaterThan(0) ? ppv.toNumber() : 0,
+          creditAmount: ppv.lessThan(0) ? ppv.abs().toNumber() : 0,
+          exchangeRate: 1,
+        }]),
+        { accountId: movement.contraAccountId!, description: lineDescription, debitAmount: 0, creditAmount: actualTotal.toNumber(), exchangeRate: 1 },
+      ];
+    } else {
+      // AVCO, FIFO, or STANDARD without PPV account: post at effective cost
+      const totalCostNum = capturedTotalCost.toNumber();
+      journalLines = [
+        { accountId: item.inventoryAccountId!, description: lineDescription, debitAmount: totalCostNum, creditAmount: 0, exchangeRate: 1 },
+        { accountId: movement.contraAccountId!, description: lineDescription, debitAmount: 0, creditAmount: totalCostNum, exchangeRate: 1 },
+      ];
+    }
+  } else if (movement.movementType === MovementType.ISSUE) {
+    lineDescription = movement.description ?? `Inventory issue: ${item.code} x${qty.toFixed(4)} @ ${capturedEffectiveUnitCost.toFixed(4)}`;
+    const totalCostNum = capturedTotalCost.toNumber();
+    journalLines = [
+      { accountId: item.cogsAccountId ?? movement.contraAccountId!, description: lineDescription, debitAmount: totalCostNum, creditAmount: 0, exchangeRate: 1 },
+      { accountId: item.inventoryAccountId!, description: lineDescription, debitAmount: 0, creditAmount: totalCostNum, exchangeRate: 1 },
+    ];
+  } else {
+    lineDescription = movement.description ?? `Inventory ${movement.movementType.toLowerCase().replace(/_/g, ' ')}: ${item.code} x${qty.toFixed(4)}`;
+    const totalCostNum = capturedTotalCost.toNumber();
+    journalLines = [
+      { accountId: movement.contraAccountId!, description: lineDescription, debitAmount: totalCostNum, creditAmount: 0, exchangeRate: 1 },
+      { accountId: item.inventoryAccountId!, description: lineDescription, debitAmount: 0, creditAmount: totalCostNum, exchangeRate: 1 },
+    ];
+  }
 
   const journalInput = {
     type: 'ADJUSTMENT' as const,
@@ -717,22 +745,7 @@ async function processMovement(movementId: string, userId: string): Promise<void
     periodId: movement.periodId!,
     currency,
     exchangeRate: 1,
-    lines: [
-      {
-        accountId: debitAccountId,
-        description: lineDescription,
-        debitAmount: totalCostNum,
-        creditAmount: 0,
-        exchangeRate: 1,
-      },
-      {
-        accountId: creditAccountId,
-        description: lineDescription,
-        debitAmount: 0,
-        creditAmount: totalCostNum,
-        exchangeRate: 1,
-      },
-    ],
+    lines: journalLines,
   };
 
   const postedEntry = await journalService.createAndPostSystemEntry(
@@ -1072,6 +1085,7 @@ export async function postStocktakeVariances(
   sessionId: string,
   userId: string,
   periodId: string,
+  contraAccountId: string,
 ) {
   const session = await prisma.stocktakeSession.findFirst({
     where: { id: sessionId, organisationId },
@@ -1114,6 +1128,7 @@ export async function postStocktakeVariances(
       movementType,
       quantity: absQty.toNumber(),
       unitCost: new Prisma.Decimal(count.unitCost).toNumber(),
+      contraAccountId,
       periodId,
       reference: `STOCKTAKE-${session.name}`,
       description: `Stocktake variance: session '${session.name}'`,
@@ -1140,9 +1155,9 @@ export async function cancelStocktakeSession(
   });
   if (!session) throw new NotFoundError('Stocktake session');
 
-  if (session.status !== StocktakeStatus.OPEN) {
+  if (session.status !== StocktakeStatus.OPEN && session.status !== StocktakeStatus.COUNTING) {
     throw new ValidationError(
-      `Only OPEN sessions can be cancelled (current status: ${session.status})`,
+      `Only OPEN or COUNTING sessions can be cancelled (current status: ${session.status})`,
     );
   }
 
@@ -1319,6 +1334,125 @@ export async function getValuationReport(organisationId: string, asAt?: string) 
   );
 
   return { items, grandTotal };
+}
+
+// ─── NRV Write-down (IAS 2.9) ────────────────────────────────────────────────
+// Reduces carrying value of inventory to net realisable value when NRV < cost.
+// Journal: DR Write-down Expense / CR Inventory Control Account.
+
+export async function writeDownToNRV(
+  organisationId: string,
+  itemId: string,
+  userId: string,
+  input: { nrvPerUnit: number; periodId: string; writeDownAccountId: string; locationId?: string; notes?: string },
+) {
+  const item = await prisma.inventoryItem.findFirst({
+    where: { id: itemId, organisationId, isDeleted: false },
+  });
+  if (!item) throw new NotFoundError('Inventory item');
+  if (!item.inventoryAccountId) throw new ValidationError('Item has no Inventory GL account configured');
+
+  const nrv = new Prisma.Decimal(input.nrvPerUnit);
+  const currentCost = new Prisma.Decimal(item.unitCost);
+
+  if (nrv.greaterThanOrEqualTo(currentCost)) {
+    throw new ValidationError(
+      `NRV per unit (${nrv.toFixed(4)}) must be less than current unit cost (${currentCost.toFixed(4)}) for a write-down to be required`,
+    );
+  }
+
+  // Scope to a specific location or aggregate all
+  const balanceWhere = {
+    itemId,
+    organisationId,
+    ...(input.locationId ? { locationId: input.locationId } : {}),
+  };
+  const balances = await prisma.stockBalance.findMany({ where: balanceWhere });
+
+  if (balances.length === 0 || balances.every((b) => new Prisma.Decimal(b.quantityOnHand).lte(0))) {
+    throw new ValidationError('No stock on hand to write down');
+  }
+
+  const period = await prisma.accountingPeriod.findFirst({
+    where: { id: input.periodId, organisationId, status: 'OPEN' },
+  });
+  if (!period) throw new ValidationError('Period not found or closed');
+
+  const org = await prisma.organisation.findUnique({ where: { id: organisationId }, select: { baseCurrency: true } });
+  const currency = org?.baseCurrency ?? 'USD';
+
+  // Compute total write-down across all in-scope balances
+  let totalWriteDown = new Prisma.Decimal(0);
+  for (const bal of balances) {
+    const qty = new Prisma.Decimal(bal.quantityOnHand);
+    if (qty.lte(0)) continue;
+    const balCost = new Prisma.Decimal(bal.averageCost);
+    const writeDownPerUnit = balCost.minus(nrv);
+    if (writeDownPerUnit.greaterThan(0)) {
+      totalWriteDown = totalWriteDown.plus(qty.mul(writeDownPerUnit));
+    }
+  }
+
+  if (totalWriteDown.lte(0)) throw new ValidationError('No write-down required — NRV exceeds or equals current cost in all locations');
+
+  // Post GL: DR Write-down expense / CR Inventory
+  const entryDate = new Date().toISOString().slice(0, 10);
+  const je = await journalService.createAndPostSystemEntry(
+    organisationId,
+    {
+      type: 'ADJUSTMENT',
+      description: input.notes ?? `NRV write-down – ${item.code} (IAS 2.9)`,
+      entryDate,
+      periodId: input.periodId,
+      currency,
+      exchangeRate: 1,
+      lines: [
+        { accountId: input.writeDownAccountId, description: `NRV write-down – ${item.name}`, debitAmount: totalWriteDown.toNumber(), creditAmount: 0, exchangeRate: 1 },
+        { accountId: item.inventoryAccountId, description: `NRV write-down – ${item.name}`, debitAmount: 0, creditAmount: totalWriteDown.toNumber(), exchangeRate: 1 },
+      ],
+    },
+    userId,
+  );
+
+  // Update StockBalance records to NRV unit cost
+  await prisma.$transaction(
+    balances
+      .filter((b) => new Prisma.Decimal(b.quantityOnHand).gt(0))
+      .map((bal) => {
+        const qty = new Prisma.Decimal(bal.quantityOnHand);
+        const newTotalValue = qty.mul(nrv);
+        return prisma.stockBalance.update({
+          where: { id: bal.id },
+          data: { averageCost: nrv, totalValue: newTotalValue },
+        });
+      }),
+  );
+
+  // Refresh item cache
+  await prisma.$transaction(async (tx) => {
+    const allBalances = await tx.stockBalance.findMany({ where: { itemId, organisationId } });
+    let totalQty = new Prisma.Decimal(0);
+    let totalValue = new Prisma.Decimal(0);
+    for (const b of allBalances) {
+      totalQty = totalQty.add(new Prisma.Decimal(b.quantityOnHand));
+      totalValue = totalValue.add(new Prisma.Decimal(b.totalValue));
+    }
+    await tx.inventoryItem.update({
+      where: { id: itemId },
+      data: {
+        unitCost: totalQty.gt(0) ? totalValue.div(totalQty) : nrv,
+      },
+    });
+  });
+
+  return {
+    itemId,
+    itemCode: item.code,
+    previousUnitCost: currentCost.toFixed(4),
+    nrvPerUnit: nrv.toFixed(4),
+    totalWriteDown: totalWriteDown.toFixed(2),
+    journalEntryId: je.id,
+  };
 }
 
 export async function getStockBalance(organisationId: string, itemId: string) {
