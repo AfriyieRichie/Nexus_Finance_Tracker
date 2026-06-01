@@ -113,7 +113,7 @@ async function assertAccountsValid(
   const unique = [...new Set(accountIds)];
   const accounts = await tx.account.findMany({
     where: { id: { in: unique }, organisationId, isDeleted: false },
-    select: { id: true, isActive: true, isLocked: true, name: true, code: true },
+    select: { id: true, isActive: true, isLocked: true, isControlAccount: true, name: true, code: true },
   });
 
   const found = new Map(accounts.map((a) => [a.id, a]));
@@ -122,6 +122,7 @@ async function assertAccountsValid(
     if (!acc) throw new NotFoundError(`Account ${id} not found in this organisation`);
     if (!acc.isActive) throw new ForbiddenError(`Account '${acc.code} ${acc.name}' is inactive`);
     if (acc.isLocked) throw new AccountLockedError(`Account '${acc.code} ${acc.name}' is locked`);
+    if (acc.isControlAccount) throw new ForbiddenError(`Account '${acc.code} ${acc.name}' is a control account and cannot be posted to directly`);
   }
 }
 
