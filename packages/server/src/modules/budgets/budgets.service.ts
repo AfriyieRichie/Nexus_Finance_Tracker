@@ -19,6 +19,7 @@ export interface BudgetLineInput {
 
 export interface CreateBudgetInput {
   name: string;
+  description?: string;
   fiscalYear: number;
   budgetType?: BudgetType;
   parentBudgetId?: string;
@@ -175,6 +176,7 @@ export async function createBudget(
     data: {
       organisationId,
       name: resolvedName,
+      description: input.description ?? null,
       fiscalYear: resolvedFiscalYear,
       budgetType,
       version,
@@ -204,7 +206,7 @@ export async function createBudget(
 export async function updateBudget(
   organisationId: string,
   budgetId: string,
-  input: { alertThresholdPct?: number | null },
+  input: { description?: string | null; alertThresholdPct?: number | null },
 ) {
   const budget = await prisma.budget.findFirst({ where: { id: budgetId, organisationId } });
   if (!budget) throw new NotFoundError('Budget');
@@ -212,6 +214,7 @@ export async function updateBudget(
   return prisma.budget.update({
     where: { id: budgetId },
     data: {
+      ...(input.description !== undefined && { description: input.description }),
       ...(input.alertThresholdPct !== undefined && {
         alertThresholdPct:
           input.alertThresholdPct === null ? null : new Prisma.Decimal(input.alertThresholdPct),
@@ -397,6 +400,7 @@ export interface BudgetVsActualLine {
   costCentreId: string | null;
   costCentreCode: string | null;
   costCentreName: string | null;
+  periodNumber?: number; // populated when byPeriod = true
   budgeted: string;
   committed: string;
   actual: string;
@@ -411,11 +415,20 @@ export async function getBudgetVsActual(
   budgetId: string,
   costCentreId?: string,
   rollupChildren?: boolean,
+  byPeriod?: boolean,
 ): Promise<BudgetVsActualLine[]> {
   const budget = await prisma.budget.findFirst({
     where: { id: budgetId, organisationId },
   });
   if (!budget) throw new NotFoundError('Budget');
+
+  // Resolve accounting periods for this fiscal year so actuals are scoped correctly
+  const periods = await prisma.accountingPeriod.findMany({
+    where: { organisationId, fiscalYear: budget.fiscalYear },
+    select: { id: true, periodNumber: true },
+  });
+  const periodIds = periods.map((p) => p.id);
+  const periodIdToNumber = new Map(periods.map((p) => [p.id, p.periodNumber]));
 
   // Build cost centre filter — optionally expand to whole subtree
   let ccFilter: string[] | undefined;
@@ -446,14 +459,20 @@ export async function getBudgetVsActual(
 
   const accountIds = [...new Set(lines.map((l) => l.accountId))];
 
-  const [ledgerTotals, commitmentTotals] = await Promise.all([
+  // Fetch actuals scoped to this fiscal year's periods only.
+  // Always group by periodId so we get a stable return type; we aggregate in code for totals mode.
+  const [ledgerRaw, commitmentTotals] = await Promise.all([
     prisma.ledgerEntry.groupBy({
-      by: ['accountId'],
-      where: { organisationId, accountId: { in: accountIds } },
+      by: ['accountId', 'periodId'],
+      where: {
+        organisationId,
+        accountId: { in: accountIds },
+        ...(periodIds.length ? { periodId: { in: periodIds } } : { periodId: 'none' }),
+      },
       _sum: { debitAmount: true, creditAmount: true },
     }),
     prisma.budgetCommitment.groupBy({
-      by: ['accountId', 'costCentreId'],
+      by: ['accountId', 'costCentreId', 'periodNumber'],
       where: {
         budgetId,
         status: { in: [CommitmentStatus.OPEN, CommitmentStatus.PARTIALLY_INVOICED] },
@@ -464,27 +483,34 @@ export async function getBudgetVsActual(
     }),
   ]);
 
-  const ledgerMap = new Map(
-    ledgerTotals.map((r) => [
-      r.accountId,
-      {
-        debit: r._sum.debitAmount ?? new Prisma.Decimal(0),
-        credit: r._sum.creditAmount ?? new Prisma.Decimal(0),
-      },
-    ]),
-  );
+  // Build ledger map: key = accountId[::periodNumber] → debit/credit totals
+  const ledgerMap = new Map<string, { debit: Prisma.Decimal; credit: Prisma.Decimal }>();
+  for (const r of ledgerRaw) {
+    const periodNum = periodIdToNumber.get(r.periodId) ?? 0;
+    const key = byPeriod ? `${r.accountId}::${periodNum}` : r.accountId;
+    const existing = ledgerMap.get(key);
+    const dr = r._sum?.debitAmount ?? new Prisma.Decimal(0);
+    const cr = r._sum?.creditAmount ?? new Prisma.Decimal(0);
+    if (existing) {
+      existing.debit = existing.debit.plus(dr);
+      existing.credit = existing.credit.plus(cr);
+    } else {
+      ledgerMap.set(key, { debit: dr, credit: cr });
+    }
+  }
 
-  // Commitment map: key = accountId::ccId
+  // Build commitment map: key = accountId::ccId[::periodNumber]
   const commitMap = new Map<string, Prisma.Decimal>();
   for (const r of commitmentTotals) {
-    const key = `${r.accountId}::${r.costCentreId ?? ''}`;
-    const open = (r._sum.amount ?? new Prisma.Decimal(0)).minus(
-      r._sum.invoicedAmount ?? new Prisma.Decimal(0),
+    const key = byPeriod
+      ? `${r.accountId}::${r.costCentreId ?? ''}::${r.periodNumber}`
+      : `${r.accountId}::${r.costCentreId ?? ''}`;
+    const open = (r._sum?.amount ?? new Prisma.Decimal(0)).minus(
+      r._sum?.invoicedAmount ?? new Prisma.Decimal(0),
     );
     commitMap.set(key, open.isNegative() ? new Prisma.Decimal(0) : open);
   }
 
-  // Group lines by account+costCentre (rollup mode collapses all CCs into one per account)
   interface Group {
     accountId: string;
     accountCode: string;
@@ -493,6 +519,7 @@ export async function getBudgetVsActual(
     costCentreId: string | null;
     costCentreCode: string | null;
     costCentreName: string | null;
+    periodNumber: number | undefined;
     budgeted: Prisma.Decimal;
   }
 
@@ -500,7 +527,8 @@ export async function getBudgetVsActual(
 
   for (const line of lines) {
     const ccKey = rollupChildren && ccFilter ? '' : (line.costCentreId ?? '');
-    const key = `${line.accountId}::${ccKey}`;
+    const periodKey = byPeriod ? `::${line.periodNumber}` : '';
+    const key = `${line.accountId}::${ccKey}${periodKey}`;
     const existing = groups.get(key);
     if (existing) {
       existing.budgeted = existing.budgeted.plus(line.amount);
@@ -513,6 +541,7 @@ export async function getBudgetVsActual(
         costCentreId: rollupChildren && ccFilter ? null : line.costCentreId,
         costCentreCode: rollupChildren && ccFilter ? null : (line.costCentre?.code ?? null),
         costCentreName: rollupChildren && ccFilter ? null : (line.costCentre?.name ?? null),
+        periodNumber: byPeriod ? line.periodNumber : undefined,
         budgeted: line.amount,
       });
     }
@@ -522,29 +551,32 @@ export async function getBudgetVsActual(
   const results: BudgetVsActualLine[] = [];
 
   for (const group of groups.values()) {
-    const totals = ledgerMap.get(group.accountId) ?? {
-      debit: new Prisma.Decimal(0),
-      credit: new Prisma.Decimal(0),
-    };
+    const ledgerKey = group.periodNumber !== undefined
+      ? `${group.accountId}::${group.periodNumber}`
+      : group.accountId;
+    const totals = ledgerMap.get(ledgerKey) ?? { debit: new Prisma.Decimal(0), credit: new Prisma.Decimal(0) };
 
     const debitNormal = group.accountClass === 'ASSET' || group.accountClass === 'EXPENSE';
     const actual = debitNormal
       ? totals.debit.minus(totals.credit)
       : totals.credit.minus(totals.debit);
 
-    // Rollup: sum commitments across all CCs in subtree
     let committed = new Prisma.Decimal(0);
     if (rollupChildren && ccFilter) {
       for (const ccId of ccFilter) {
-        const k = `${group.accountId}::${ccId}`;
+        const k = group.periodNumber !== undefined
+          ? `${group.accountId}::${ccId}::${group.periodNumber}`
+          : `${group.accountId}::${ccId}`;
         committed = committed.plus(commitMap.get(k) ?? new Prisma.Decimal(0));
       }
-      // Also no-CC commitments on this budget
-      committed = committed.plus(
-        commitMap.get(`${group.accountId}::`) ?? new Prisma.Decimal(0),
-      );
+      const noCC = group.periodNumber !== undefined
+        ? `${group.accountId}::::${group.periodNumber}`
+        : `${group.accountId}::`;
+      committed = committed.plus(commitMap.get(noCC) ?? new Prisma.Decimal(0));
     } else {
-      const k = `${group.accountId}::${group.costCentreId ?? ''}`;
+      const k = group.periodNumber !== undefined
+        ? `${group.accountId}::${group.costCentreId ?? ''}::${group.periodNumber}`
+        : `${group.accountId}::${group.costCentreId ?? ''}`;
       committed = commitMap.get(k) ?? new Prisma.Decimal(0);
     }
 
@@ -557,7 +589,7 @@ export async function getBudgetVsActual(
     const isFlagged =
       threshold !== null && variancePct !== null && Math.abs(Number(variancePct)) > threshold;
 
-    results.push({
+    const row: BudgetVsActualLine = {
       accountId: group.accountId,
       accountCode: group.accountCode,
       accountName: group.accountName,
@@ -572,12 +604,17 @@ export async function getBudgetVsActual(
       variance: variance.toFixed(4),
       variancePct,
       isFlagged,
-    });
+    };
+    if (group.periodNumber !== undefined) row.periodNumber = group.periodNumber;
+    results.push(row);
   }
 
   results.sort((a, b) => {
     const cc = (a.costCentreCode ?? '').localeCompare(b.costCentreCode ?? '');
-    return cc !== 0 ? cc : a.accountCode.localeCompare(b.accountCode);
+    if (cc !== 0) return cc;
+    const ac = a.accountCode.localeCompare(b.accountCode);
+    if (ac !== 0) return ac;
+    return (a.periodNumber ?? 0) - (b.periodNumber ?? 0);
   });
 
   return results;

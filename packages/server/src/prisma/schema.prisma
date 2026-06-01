@@ -1433,6 +1433,7 @@ model Budget {
   id                String     @id @default(uuid())
   organisationId    String
   name              String
+  description       String?
   fiscalYear        Int
   budgetType        BudgetType @default(ORIGINAL)
   version           Int        @default(1)
