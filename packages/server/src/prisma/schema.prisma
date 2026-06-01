@@ -90,6 +90,7 @@ enum ApprovalEntityType {
   EXPENSE_CLAIM
   PAYROLL
   BANK_TRANSFER
+  SUPPLIER_INVOICE
 }
 
 enum ApprovalType {
@@ -409,6 +410,8 @@ model Organisation {
   employeeLoans           EmployeeLoan[]
   invoices                Invoice[]
   supplierInvoices        SupplierInvoice[]
+  supplierPayments        SupplierPayment[]
+  supplierCreditNotes     SupplierCreditNote[]
   approvalDelegations     ApprovalDelegation[]
   notifications           Notification[]
 
@@ -870,15 +873,19 @@ model Supplier {
   phone          String?
   address        Json?
   taxId          String?
-  paymentTerms   Int      @default(30)
-  bankDetails    Json?
-  isActive       Boolean  @default(true)
-  isDeleted      Boolean  @default(false)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  paymentTerms      Int      @default(30)
+  bankDetails       Json?
+  whtRate           Decimal? @db.Decimal(5, 2)
+  whtClassification String?
+  isActive          Boolean  @default(true)
+  isDeleted         Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  organisation     Organisation      @relation(fields: [organisationId], references: [id])
-  supplierInvoices SupplierInvoice[]
+  organisation        Organisation         @relation(fields: [organisationId], references: [id])
+  supplierInvoices    SupplierInvoice[]
+  supplierPayments    SupplierPayment[]
+  supplierCreditNotes SupplierCreditNote[]
 
   @@unique([organisationId, code])
   @@index([organisationId])
@@ -906,9 +913,11 @@ model SupplierInvoice {
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
-  organisation Organisation     @relation(fields: [organisationId], references: [id])
-  supplier     Supplier         @relation(fields: [supplierId], references: [id])
-  lines        SupplierInvoiceLine[]
+  organisation        Organisation         @relation(fields: [organisationId], references: [id])
+  supplier            Supplier             @relation(fields: [supplierId], references: [id])
+  lines               SupplierInvoiceLine[]
+  supplierPayments    SupplierPayment[]
+  supplierCreditNotes SupplierCreditNote[]
 
   @@unique([organisationId, invoiceNumber])
   @@index([organisationId, status])
@@ -932,6 +941,61 @@ model SupplierInvoiceLine {
 
   @@index([supplierInvoiceId])
   @@map("supplier_invoice_lines")
+}
+
+model SupplierPayment {
+  id                String    @id @default(uuid())
+  organisationId    String
+  supplierInvoiceId String
+  supplierId        String
+  paymentDate       DateTime  @db.Date
+  amount            Decimal   @db.Decimal(20, 4)
+  whtAmount         Decimal   @default(0) @db.Decimal(20, 4)
+  whtRate           Decimal?  @db.Decimal(5, 2)
+  reference         String?
+  bankAccountId     String
+  periodId          String
+  journalEntryId    String?
+  isReversed        Boolean   @default(false)
+  reversedAt        DateTime?
+  reversedBy        String?
+  reversalReason    String?
+  reversalJournalId String?
+  createdBy         String
+  createdAt         DateTime  @default(now())
+
+  organisation Organisation    @relation(fields: [organisationId], references: [id])
+  invoice      SupplierInvoice @relation(fields: [supplierInvoiceId], references: [id])
+  supplier     Supplier        @relation(fields: [supplierId], references: [id])
+
+  @@index([organisationId])
+  @@index([supplierInvoiceId])
+  @@map("supplier_payments")
+}
+
+model SupplierCreditNote {
+  id                String    @id @default(uuid())
+  organisationId    String
+  supplierId        String
+  supplierInvoiceId String?
+  creditNoteNumber  String
+  creditNoteDate    DateTime  @db.Date
+  amount            Decimal   @db.Decimal(20, 4)
+  taxAmount         Decimal   @default(0) @db.Decimal(20, 4)
+  reason            String?
+  currency          String    @default("GHS")
+  exchangeRate      Decimal   @default(1) @db.Decimal(20, 6)
+  journalEntryId    String?
+  createdBy         String
+  createdAt         DateTime  @default(now())
+
+  organisation Organisation     @relation(fields: [organisationId], references: [id])
+  supplier     Supplier         @relation(fields: [supplierId], references: [id])
+  invoice      SupplierInvoice? @relation(fields: [supplierInvoiceId], references: [id])
+
+  @@index([organisationId])
+  @@index([supplierId])
+  @@map("supplier_credit_notes")
 }
 
 // ============================================================

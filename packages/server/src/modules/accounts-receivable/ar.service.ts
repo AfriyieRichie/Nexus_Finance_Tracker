@@ -179,27 +179,104 @@ export async function postInvoice(organisationId: string, invoiceId: string, per
   if (!invoice) throw new NotFoundError('Invoice not found');
   if (invoice.status !== 'APPROVED') throw new ValidationError(`Invoice must be approved before posting. Current status: ${invoice.status}`);
 
-  // Find AR control account
   const arAccount = await prisma.account.findFirst({
     where: { organisationId, type: 'RECEIVABLE', isActive: true, isDeleted: false },
   });
   if (!arAccount) throw new ValidationError('No AR control account found. Create an account with type RECEIVABLE.');
 
-  // Build revenue lines from invoice lines that have an accountId
-  const revenueLines = invoice.lines.filter((l) => l.accountId);
-  if (revenueLines.length === 0) {
-    const revenueAccount = await prisma.account.findFirst({
-      where: { organisationId, class: 'REVENUE', isActive: true, isDeleted: false, isControlAccount: false },
-      orderBy: { code: 'asc' },
-    });
-    if (!revenueAccount) throw new ValidationError('No revenue account found. Assign a non-control revenue account to invoice lines.');
-    revenueLines.push({ ...invoice.lines[0], accountId: revenueAccount.id, lineTotal: invoice.totalAmount });
+  const entryDate = invoice.invoiceDate.toISOString().split('T')[0];
+  const invoiceTotalTax = Number(invoice.taxAmount);
+
+  // ── VAT GL account resolution ─────────────────────────────────────────────
+  // Build map: VAT GL account id → accumulated tax amount
+  const vatGlById = new Map<string, number>();
+
+  if (invoiceTotalTax > 0) {
+    const taxCodeStrings = [...new Set(
+      invoice.lines
+        .filter((l) => Number(l.taxAmount) > 0 && l.taxCode)
+        .map((l) => l.taxCode!),
+    )];
+
+    let fallbackVatAmount = 0;
+
+    if (taxCodeStrings.length > 0) {
+      const taxCodeRecords = await prisma.taxCode.findMany({
+        where: { organisationId, code: { in: taxCodeStrings }, isActive: true },
+        select: { code: true, glAccountId: true },
+      });
+      const codeToGl = new Map(taxCodeRecords.map((t) => [t.code, t.glAccountId]));
+
+      for (const line of invoice.lines) {
+        const lineTax = Number(line.taxAmount);
+        if (lineTax <= 0) continue;
+        const glAccountId = line.taxCode ? (codeToGl.get(line.taxCode) ?? null) : null;
+        if (glAccountId) {
+          vatGlById.set(glAccountId, (vatGlById.get(glAccountId) ?? 0) + lineTax);
+        } else {
+          fallbackVatAmount += lineTax;
+        }
+      }
+    } else {
+      fallbackVatAmount = invoiceTotalTax;
+    }
+
+    if (fallbackVatAmount > 0) {
+      const fallbackVatAccount = await prisma.account.findFirst({
+        where: { organisationId, type: 'TAX_PAYABLE', isActive: true, isDeleted: false },
+        orderBy: { code: 'asc' },
+      });
+      if (!fallbackVatAccount) {
+        throw new ValidationError(
+          'Invoice has tax but no Output VAT account (type: TAX_PAYABLE) was found. ' +
+          'Create a VAT Payable account or assign a GL account to your tax codes.',
+        );
+      }
+      vatGlById.set(fallbackVatAccount.id, (vatGlById.get(fallbackVatAccount.id) ?? 0) + fallbackVatAmount);
+    }
   }
 
-  const total = invoice.totalAmount;
-  const entryDate = invoice.invoiceDate.toISOString().split('T')[0];
+  // ── Revenue lines (net of tax) ────────────────────────────────────────────
+  const revenueLines = invoice.lines.filter((l) => l.accountId);
 
-  // Use the journal service to create + post the entry properly
+  const revenueJournalLines: Array<{
+    accountId: string; description: string;
+    debitAmount: number; creditAmount: number;
+    currency: string; exchangeRate: number;
+  }> = revenueLines.length > 0
+    ? revenueLines.map((l) => ({
+        accountId: l.accountId!,
+        description: l.description,
+        debitAmount: 0,
+        creditAmount: Number(l.lineTotal) - Number(l.taxAmount), // net of VAT
+        currency: invoice.currency,
+        exchangeRate: Number(invoice.exchangeRate),
+      }))
+    : await (async () => {
+        const revenueAccount = await prisma.account.findFirst({
+          where: { organisationId, class: 'REVENUE', isActive: true, isDeleted: false, isControlAccount: false },
+          orderBy: { code: 'asc' },
+        });
+        if (!revenueAccount) throw new ValidationError('No revenue account found. Assign a non-control revenue account to invoice lines.');
+        return [{
+          accountId: revenueAccount.id,
+          description: `Sales – ${invoice.invoiceNumber}`,
+          debitAmount: 0,
+          creditAmount: Number(invoice.subtotal), // net subtotal, excl. VAT
+          currency: invoice.currency,
+          exchangeRate: Number(invoice.exchangeRate),
+        }];
+      })();
+
+  const vatJournalLines = Array.from(vatGlById.entries()).map(([accountId, amount]) => ({
+    accountId,
+    description: `Output VAT – ${invoice.invoiceNumber}`,
+    debitAmount: 0,
+    creditAmount: amount,
+    currency: invoice.currency,
+    exchangeRate: Number(invoice.exchangeRate),
+  }));
+
   const journalEntry = await journalService.createAndPostSystemEntry(
     organisationId,
     {
@@ -214,24 +291,17 @@ export async function postInvoice(organisationId: string, invoiceId: string, per
         {
           accountId: arAccount.id,
           description: `AR – ${invoice.customer.name} – ${invoice.invoiceNumber}`,
-          debitAmount: Number(total),
+          debitAmount: Number(invoice.totalAmount),
           creditAmount: 0,
           currency: invoice.currency,
           exchangeRate: Number(invoice.exchangeRate),
         },
-        ...revenueLines.map((l) => ({
-          accountId: l.accountId!,
-          description: l.description,
-          debitAmount: 0,
-          creditAmount: Number(l.lineTotal),
-          currency: invoice.currency,
-          exchangeRate: Number(invoice.exchangeRate),
-        })),
+        ...revenueJournalLines,
+        ...vatJournalLines,
       ],
     },
     userId,
   );
-
 
   await prisma.invoice.update({
     where: { id: invoiceId },
@@ -475,7 +545,82 @@ export async function createCreditNote(organisationId: string, userId: string, i
     throw new ValidationError(`Credit note amount exceeds outstanding balance of ${outstanding.toFixed(2)}`);
   }
 
+  // ── VAT split on credit note ──────────────────────────────────────────────
+  const invoiceTotalTax = Number(invoice.taxAmount);
+  const invoiceTotal = Number(invoice.totalAmount);
+  const creditAmount = Number(amount);
+
+  let vatOnCredit = 0;
+  let vatGlAccountId: string | null = null;
+
+  if (invoiceTotalTax > 0 && invoiceTotal > 0) {
+    vatOnCredit = Math.round((creditAmount * invoiceTotalTax / invoiceTotal) * 10000) / 10000;
+
+    const taxCodes = [...new Set(
+      invoice.lines
+        .filter((l) => Number(l.taxAmount) > 0 && l.taxCode)
+        .map((l) => l.taxCode!),
+    )];
+
+    if (taxCodes.length > 0) {
+      const taxCodeRecord = await prisma.taxCode.findFirst({
+        where: { organisationId, code: { in: taxCodes }, glAccountId: { not: null }, isActive: true },
+        select: { glAccountId: true },
+      });
+      vatGlAccountId = taxCodeRecord?.glAccountId ?? null;
+    }
+
+    if (!vatGlAccountId) {
+      const fallbackVatAccount = await prisma.account.findFirst({
+        where: { organisationId, type: 'TAX_PAYABLE', isActive: true, isDeleted: false },
+        orderBy: { code: 'asc' },
+      });
+      if (!fallbackVatAccount) {
+        throw new ValidationError(
+          'Cannot issue credit note with VAT: no Output VAT account (type: TAX_PAYABLE) found.',
+        );
+      }
+      vatGlAccountId = fallbackVatAccount.id;
+    }
+  }
+
+  const netCredit = creditAmount - vatOnCredit;
   const cnNumber = await nextCreditNoteNumber(organisationId);
+
+  const cnLines: Array<{
+    accountId: string; description: string;
+    debitAmount: number; creditAmount: number;
+    currency: string; exchangeRate: number;
+  }> = [
+    {
+      accountId: revenueAccountId,
+      description: `Credit Note – ${invoice.invoiceNumber}`,
+      debitAmount: netCredit,
+      creditAmount: 0,
+      currency: invoice.currency,
+      exchangeRate: Number(invoice.exchangeRate),
+    },
+  ];
+
+  if (vatOnCredit > 0 && vatGlAccountId) {
+    cnLines.push({
+      accountId: vatGlAccountId,
+      description: `Output VAT Reversal – ${invoice.invoiceNumber}`,
+      debitAmount: vatOnCredit,
+      creditAmount: 0,
+      currency: invoice.currency,
+      exchangeRate: Number(invoice.exchangeRate),
+    });
+  }
+
+  cnLines.push({
+    accountId: arAccount.id,
+    description: `AR Credit – ${invoice.invoiceNumber}`,
+    debitAmount: 0,
+    creditAmount: creditAmount,
+    currency: invoice.currency,
+    exchangeRate: Number(invoice.exchangeRate),
+  });
 
   const journalEntry = await journalService.createAndPostSystemEntry(
     organisationId,
@@ -487,24 +632,7 @@ export async function createCreditNote(organisationId: string, userId: string, i
       periodId: input.periodId,
       currency: invoice.currency,
       exchangeRate: Number(invoice.exchangeRate),
-      lines: [
-        {
-          accountId: revenueAccountId,
-          description: `Credit Note – ${invoice.invoiceNumber}`,
-          debitAmount: Number(amount),
-          creditAmount: 0,
-          currency: invoice.currency,
-          exchangeRate: Number(invoice.exchangeRate),
-        },
-        {
-          accountId: arAccount.id,
-          description: `AR Credit – ${invoice.invoiceNumber}`,
-          debitAmount: 0,
-          creditAmount: Number(amount),
-          currency: invoice.currency,
-          exchangeRate: Number(invoice.exchangeRate),
-        },
-      ],
+      lines: cnLines,
     },
     userId,
   );
