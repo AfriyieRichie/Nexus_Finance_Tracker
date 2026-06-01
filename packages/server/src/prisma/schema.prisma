@@ -1025,6 +1025,7 @@ model FixedAsset {
   status                    AssetStatus        @default(ACTIVE)
   disposalDate              DateTime?          @db.Date
   disposalProceeds          Decimal?           @db.Decimal(20, 4)
+  reducingBalanceRate       Decimal?           @db.Decimal(8, 6)
   assetAccountId            String?
   deprnAccountId            String?
   accDeprnAccountId         String?
@@ -1057,6 +1058,7 @@ model AssetCategory {
   assetCostAccountId                String?
   depreciationExpenseAccountId      String?
   accumulatedDepreciationAccountId  String?
+  gainLossOnDisposalAccountId       String?
   isActive                  Boolean            @default(true)
   isDeleted                 Boolean            @default(false)
   createdAt                 DateTime           @default(now())

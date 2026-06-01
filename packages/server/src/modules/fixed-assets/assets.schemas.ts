@@ -21,6 +21,7 @@ export const createAssetSchema = z.object({
   residualValue: z.number().nonnegative().default(0),
   usefulLifeMonths: z.number().int().positive(),
   depreciationMethod: depreciationMethodEnum.default('STRAIGHT_LINE'),
+  reducingBalanceRate: z.number().positive().max(1).optional(),
   unitsOfProductionTotal: z.number().int().positive().optional(),
   assetAccountId: z.string().uuid().optional(),
   deprnAccountId: z.string().uuid().optional(),
@@ -60,7 +61,7 @@ export const disposeAssetSchema = z.object({
   disposalDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   disposalProceeds: z.number().nonnegative(),
   periodId: z.string().uuid(),
-  bankAccountId: z.string().uuid().optional(),
+  proceedsAccountId: z.string().uuid().optional(),
 });
 
 export const revalueAssetSchema = z.object({
@@ -73,7 +74,7 @@ export const revalueAssetSchema = z.object({
 
 export const impairAssetSchema = z.object({
   impairmentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  impairmentAmount: z.number().positive(),
+  recoverableAmount: z.number().nonnegative(),
   periodId: z.string().uuid(),
   impairmentAccountId: z.string().uuid().optional(),
   notes: z.string().optional(),
@@ -90,6 +91,7 @@ export const createCategorySchema = z.object({
   assetCostAccountId:               z.string().uuid().optional().nullable(),
   depreciationExpenseAccountId:     z.string().uuid().optional().nullable(),
   accumulatedDepreciationAccountId: z.string().uuid().optional().nullable(),
+  gainLossOnDisposalAccountId:      z.string().uuid().optional().nullable(),
 });
 
 export const updateCategorySchema = createCategorySchema.partial();

@@ -21,6 +21,7 @@ function computeMonthlyDeprn(
   monthsElapsed: number,
   unitsThisPeriod?: number,
   unitsTotal?: number,
+  reducingBalanceRate?: Prisma.Decimal,
 ): Prisma.Decimal {
   const depreciableAmount = cost.minus(residual);
 
@@ -29,9 +30,9 @@ function computeMonthlyDeprn(
       return depreciableAmount.dividedBy(usefulLifeMonths);
 
     case 'REDUCING_BALANCE': {
-      // Double-declining balance rate
-      const rate = new Prisma.Decimal(2).dividedBy(usefulLifeMonths);
-      return carryingValue.times(rate);
+      // Use user-defined annual rate if provided; otherwise double-declining (2/n)
+      const rate = reducingBalanceRate ?? new Prisma.Decimal(2).dividedBy(usefulLifeMonths);
+      return carryingValue.times(rate).dividedBy(12);
     }
 
     case 'SUM_OF_YEARS_DIGITS': {
@@ -145,6 +146,7 @@ export async function createCategory(organisationId: string, input: CreateCatego
       assetCostAccountId:               input.assetCostAccountId               ?? null,
       depreciationExpenseAccountId:     input.depreciationExpenseAccountId     ?? null,
       accumulatedDepreciationAccountId: input.accumulatedDepreciationAccountId ?? null,
+      gainLossOnDisposalAccountId:      input.gainLossOnDisposalAccountId      ?? null,
     },
   });
 }
@@ -172,6 +174,7 @@ export async function updateCategory(organisationId: string, categoryId: string,
       ...(input.assetCostAccountId               !== undefined && { assetCostAccountId:               input.assetCostAccountId }),
       ...(input.depreciationExpenseAccountId     !== undefined && { depreciationExpenseAccountId:     input.depreciationExpenseAccountId }),
       ...(input.accumulatedDepreciationAccountId !== undefined && { accumulatedDepreciationAccountId: input.accumulatedDepreciationAccountId }),
+      ...(input.gainLossOnDisposalAccountId      !== undefined && { gainLossOnDisposalAccountId:      input.gainLossOnDisposalAccountId }),
     },
   });
 }
@@ -222,6 +225,7 @@ export async function createAsset(organisationId: string, input: CreateAssetInpu
       residualValue: new Prisma.Decimal(input.residualValue),
       usefulLifeMonths: input.usefulLifeMonths,
       depreciationMethod: method as 'STRAIGHT_LINE' | 'REDUCING_BALANCE' | 'UNITS_OF_PRODUCTION' | 'SUM_OF_YEARS_DIGITS',
+      reducingBalanceRate: input.reducingBalanceRate != null ? new Prisma.Decimal(input.reducingBalanceRate) : undefined,
       unitsOfProductionTotal: input.unitsOfProductionTotal,
       carryingValue: cost,
       assetAccountId,
@@ -418,6 +422,7 @@ export async function runDepreciation(
         asset.depreciationMonthsElapsed,
         unitsMap.get(asset.id),
         asset.unitsOfProductionTotal ?? undefined,
+        asset.reducingBalanceRate ?? undefined,
       );
       // Skip UNITS_OF_PRODUCTION assets with no units provided
       if (asset.depreciationMethod === 'UNITS_OF_PRODUCTION' && !unitsMap.has(asset.id)) return null;
@@ -636,19 +641,28 @@ export async function disposeAsset(
 
   journalLines.push({ accountId: assetAccountId, description: `Remove asset at cost – ${asset.name}`, debitAmount: 0, creditAmount: Number(asset.acquisitionCost), currency, exchangeRate: 1 });
 
-  if (proceeds.greaterThan(0) && input.bankAccountId) {
-    journalLines.push({ accountId: input.bankAccountId, description: 'Disposal proceeds', debitAmount: Number(proceeds), creditAmount: 0, currency, exchangeRate: 1 });
+  if (proceeds.greaterThan(0) && input.proceedsAccountId) {
+    journalLines.push({ accountId: input.proceedsAccountId, description: 'Disposal proceeds', debitAmount: Number(proceeds), creditAmount: 0, currency, exchangeRate: 1 });
   }
 
   if (!gainOrLoss.isZero()) {
-    const glAccount = await prisma.account.findFirst({
+    // Prefer the category's dedicated gain/loss on disposal account
+    const categoryGainLossId = asset.categoryId
+      ? (await prisma.assetCategory.findFirst({
+          where: { id: asset.categoryId, organisationId },
+          select: { gainLossOnDisposalAccountId: true },
+        }))?.gainLossOnDisposalAccountId
+      : null;
+
+    const gainLossAccountId = categoryGainLossId ?? (await prisma.account.findFirst({
       where: { organisationId, type: gainOrLoss.greaterThan(0) ? 'REVENUE_ACCOUNT' : 'EXPENSE_ACCOUNT', isActive: true, isDeleted: false, isControlAccount: false },
       orderBy: { code: 'asc' },
       select: { id: true },
-    });
-    if (glAccount) {
+    }))?.id;
+
+    if (gainLossAccountId) {
       journalLines.push({
-        accountId: glAccount.id,
+        accountId: gainLossAccountId,
         description: gainOrLoss.greaterThan(0) ? 'Gain on asset disposal' : 'Loss on asset disposal',
         debitAmount: gainOrLoss.lessThan(0) ? Number(gainOrLoss.abs()) : 0,
         creditAmount: gainOrLoss.greaterThan(0) ? Number(gainOrLoss) : 0,
@@ -797,12 +811,13 @@ export async function impairAsset(
   });
   if (!period) throw new ValidationError('Period not found or closed');
 
-  const impairmentAmount = new Prisma.Decimal(input.impairmentAmount);
-  if (impairmentAmount.greaterThan(asset.carryingValue)) {
-    throw new ValidationError(`Impairment amount (${impairmentAmount.toFixed(2)}) cannot exceed carrying value (${asset.carryingValue.toFixed(2)})`);
+  const recoverableAmount = new Prisma.Decimal(input.recoverableAmount);
+  if (recoverableAmount.greaterThanOrEqualTo(asset.carryingValue)) {
+    throw new ValidationError(`Recoverable amount (${recoverableAmount.toFixed(2)}) must be less than carrying value (${asset.carryingValue.toFixed(2)}) for an impairment to exist`);
   }
 
-  const newCarryingValue = asset.carryingValue.minus(impairmentAmount);
+  const impairmentAmount = asset.carryingValue.minus(recoverableAmount);
+  const newCarryingValue = recoverableAmount;
 
   const org = await prisma.organisation.findUnique({ where: { id: organisationId }, select: { baseCurrency: true } });
   const currency = org?.baseCurrency ?? 'USD';
