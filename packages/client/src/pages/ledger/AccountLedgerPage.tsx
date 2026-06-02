@@ -45,6 +45,14 @@ export function AccountLedgerPage() {
   const accountClass = searchParams.get('accountClass') ?? '';
   const normalBalance = (searchParams.get('normalBalance') ?? 'DEBIT') as 'DEBIT' | 'CREDIT';
 
+  // Build the "Trial Balance" breadcrumb link so it restores the filter state the user had
+  const tbBackParams = new URLSearchParams();
+  ['tbRestore', 'tbFormMode', 'tbFormPeriodId', 'tbFormYear', 'tbFormFromPeriodId', 'tbFormToPeriodId', 'tbFormAsOfDate', 'tbFormZeros'].forEach((key) => {
+    const v = searchParams.get(key);
+    if (v) tbBackParams.set(key, v);
+  });
+  const tbBackLink = `/ledger/trial-balance${tbBackParams.size > 0 ? '?' + tbBackParams.toString() : ''}`;
+
   const { data, isLoading } = useQuery({
     queryKey: ['account-ledger', activeOrganisationId, accountId, { periodId, fromDate, toDate }],
     queryFn: () =>
@@ -88,7 +96,7 @@ export function AccountLedgerPage() {
       {/* Breadcrumb */}
       <nav className="flex items-center gap-1.5 text-sm text-muted-foreground flex-wrap">
         <Link
-          to="/ledger/trial-balance"
+          to={tbBackLink}
           className="hover:text-foreground transition-colors"
         >
           Trial Balance
@@ -101,7 +109,7 @@ export function AccountLedgerPage() {
 
       {/* Page header */}
       <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" onClick={() => navigate(-1)} title="Back">
+        <Button variant="ghost" size="icon" onClick={() => navigate(tbBackLink)} title="Back to Trial Balance">
           <ArrowLeft size={16} />
         </Button>
         <div>

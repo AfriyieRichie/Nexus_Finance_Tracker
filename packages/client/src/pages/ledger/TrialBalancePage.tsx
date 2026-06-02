@@ -1,6 +1,6 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Scale, CheckCircle, AlertCircle, Download, Printer } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { getTrialBalance } from '@/services/ledger.service';
@@ -74,6 +74,7 @@ function periodsForYear(periods: AccountingPeriod[], year: number): AccountingPe
 
 export function TrialBalancePage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { activeOrganisationId, user } = useAuthStore((s) => ({
     activeOrganisationId: s.activeOrganisationId,
     user: s.user,
@@ -95,6 +96,35 @@ export function TrialBalancePage() {
   // Committed (generated) state
   const [committed, setCommitted] = useState<CommittedParams | null>(null);
   const [generatedAt, setGeneratedAt] = useState<Date | null>(null);
+
+  // Restore filter state when navigating back from the account ledger drilldown.
+  // The account ledger page passes `tbRestore` (base64 JSON of the committed params)
+  // and `tbFormMode` / `tbFormPeriodId` etc. for restoring the form controls.
+  useEffect(() => {
+    const raw = searchParams.get('tbRestore');
+    if (!raw) return;
+    try {
+      const restored = JSON.parse(atob(raw)) as CommittedParams;
+      setCommitted(restored);
+      setGeneratedAt(new Date());
+      // Restore the form controls so the user can modify and re-run
+      const fm = searchParams.get('tbFormMode') as Mode | null;
+      if (fm) setMode(fm);
+      const fp = searchParams.get('tbFormPeriodId');
+      if (fp) setPeriodId(fp);
+      const fy = searchParams.get('tbFormYear');
+      if (fy) setSelectedYear(fy);
+      const ffp = searchParams.get('tbFormFromPeriodId');
+      if (ffp) setFromPeriodId(ffp);
+      const ftp = searchParams.get('tbFormToPeriodId');
+      if (ftp) setToPeriodId(ftp);
+      const fa = searchParams.get('tbFormAsOfDate');
+      if (fa) setAsOfDate(fa);
+      const fz = searchParams.get('tbFormZeros');
+      if (fz) setIncludeZeros(fz === 'true');
+    } catch { /* ignore malformed */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // only on mount
 
   // Periods list
   const { data: periods = [] } = useQuery({
@@ -182,6 +212,7 @@ export function TrialBalancePage() {
   function handleRowClick(line: TrialBalanceLine) {
     if (!committed) return;
     const p = new URLSearchParams();
+    // Ledger filter params
     if (committed.periodId) p.set('periodId', committed.periodId);
     if (committed.fromDate) p.set('fromDate', committed.fromDate);
     if (committed.toDate) p.set('toDate', committed.toDate);
@@ -191,6 +222,16 @@ export function TrialBalancePage() {
     p.set('name', line.name);
     p.set('accountClass', line.class);
     p.set('normalBalance', line.normalBalance);
+    // Encode the full committed state so the breadcrumb can restore it
+    p.set('tbRestore', btoa(JSON.stringify(committed)));
+    // Also encode form control state so the filter panel is restored correctly
+    p.set('tbFormMode', mode);
+    if (periodId) p.set('tbFormPeriodId', periodId);
+    if (selectedYear) p.set('tbFormYear', selectedYear);
+    if (fromPeriodId) p.set('tbFormFromPeriodId', fromPeriodId);
+    if (toPeriodId) p.set('tbFormToPeriodId', toPeriodId);
+    if (asOfDate) p.set('tbFormAsOfDate', asOfDate);
+    p.set('tbFormZeros', String(includeZeros));
     navigate(`/ledger/accounts/${line.accountId}?${p.toString()}`);
   }
 

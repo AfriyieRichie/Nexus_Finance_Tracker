@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Archive, Plus, BarChart3, RefreshCw, CheckCircle, XCircle, ClipboardList, AlertTriangle, Package, MapPin } from 'lucide-react';
+import { Archive, Plus, BarChart3, RefreshCw, CheckCircle, XCircle, ClipboardList, AlertTriangle, Package, MapPin, Download } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import * as inv from '@/services/inventory.service';
 import { listAccounts } from '@/services/accounts.service';
@@ -715,7 +715,36 @@ export function InventoryPage() {
       {/* ── Items ─────────────────────────────────────────────────────────────── */}
       {tab === 'items' && (
         <>
-          <Input placeholder="Search by code or name…" value={search} onChange={(e) => setSearch(e.target.value)} className="max-w-sm h-8 text-xs" />
+          <div className="flex items-center gap-2">
+            <Input placeholder="Search by code or name…" value={search} onChange={(e) => setSearch(e.target.value)} className="max-w-sm h-8 text-xs" />
+            <Button
+              variant="outline" size="sm"
+              disabled={items.length === 0}
+              onClick={() => {
+                const rows = [
+                  ['SKU', 'Name', 'Description', 'Category', 'Costing Method', 'Unit', 'Unit Cost', 'Qty on Hand', 'Stock Value', 'Reorder Level', 'Status'],
+                  ...items.map((i) => [
+                    i.code, i.name, i.description ?? '', i.inventoryCategory?.name ?? i.category ?? '',
+                    i.costMethod === 'WEIGHTED_AVERAGE' ? 'AVCO' : i.costMethod,
+                    i.unit, i.unitCost, i.quantityOnHand,
+                    (Number(i.unitCost) * Number(i.quantityOnHand)).toFixed(2),
+                    i.reorderLevel ?? '', i.isActive ? 'Active' : 'Inactive',
+                  ]),
+                ];
+                const csv = rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\r\n');
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `inventory-items-${new Date().toISOString().slice(0, 10)}.csv`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+              className="h-8 gap-1.5 shrink-0"
+            >
+              <Download size={13} /> Export CSV
+            </Button>
+          </div>
           <Card>
             <CardContent className="p-0">
               {itemsLoading ? (

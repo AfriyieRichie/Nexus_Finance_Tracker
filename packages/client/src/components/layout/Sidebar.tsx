@@ -1,13 +1,13 @@
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, BookOpen, FileText, BarChart3, TrendingUp, Building2,
-  ChevronDown, LogOut, Settings, Scale, Banknote, Users, ShoppingCart,
+  ChevronDown, ChevronRight, LogOut, Settings, Scale, Banknote, Users, ShoppingCart,
   Package, Landmark, Archive, PiggyBank, Receipt, CheckCircle, Shield,
   Bell, UserCog, RefreshCw,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth.store';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useQueryClient, useIsFetching } from '@tanstack/react-query';
 import { getUnreadCount } from '@/services/approvals.service';
 import type { UserRole } from '@/services/users.types';
@@ -105,7 +105,41 @@ function canSee(itemRoles: UserRole[] | undefined, userRole: UserRole | undefine
 export function Sidebar() {
   const { user, activeOrganisationId, setActiveOrganisation, logout } = useAuthStore();
   const navigate = useNavigate();
+  const location = useLocation();
   const [orgOpen, setOrgOpen] = useState(false);
+
+  // Collapsible groups — start with the active group open, all others closed
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => {
+    const open = new Set<string>();
+    for (const group of NAV_GROUPS) {
+      // Overview is always open (it's just Dashboard — one item)
+      if (group.heading === 'Overview') { open.add(group.heading); continue; }
+      if (group.items.some((item) => location.pathname.startsWith(item.to))) {
+        open.add(group.heading);
+      }
+    }
+    return open;
+  });
+
+  // When the route changes, auto-expand the group that contains the new active item
+  useEffect(() => {
+    for (const group of NAV_GROUPS) {
+      if (group.items.some((item) => location.pathname.startsWith(item.to))) {
+        setExpandedGroups((prev) => {
+          if (prev.has(group.heading)) return prev;
+          return new Set([...prev, group.heading]);
+        });
+      }
+    }
+  }, [location.pathname]);
+
+  function toggleGroup(heading: string) {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(heading)) { next.delete(heading); } else { next.add(heading); }
+      return next;
+    });
+  }
 
   const activeOrg = user?.organisations.find((o) => o.organisationId === activeOrganisationId);
   const userRole = activeOrg?.role as UserRole | undefined;
@@ -197,34 +231,72 @@ export function Sidebar() {
       )}
 
       {/* Nav */}
-      <nav className="flex-1 px-3 py-4 space-y-5 overflow-y-auto">
-        {visibleGroups.map((group) => (
-          <div key={group.heading}>
-            <p className="px-2 mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              {group.heading}
-            </p>
-            <ul className="space-y-0.5">
-              {group.items.map((item) => (
-                <li key={item.to}>
-                  <NavLink
-                    to={item.to}
-                    className={({ isActive }) =>
-                      cn(
-                        'flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm transition-colors',
-                        isActive
-                          ? 'bg-primary/10 text-primary font-medium'
-                          : 'text-muted-foreground hover:bg-accent hover:text-foreground',
-                      )
-                    }
+      <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+        {visibleGroups.map((group) => {
+          const isOpen = expandedGroups.has(group.heading);
+          const isSingleAlwaysOpen = group.heading === 'Overview';
+          return (
+            <div key={group.heading}>
+              {/* Group header — clickable toggle (except Overview which is always open) */}
+              {isSingleAlwaysOpen ? (
+                <div className="space-y-0.5">
+                  {group.items.map((item) => (
+                    <NavLink
+                      key={item.to}
+                      to={item.to}
+                      className={({ isActive }) =>
+                        cn(
+                          'flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm transition-colors',
+                          isActive
+                            ? 'bg-primary/10 text-primary font-medium'
+                            : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+                        )
+                      }
+                    >
+                      {item.icon}
+                      {item.label}
+                    </NavLink>
+                  ))}
+                </div>
+              ) : (
+                <>
+                  <button
+                    onClick={() => toggleGroup(group.heading)}
+                    className="w-full flex items-center justify-between px-2 py-1.5 mt-1 rounded-md text-[10px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
                   >
-                    {item.icon}
-                    {item.label}
-                  </NavLink>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
+                    {group.heading}
+                    <ChevronRight
+                      size={11}
+                      className={cn('transition-transform duration-150 shrink-0', isOpen && 'rotate-90')}
+                    />
+                  </button>
+                  {isOpen && (
+                    <ul className="space-y-0.5 mt-0.5">
+                      {group.items.map((item) => (
+                        <li key={item.to}>
+                          <NavLink
+                            to={item.to}
+                            className={({ isActive }) =>
+                              cn(
+                                'flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm transition-colors',
+                                isActive
+                                  ? 'bg-primary/10 text-primary font-medium'
+                                  : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+                              )
+                            }
+                          >
+                            {item.icon}
+                            {item.label}
+                          </NavLink>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              )}
+            </div>
+          );
+        })}
       </nav>
 
       {/* User menu */}
