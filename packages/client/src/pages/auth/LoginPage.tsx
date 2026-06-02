@@ -40,6 +40,59 @@ function NexusLogo({ size = 40 }: { size?: number }) {
   );
 }
 
+// ─── Fluid gradient art (SVG — blue → cream liquid drape) ──────────────────────
+function FluidArt() {
+  return (
+    <svg
+      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
+      viewBox="0 0 600 820"
+      preserveAspectRatio="xMidYMid slice"
+    >
+      <defs>
+        <linearGradient id="fa-base" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#1e3a8a" />
+          <stop offset="35%" stopColor="#2563eb" />
+          <stop offset="62%" stopColor="#5f7fb8" />
+          <stop offset="82%" stopColor="#cabf9f" />
+          <stop offset="100%" stopColor="#f0e6cf" />
+        </linearGradient>
+        <linearGradient id="fa-cream" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#f5ecd6" />
+          <stop offset="100%" stopColor="#d8c8a4" />
+        </linearGradient>
+        <radialGradient id="fa-blue" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="#4f8ef7" />
+          <stop offset="100%" stopColor="#4f8ef7" stopOpacity="0" />
+        </radialGradient>
+        <radialGradient id="fa-fold" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="#12235f" />
+          <stop offset="100%" stopColor="#12235f" stopOpacity="0" />
+        </radialGradient>
+        <filter id="fa-blur" x="-30%" y="-30%" width="160%" height="160%">
+          <feGaussianBlur stdDeviation="48" />
+        </filter>
+      </defs>
+
+      {/* Base diagonal drape: blue (top-left) → cream (bottom-right) */}
+      <rect x="0" y="0" width="600" height="820" fill="url(#fa-base)" />
+
+      {/* Soft organic highlights, all blurred together for a liquid feel */}
+      <g filter="url(#fa-blur)">
+        {/* Bright blue highlight — upper left */}
+        <ellipse cx="170" cy="160" rx="240" ry="220" fill="url(#fa-blue)" />
+        {/* Bright blue highlight — right edge */}
+        <ellipse cx="560" cy="300" rx="220" ry="260" fill="url(#fa-blue)" />
+        {/* Dark fold/valley — diagonal through the middle (gives the 3D liquid drape) */}
+        <ellipse cx="300" cy="430" rx="120" ry="300" fill="url(#fa-fold)" transform="rotate(28 300 430)" />
+        {/* Cream pool — lower right */}
+        <ellipse cx="470" cy="660" rx="280" ry="240" fill="url(#fa-cream)" opacity="0.9" />
+        {/* Cream sweep — bottom */}
+        <ellipse cx="240" cy="780" rx="300" ry="180" fill="url(#fa-cream)" opacity="0.75" />
+      </g>
+    </svg>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export function LoginPage() {
   const navigate = useNavigate();
@@ -69,19 +122,9 @@ export function LoginPage() {
   return (
     <>
       <style>{`
-        @keyframes blobFloat1 {
-          0%, 100% { transform: translate(0, 0) scale(1); }
-          33%      { transform: translate(60px, -40px) scale(1.15); }
-          66%      { transform: translate(-30px, 50px) scale(0.92); }
-        }
-        @keyframes blobFloat2 {
-          0%, 100% { transform: translate(0, 0) scale(1); }
-          40%      { transform: translate(-70px, 40px) scale(1.2); }
-          75%      { transform: translate(40px, -30px) scale(0.9); }
-        }
-        @keyframes blobFloat3 {
-          0%, 100% { transform: translate(0, 0) scale(1); }
-          50%      { transform: translate(50px, 60px) scale(1.1); }
+        @keyframes f-drift {
+          0%, 100% { transform: scale(1) translate(0, 0); }
+          50%      { transform: scale(1.06) translate(-1.5%, 1.5%); }
         }
         @keyframes formIn {
           from { opacity: 0; transform: translateY(18px); }
@@ -93,68 +136,68 @@ export function LoginPage() {
         }
         .lp-input {
           width: 100%;
-          border-radius: 10px;
-          border: 1.5px solid #e2e8f0;
-          background: #f8fafc;
-          padding: 12px 14px 12px 42px;
+          border-radius: 999px;
+          border: 1.5px solid #e8ecf2;
+          background: #f5f7fb;
+          padding: 13px 18px 13px 46px;
           font-size: 14px;
           color: #1e293b;
           outline: none;
           transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
         }
-        .lp-input::placeholder { color: #94a3b8; }
+        .lp-input::placeholder { color: #9aa6b8; }
         .lp-input:focus {
           border-color: #2563eb;
-          box-shadow: 0 0 0 3px rgba(37,99,235,0.12);
+          box-shadow: 0 0 0 4px rgba(37,99,235,0.1);
           background: #ffffff;
         }
         .lp-input.err { border-color: #dc2626; background: #fef2f2; }
         .lp-btn {
           width: 100%;
-          padding: 13px;
-          border-radius: 10px;
-          background: #1e3a5f;
+          padding: 14px;
+          border-radius: 999px;
+          background: #16243b;
           color: white;
-          font-size: 14px;
+          font-size: 13px;
           font-weight: 700;
-          letter-spacing: 0.06em;
+          letter-spacing: 0.14em;
           text-transform: uppercase;
           cursor: pointer;
           border: none;
           transition: background 0.18s, transform 0.1s, box-shadow 0.18s;
         }
         .lp-btn:hover:not(:disabled) {
-          background: #16304f;
-          box-shadow: 0 8px 24px rgba(30,58,95,0.28);
+          background: #0f1a2e;
+          box-shadow: 0 10px 28px rgba(22,36,59,0.3);
           transform: translateY(-1px);
         }
         .lp-btn:active:not(:disabled) { transform: translateY(0); }
         .lp-btn:disabled { opacity: 0.6; cursor: not-allowed; }
         .lp-icon {
-          position: absolute; left: 14px; top: 50%;
+          position: absolute; left: 17px; top: 50%;
           transform: translateY(-50%);
-          color: #94a3b8; pointer-events: none;
+          color: #9aa6b8; pointer-events: none;
         }
         .lp-eye {
-          position: absolute; right: 12px; top: 50%;
+          position: absolute; right: 16px; top: 50%;
           transform: translateY(-50%);
           background: none; border: none; cursor: pointer;
-          color: #94a3b8; padding: 4px; display: flex;
+          color: #9aa6b8; padding: 4px; display: flex;
         }
         .lp-eye:hover { color: #475569; }
-        /* Right gradient art panel */
         .lp-art {
           flex: 1;
           position: relative;
           overflow: hidden;
-          background: #1e3a8a;
           display: flex;
           flex-direction: column;
           justify-content: flex-end;
           padding: 56px;
         }
-        .lp-blob { position: absolute; border-radius: 50%; filter: blur(60px); opacity: 0.9; }
-        /* Responsive: hide art panel on narrow screens */
+        .lp-art-inner {
+          position: absolute; inset: -4%;
+          animation: f-drift 18s ease-in-out infinite;
+        }
         @media (max-width: 900px) {
           .lp-art { display: none; }
           .lp-form-panel { flex: 1 1 100% !important; }
@@ -167,7 +210,7 @@ export function LoginPage() {
         <div
           className="lp-form-panel"
           style={{
-            flex: '0 0 42%',
+            flex: '0 0 40%',
             display: 'flex',
             flexDirection: 'column',
             padding: '40px 56px',
@@ -202,12 +245,12 @@ export function LoginPage() {
           >
             {/* Emblem */}
             <div style={{
-              width: 64, height: 64, borderRadius: 18,
+              width: 60, height: 60, borderRadius: 18,
               background: 'linear-gradient(135deg, #1e3a5f 0%, #2563eb 100%)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              marginBottom: 24, boxShadow: '0 8px 24px rgba(30,58,95,0.25)',
+              marginBottom: 22, boxShadow: '0 8px 24px rgba(30,58,95,0.25)',
             }}>
-              <NexusLogo size={36} />
+              <NexusLogo size={34} />
             </div>
 
             <h1 style={{ fontSize: 26, fontWeight: 800, color: '#0f172a', marginBottom: 6 }}>
@@ -219,8 +262,8 @@ export function LoginPage() {
 
             <form onSubmit={handleSubmit((d) => loginMutation.mutate(d))} noValidate>
               {/* Email */}
-              <div style={{ marginBottom: 18 }}>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 7, paddingLeft: 4 }}>
                   Email address
                 </label>
                 <div style={{ position: 'relative' }}>
@@ -233,12 +276,12 @@ export function LoginPage() {
                     {...register('email')}
                   />
                 </div>
-                {errors.email && <p style={{ marginTop: 5, fontSize: 12, color: '#dc2626' }}>{errors.email.message}</p>}
+                {errors.email && <p style={{ marginTop: 5, fontSize: 12, color: '#dc2626', paddingLeft: 18 }}>{errors.email.message}</p>}
               </div>
 
               {/* Password */}
-              <div style={{ marginBottom: 16 }}>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 7, paddingLeft: 4 }}>
                   Password
                 </label>
                 <div style={{ position: 'relative' }}>
@@ -248,7 +291,7 @@ export function LoginPage() {
                     autoComplete="current-password"
                     placeholder="••••••••"
                     className={`lp-input${errors.password ? ' err' : ''}`}
-                    style={{ paddingRight: 42 }}
+                    style={{ paddingRight: 46 }}
                     {...register('password')}
                   />
                   <button
@@ -261,11 +304,11 @@ export function LoginPage() {
                     {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
                 </div>
-                {errors.password && <p style={{ marginTop: 5, fontSize: 12, color: '#dc2626' }}>{errors.password.message}</p>}
+                {errors.password && <p style={{ marginTop: 5, fontSize: 12, color: '#dc2626', paddingLeft: 18 }}>{errors.password.message}</p>}
               </div>
 
               {/* Remember / forgot row */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22, paddingLeft: 4 }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 13, color: '#475569', cursor: 'pointer' }}>
                   <input type="checkbox" defaultChecked style={{ width: 14, height: 14, accentColor: '#1e3a5f' }} />
                   Remember me
@@ -280,9 +323,9 @@ export function LoginPage() {
 
               {loginMutation.isError && (
                 <div style={{
-                  marginBottom: 18, borderRadius: 10,
+                  marginBottom: 18, borderRadius: 12,
                   background: '#fef2f2', border: '1px solid #fecaca',
-                  padding: '11px 14px', fontSize: 13, color: '#dc2626',
+                  padding: '11px 16px', fontSize: 13, color: '#dc2626',
                 }}>
                   {errorMessage}
                 </div>
@@ -293,7 +336,7 @@ export function LoginPage() {
               </button>
             </form>
 
-            <p style={{ marginTop: 26, textAlign: 'center', fontSize: 13, color: '#94a3b8' }}>
+            <p style={{ marginTop: 24, textAlign: 'center', fontSize: 13, color: '#94a3b8' }}>
               Don't have an account?{' '}
               <Link to="/register" style={{ color: '#2563eb', fontWeight: 600, textDecoration: 'none' }}>
                 Create one
@@ -309,14 +352,11 @@ export function LoginPage() {
           </div>
         </div>
 
-        {/* ── RIGHT: animated gradient art panel ── */}
+        {/* ── RIGHT: fluid gradient art panel ── */}
         <div className="lp-art">
-          {/* Flowing blobs */}
-          <div className="lp-blob" style={{ width: 460, height: 460, top: '-12%', left: '6%', background: '#2563eb', animation: 'blobFloat1 16s ease-in-out infinite' }} />
-          <div className="lp-blob" style={{ width: 420, height: 420, top: '24%', right: '-8%', background: '#60a5fa', animation: 'blobFloat2 19s ease-in-out infinite' }} />
-          <div className="lp-blob" style={{ width: 480, height: 480, bottom: '-18%', left: '28%', background: '#ead9b8', opacity: 0.75, animation: 'blobFloat3 21s ease-in-out infinite' }} />
-          <div className="lp-blob" style={{ width: 360, height: 360, top: '40%', left: '34%', background: '#1e3a8a', animation: 'blobFloat1 23s ease-in-out infinite reverse' }} />
-          <div className="lp-blob" style={{ width: 300, height: 300, bottom: '6%', right: '14%', background: '#f0e6d2', opacity: 0.6, animation: 'blobFloat2 17s ease-in-out infinite' }} />
+          <div className="lp-art-inner">
+            <FluidArt />
+          </div>
 
           {/* Top-right register link */}
           <Link
@@ -324,9 +364,9 @@ export function LoginPage() {
             style={{
               position: 'absolute', top: 40, right: 56, zIndex: 2,
               display: 'inline-flex', alignItems: 'center', gap: 8,
-              padding: '8px 18px', borderRadius: 22,
-              border: '1px solid rgba(255,255,255,0.3)',
-              background: 'rgba(255,255,255,0.1)',
+              padding: '8px 20px', borderRadius: 22,
+              border: '1px solid rgba(255,255,255,0.35)',
+              background: 'rgba(255,255,255,0.12)',
               color: 'white', fontSize: 13, fontWeight: 600,
               textDecoration: 'none', backdropFilter: 'blur(8px)',
             }}
@@ -337,24 +377,25 @@ export function LoginPage() {
           {/* Welcome text */}
           <div style={{ position: 'relative', zIndex: 2, animation: 'welcomeIn 0.7s 0.3s ease-out both' }}>
             <h2 style={{
-              fontSize: 'clamp(2.5rem, 5vw, 4rem)', fontWeight: 800,
-              color: 'white', lineHeight: 1.05, marginBottom: 16,
+              fontSize: 'clamp(2.8rem, 5.5vw, 4.5rem)', fontWeight: 800,
+              color: 'white', lineHeight: 1, marginBottom: 18,
               letterSpacing: '-0.02em',
-              textShadow: '0 4px 30px rgba(0,0,0,0.2)',
+              textShadow: '0 6px 40px rgba(15,23,42,0.35)',
             }}>
               Welcome.
             </h2>
             <p style={{
-              fontSize: 15, color: 'rgba(255,255,255,0.85)',
-              maxWidth: 420, lineHeight: 1.6,
-              textShadow: '0 2px 12px rgba(0,0,0,0.2)',
+              fontSize: 15, color: 'rgba(255,255,255,0.9)',
+              maxWidth: 430, lineHeight: 1.65,
+              textShadow: '0 2px 16px rgba(15,23,42,0.3)',
             }}>
-              Enterprise-grade financial management — IAS/IFRS compliant accounting,
-              real-time statements, and Ghana GRA payroll, all in one place.
+              Enterprise-grade financial management — IAS/IFRS compliant
+              accounting, real-time statements, and Ghana GRA payroll, all in one place.
             </p>
             <div style={{
-              marginTop: 28, display: 'flex', alignItems: 'center', gap: 10,
-              fontSize: 12, color: 'rgba(255,255,255,0.55)', letterSpacing: '0.08em',
+              marginTop: 30, display: 'flex', alignItems: 'center', gap: 10,
+              fontSize: 12, color: 'rgba(255,255,255,0.7)', letterSpacing: '0.1em',
+              textShadow: '0 2px 12px rgba(15,23,42,0.3)',
             }}>
               <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#4ade80', flexShrink: 0 }} />
               NEXUS FINANCE TRACKER · v1.1
