@@ -108,6 +108,10 @@ export const decide = (
   api.post(`/organisations/${organisationId}/approvals/requests/${requestId}/decide`, data)
     .then((r) => r.data.data);
 
+export const withdrawRequest = (organisationId: string, requestId: string) =>
+  api.post(`/organisations/${organisationId}/approvals/requests/${requestId}/withdraw`)
+    .then((r) => r.data.data);
+
 // ── Workflows ─────────────────────────────────────────────────────────────────
 
 export const listWorkflows = (organisationId: string) =>

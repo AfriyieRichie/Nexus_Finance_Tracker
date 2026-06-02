@@ -284,6 +284,7 @@ function WorkflowDetailDialog({ organisationId, workflowId, onClose }: { organis
 
 function RequestDetailDialog({ organisationId, requestId, onClose }: { organisationId: string; requestId: string; onClose: () => void }) {
   const qc = useQueryClient();
+  const currentUserId = useAuthStore((s) => s.user?.id);
   const [comment, setComment] = useState('');
   const [pendingDecision, setPendingDecision] = useState<'APPROVED' | 'REJECTED' | 'DELEGATED' | null>(null);
   const [delegateTo, setDelegateTo] = useState('');
@@ -320,11 +321,23 @@ function RequestDetailDialog({ organisationId, requestId, onClose }: { organisat
     },
   });
 
+  const withdrawMut = useMutation({
+    mutationFn: () => appSvc.withdrawRequest(organisationId, requestId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['approvals'] });
+      void qc.invalidateQueries({ queryKey: ['approval-notifications-count'] });
+      onClose();
+    },
+  });
+
   const journalLines  = journal?.lines ?? [];
   const totalDebit    = journalLines.reduce((s, l) => s + parseFloat(l.debitAmount  || '0'), 0);
   const totalCredit   = journalLines.reduce((s, l) => s + parseFloat(l.creditAmount || '0'), 0);
   const isPending     = request?.status === 'PENDING';
   const sla           = request ? slaStatus(request) : null;
+  const canWithdraw   = request != null
+    && (request.status === 'PENDING' || request.status === 'ESCALATED')
+    && request.requester?.id === currentUserId;
 
   return (
     <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto" title="Approval Request" description="Review the entry in full before approving or rejecting.">
@@ -484,6 +497,23 @@ function RequestDetailDialog({ organisationId, requestId, onClose }: { organisat
                 </p>
               )}
             </div>
+          )}
+
+          {/* Withdraw — only the original requester, while pending/escalated */}
+          {canWithdraw && (
+            <div className="flex items-center justify-between gap-2 pt-3 border-t">
+              <p className="text-xs text-muted-foreground">You submitted this request — you can withdraw it while it is awaiting approval.</p>
+              <Button size="sm" variant="outline" className="text-amber-700 border-amber-300 hover:bg-amber-50 shrink-0"
+                disabled={withdrawMut.isPending}
+                onClick={() => { if (window.confirm('Withdraw this request? Journal entries will return to DRAFT so you can edit and resubmit.')) withdrawMut.mutate(); }}>
+                {withdrawMut.isPending ? 'Withdrawing…' : 'Withdraw Request'}
+              </Button>
+            </div>
+          )}
+          {withdrawMut.isError && (
+            <p className="text-xs text-destructive">
+              {(withdrawMut.error as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message ?? 'Failed to withdraw request'}
+            </p>
           )}
 
           {!isPending && (
