@@ -244,8 +244,8 @@ export function LoginPage() {
           {/* ── Brand backdrop element (gold logo + ripples + tagline) ── */}
           <div className="lp-brand" style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
             {/* Concentric rounded-square ripples */}
-            <div style={{ position: 'relative', width: 460, height: 460, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              {[460, 380, 300, 230].map((s, i) => (
+            <div style={{ position: 'relative', width: 560, height: 560, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {[560, 460, 360, 280].map((s, i) => (
                 <div key={s} style={{
                   position: 'absolute', width: s, height: s, borderRadius: s * 0.28,
                   border: '1.5px solid rgba(255,255,255,0.08)',
@@ -253,7 +253,7 @@ export function LoginPage() {
                 }} />
               ))}
               <div style={{ animation: 'lp-logo 0.8s cubic-bezier(0.34,1.56,0.64,1) both' }}>
-                <img src="/nexus-logo.png" alt="Nexus" style={{ width: 170, height: 170, objectFit: 'contain' }} />
+                <img src="/nexus-logo.png" alt="Nexus" style={{ width: 240, height: 240, objectFit: 'contain' }} />
               </div>
             </div>
 
