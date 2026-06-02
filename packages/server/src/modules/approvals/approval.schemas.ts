@@ -31,7 +31,10 @@ export const decisionSchema = z.object({
   decision: z.nativeEnum(ApprovalDecisionType),
   comments: z.string().max(1000).trim().optional(),
   delegatedTo: z.string().uuid().optional(),
-});
+}).refine(
+  (d) => d.decision !== ApprovalDecisionType.REJECTED || (d.comments && d.comments.trim().length > 0),
+  { message: 'A comment is required when rejecting an approval request', path: ['comments'] },
+);
 
 export type CreateWorkflowInput = z.infer<typeof createWorkflowSchema>;
 export type UpdateWorkflowInput = z.infer<typeof updateWorkflowSchema>;

@@ -25,7 +25,8 @@ approvalRouter.delete('/workflows/:workflowId/levels/:levelId/approvers/:userId'
 // ─── Requests & Decisions ─────────────────────────────────────────────────────
 approvalRouter.get('/requests',                requireRole(APPROVER), ctrl.listRequests);
 approvalRouter.get('/requests/:requestId',     requireRole(APPROVER), ctrl.getRequest);
-approvalRouter.post('/requests/:requestId/decide', requireRole(APPROVER), ctrl.decide);
+approvalRouter.post('/requests/:requestId/decide',    requireRole(APPROVER), ctrl.decide);
+approvalRouter.post('/requests/:requestId/withdraw',  requireRole(APPROVER), ctrl.withdrawRequest);
 
 // ─── Delegations ──────────────────────────────────────────────────────────────
 approvalRouter.get('/delegations',    requireRole(REPORT_VIEWER), ctrl.listDelegations);

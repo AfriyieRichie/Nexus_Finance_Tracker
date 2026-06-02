@@ -79,6 +79,11 @@ export const decide = asyncHandler(async (req: Request, res: Response) => {
   return sendSuccess(res, result, `Decision recorded: ${result.status}`);
 });
 
+export const withdrawRequest = asyncHandler(async (req: Request, res: Response) => {
+  const result = await svc.withdrawRequest(req.params.organisationId, req.params.requestId, req.user!.sub);
+  return sendSuccess(res, result, 'Approval request withdrawn');
+});
+
 // ─── Delegations ──────────────────────────────────────────────────────────────
 
 export const createDelegation = asyncHandler(async (req: Request, res: Response) => {

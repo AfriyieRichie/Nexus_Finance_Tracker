@@ -51,14 +51,11 @@ async function notify(
 // ─── Workflow CRUD ────────────────────────────────────────────────────────────
 
 export async function createWorkflow(organisationId: string, input: CreateWorkflowInput) {
-  const existing = await prisma.approvalWorkflow.findFirst({
+  // Per manual: creating a new workflow auto-deactivates the previous active one
+  await prisma.approvalWorkflow.updateMany({
     where: { organisationId, entityType: input.entityType, isActive: true },
+    data:  { isActive: false },
   });
-  if (existing) {
-    throw new ConflictError(
-      `An active ${input.entityType} approval workflow already exists ('${existing.name}'). Deactivate it first.`,
-    );
-  }
 
   return prisma.approvalWorkflow.create({
     data: {
@@ -264,11 +261,13 @@ async function getEffectiveApproverIds(
   levelApproverIds: string[],
   workflowId: string,
   organisationId: string,
+  requestId?: string,
+  levelNumber?: number,
 ): Promise<Set<string>> {
   const now = new Date();
   const effectiveIds = new Set(levelApproverIds);
 
-  // Find active delegations pointing to any level approver, valid today
+  // Standing delegations (from the ApprovalDelegation table)
   const delegations = await prisma.approvalDelegation.findMany({
     where: {
       organisationId,
@@ -279,9 +278,21 @@ async function getEffectiveApproverIds(
       OR: [{ workflowId }, { workflowId: null }],
     },
   });
+  for (const d of delegations) effectiveIds.add(d.delegatedTo);
 
-  for (const d of delegations) {
-    effectiveIds.add(d.delegatedTo);
+  // Ad-hoc delegations for this specific request (from ApprovalDecision records)
+  if (requestId !== undefined && levelNumber !== undefined) {
+    const adHoc = await prisma.approvalDecision.findMany({
+      where: {
+        approvalRequestId: requestId,
+        levelNumber,
+        decision: ApprovalDecisionType.DELEGATED,
+      },
+      select: { delegatedTo: true },
+    });
+    for (const d of adHoc) {
+      if (d.delegatedTo) effectiveIds.add(d.delegatedTo);
+    }
   }
 
   return effectiveIds;
@@ -498,6 +509,8 @@ export async function decide(
     levelApproverIds,
     request.workflowId,
     organisationId,
+    requestId,
+    request.currentLevel,
   );
 
   if (!effectiveApprovers.has(userId)) {
@@ -601,18 +614,9 @@ async function handleDelegation(
     },
   });
 
-  // Add delegatee as approver for this level if not already
-  const currentLevel = request.workflow.levels.find(
-    (l) => l.levelNumber === request.currentLevel,
-  );
-  if (currentLevel) {
-    const alreadyApprover = currentLevel.approvers.some((a) => a.user.id === delegatedTo);
-    if (!alreadyApprover) {
-      await prisma.approvalLevelUser.create({
-        data: { levelId: currentLevel.id, userId: delegatedTo },
-      });
-    }
-  }
+  // Do NOT add the delegatee to ApprovalLevelUser — that would permanently mutate the workflow
+  // and inflate requiredApprovers counts for ALL_REQUIRED/MAJORITY.
+  // getEffectiveApproverIds reads the DELEGATED decision records to grant access for this request only.
 
   await notify(
     [delegatedTo],
@@ -627,27 +631,83 @@ async function handleDelegation(
   return { status: 'DELEGATED', requestId: request.id };
 }
 
+// Post-approval entity dispatch — update the entity's own status on full approval.
+// JOURNAL_ENTRY and BUDGET are handled inline; other entity types (PAYMENT, PAYROLL, etc.)
+// use module-specific approval flows and do not require a status update here.
+async function dispatchApprovalComplete(entityType: ApprovalEntityType, entityId: string) {
+  switch (entityType) {
+    case ApprovalEntityType.JOURNAL_ENTRY:
+      await prisma.journalEntry.update({
+        where: { id: entityId },
+        data:  { status: EntryStatus.APPROVED, approvedAt: new Date() },
+      });
+      break;
+    case ApprovalEntityType.BUDGET:
+      await prisma.budget.updateMany({
+        where: { id: entityId },
+        data:  { isApproved: true, approvedAt: new Date() },
+      });
+      break;
+    default:
+      // PAYMENT, PURCHASE_ORDER, SALES_INVOICE, EXPENSE_CLAIM, PAYROLL, BANK_TRANSFER,
+      // SUPPLIER_INVOICE: approval is tracked at the ApprovalRequest level only.
+      break;
+  }
+}
+
 async function checkLevelSatisfied(
   request: Awaited<ReturnType<typeof getRequest>>,
   currentLevel: Awaited<ReturnType<typeof getRequest>>['workflow']['levels'][0],
   organisationId: string,
 ) {
-  const decisions = await prisma.approvalDecision.findMany({
+  // Original approver IDs on this level (never inflated by ad-hoc delegation)
+  const originalApproverIds = new Set(currentLevel.approvers.map((a) => a.user.id));
+  const requiredApprovers = originalApproverIds.size;
+
+  // Approved decisions at this level
+  const approvedDecisions = await prisma.approvalDecision.findMany({
     where: {
       approvalRequestId: request.id,
       levelNumber:       request.currentLevel,
       decision:          ApprovalDecisionType.APPROVED,
     },
+    select: { decidedBy: true },
   });
 
-  const approvalCount    = decisions.length;
-  const requiredApprovers = currentLevel.approvers.length;
-  let satisfied = false;
+  // Ad-hoc delegation map: delegatee → delegator (for this request + level)
+  const adHocDelegations = await prisma.approvalDecision.findMany({
+    where: {
+      approvalRequestId: request.id,
+      levelNumber:       request.currentLevel,
+      decision:          ApprovalDecisionType.DELEGATED,
+    },
+    select: { decidedBy: true, delegatedTo: true },
+  });
+  const delegateeToOriginal = new Map<string, string>(
+    adHocDelegations
+      .filter((d) => d.delegatedTo !== null)
+      .map((d) => [d.delegatedTo!, d.decidedBy]),
+  );
 
+  // Count unique original approver slots satisfied (direct or via delegatee)
+  const satisfiedSlots = new Set<string>();
+  for (const d of approvedDecisions) {
+    if (originalApproverIds.has(d.decidedBy)) {
+      satisfiedSlots.add(d.decidedBy);
+    } else {
+      const original = delegateeToOriginal.get(d.decidedBy);
+      if (original && originalApproverIds.has(original)) {
+        satisfiedSlots.add(original);
+      }
+    }
+  }
+  const approvalCount = satisfiedSlots.size;
+
+  let satisfied = false;
   switch (currentLevel.approvalType) {
-    case ApprovalType.ANY_ONE:    satisfied = approvalCount >= 1; break;
+    case ApprovalType.ANY_ONE:      satisfied = approvalCount >= 1; break;
     case ApprovalType.ALL_REQUIRED: satisfied = approvalCount >= requiredApprovers; break;
-    case ApprovalType.MAJORITY:   satisfied = requiredApprovers > 0 && approvalCount > requiredApprovers / 2; break;
+    case ApprovalType.MAJORITY:     satisfied = requiredApprovers > 0 && approvalCount > requiredApprovers / 2; break;
   }
 
   if (!satisfied) {
@@ -695,12 +755,8 @@ async function checkLevelSatisfied(
     data:  { status: ApprovalRequestStatus.APPROVED, completedAt: new Date() },
   });
 
-  if (request.entityType === ApprovalEntityType.JOURNAL_ENTRY) {
-    await prisma.journalEntry.update({
-      where: { id: request.entityId },
-      data:  { status: EntryStatus.APPROVED, approvedAt: new Date() },
-    });
-  }
+  // Dispatch: update entity status based on type
+  await dispatchApprovalComplete(request.entityType, request.entityId);
 
   await notify(
     [request.requestedBy],
@@ -745,4 +801,41 @@ export async function getUnreadCount(organisationId: string, userId: string) {
   return prisma.notification.count({
     where: { userId, organisationId, isRead: false },
   });
+}
+
+// ─── Withdraw ─────────────────────────────────────────────────────────────────
+
+export async function withdrawRequest(
+  organisationId: string,
+  requestId: string,
+  userId: string,
+) {
+  const request = await prisma.approvalRequest.findFirst({
+    where: { id: requestId, workflow: { organisationId } },
+  });
+  if (!request) throw new NotFoundError('Approval request not found');
+  if (request.requestedBy !== userId) {
+    throw new ForbiddenError('Only the original requester can withdraw this request');
+  }
+  if (
+    request.status !== ApprovalRequestStatus.PENDING &&
+    request.status !== ApprovalRequestStatus.ESCALATED
+  ) {
+    throw new ValidationError(`Cannot withdraw a ${request.status.toLowerCase()} request`);
+  }
+
+  await prisma.approvalRequest.update({
+    where: { id: request.id },
+    data:  { status: ApprovalRequestStatus.WITHDRAWN, completedAt: new Date() },
+  });
+
+  // Reset JOURNAL_ENTRY back to DRAFT so it can be corrected and resubmitted
+  if (request.entityType === ApprovalEntityType.JOURNAL_ENTRY) {
+    await prisma.journalEntry.update({
+      where: { id: request.entityId },
+      data:  { status: EntryStatus.DRAFT },
+    });
+  }
+
+  return { status: 'WITHDRAWN', requestId: request.id };
 }
