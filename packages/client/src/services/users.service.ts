@@ -25,16 +25,23 @@ export async function listOrgUsers(organisationId: string) {
   return res.data.data as OrgUser[];
 }
 
+export interface CreatedUser {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  temporaryPassword?: string; // only present for brand-new users (not existing users added to org)
+}
+
 export async function createOrgUser(organisationId: string, data: {
   email: string;
   firstName: string;
   lastName: string;
   jobTitle?: string;
   role: UserRole;
-  temporaryPassword: string;
 }) {
   const res = await api.post(`/organisations/${organisationId}/users`, data);
-  return res.data.data;
+  return res.data.data as CreatedUser;
 }
 
 export async function updateUserRole(organisationId: string, userId: string, role: UserRole) {
@@ -47,9 +54,15 @@ export async function setUserStatus(organisationId: string, userId: string, isAc
   return res.data.data;
 }
 
-export async function adminResetPassword(organisationId: string, userId: string, newPassword: string) {
-  const res = await api.post(`/organisations/${organisationId}/users/${userId}/reset-password`, { newPassword });
-  return res.data.data;
+export interface ResetPasswordResult {
+  userId: string;
+  mustChangePassword: boolean;
+  temporaryPassword: string;
+}
+
+export async function adminResetPassword(organisationId: string, userId: string) {
+  const res = await api.post(`/organisations/${organisationId}/users/${userId}/reset-password`);
+  return res.data.data as ResetPasswordResult;
 }
 
 export async function unlockUser(organisationId: string, userId: string) {

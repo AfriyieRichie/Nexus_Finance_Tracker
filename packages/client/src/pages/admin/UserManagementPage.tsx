@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Users, Plus, Shield, KeyRound, UserX, UserCheck, Lock, Pencil } from 'lucide-react';
+import { Users, Plus, Shield, KeyRound, UserX, UserCheck, Lock, Pencil, Copy, Check } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import * as usersSvc from '@/services/users.service';
 import { ROLE_LABELS, ASSIGNABLE_ROLES } from '@/services/users.types';
@@ -23,80 +23,122 @@ function errMsg(e: unknown) {
   return (e as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message ?? 'An error occurred';
 }
 
+// ─── Temporary password reveal box ────────────────────────────────────────────
+function TempPasswordBox({ password }: { password: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    void navigator.clipboard.writeText(password).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+  return (
+    <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 space-y-2">
+      <p className="text-xs font-medium text-amber-800">
+        Temporary password — copy and share it securely. It will not be shown again.
+      </p>
+      <div className="flex items-center gap-2">
+        <code className="flex-1 rounded bg-white border border-amber-200 px-3 py-2 text-sm font-mono text-amber-900 select-all">
+          {password}
+        </code>
+        <Button variant="outline" size="sm" onClick={copy} className="h-9 gap-1.5 shrink-0">
+          {copied ? <><Check size={13} /> Copied</> : <><Copy size={13} /> Copy</>}
+        </Button>
+      </div>
+      <p className="text-[11px] text-amber-700">The user must change it on first login.</p>
+    </div>
+  );
+}
+
 // ─── Add User Dialog ──────────────────────────────────────────────────────────
 function AddUserDialog({ organisationId, onSuccess }: { organisationId: string; onSuccess: () => void }) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({
-    email: '', firstName: '', lastName: '', jobTitle: '',
-    role: 'ACCOUNTANT' as UserRole, temporaryPassword: '', confirmPassword: '',
+    email: '', firstName: '', lastName: '', jobTitle: '', role: 'ACCOUNTANT' as UserRole,
   });
+  const [tempPassword, setTempPassword] = useState<string | null>(null);
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  const reset = () => {
+    setForm({ email: '', firstName: '', lastName: '', jobTitle: '', role: 'ACCOUNTANT' });
+    setTempPassword(null);
+  };
 
   const mutation = useMutation({
     mutationFn: () => usersSvc.createOrgUser(organisationId, {
       email: form.email, firstName: form.firstName, lastName: form.lastName,
       jobTitle: form.jobTitle || undefined, role: form.role,
-      temporaryPassword: form.temporaryPassword,
     }),
-    onSuccess: () => { setOpen(false); setForm({ email: '', firstName: '', lastName: '', jobTitle: '', role: 'ACCOUNTANT', temporaryPassword: '', confirmPassword: '' }); onSuccess(); },
+    onSuccess: (created) => {
+      onSuccess();
+      // Brand-new users get a generated temp password; existing users added to an org do not.
+      if (created.temporaryPassword) {
+        setTempPassword(created.temporaryPassword);
+      } else {
+        setOpen(false); reset();
+      }
+    },
   });
 
-  const passwordMatch = form.temporaryPassword === form.confirmPassword;
-  const canSave = form.email && form.firstName && form.lastName && form.temporaryPassword.length >= 8 && passwordMatch;
+  const canSave = form.email && form.firstName && form.lastName;
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) reset(); }}>
       <DialogTrigger asChild>
         <Button size="sm"><Plus size={14} /> Add User</Button>
       </DialogTrigger>
-      <DialogContent title="Add New User" description="Create a user account. The user must change their password on first login.">
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-medium mb-1 block">First Name *</label>
-              <Input value={form.firstName} onChange={(e) => set('firstName', e.target.value)} placeholder="Eric" className="h-8 text-xs" />
+      <DialogContent title="Add New User" description="Create a user account. The system generates a temporary password the user must change on first login.">
+        {tempPassword ? (
+          <div className="space-y-3">
+            <div className="rounded-lg bg-success/10 border border-success/20 p-3">
+              <p className="text-sm font-medium text-success">User created successfully</p>
+              <p className="text-xs text-muted-foreground mt-0.5">{form.firstName} {form.lastName} · {form.email}</p>
             </div>
-            <div>
-              <label className="text-xs font-medium mb-1 block">Last Name *</label>
-              <Input value={form.lastName} onChange={(e) => set('lastName', e.target.value)} placeholder="Boateng" className="h-8 text-xs" />
+            <TempPasswordBox password={tempPassword} />
+            <div className="flex justify-end pt-1">
+              <Button size="sm" onClick={() => { setOpen(false); reset(); }}>Done</Button>
             </div>
           </div>
-          <div>
-            <label className="text-xs font-medium mb-1 block">Email Address *</label>
-            <Input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} placeholder="eric@company.com" className="h-8 text-xs" />
-          </div>
-          <div>
-            <label className="text-xs font-medium mb-1 block">Job Title</label>
-            <Input value={form.jobTitle} onChange={(e) => set('jobTitle', e.target.value)} placeholder="Finance Officer" className="h-8 text-xs" />
-          </div>
-          <div>
-            <label className="text-xs font-medium mb-1 block">Role *</label>
-            <Select value={form.role} onChange={(e) => set('role', e.target.value as UserRole)} className="h-8 text-xs">
-              {ASSIGNABLE_ROLES.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
-            </Select>
-          </div>
-          <div className="border-t pt-3">
-            <p className="text-xs text-muted-foreground mb-2">Set a temporary password — the user will be required to change it on first login.</p>
+        ) : (
+          <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs font-medium mb-1 block">Temporary Password *</label>
-                <Input type="password" value={form.temporaryPassword} onChange={(e) => set('temporaryPassword', e.target.value)} placeholder="Min. 8 characters" className="h-8 text-xs" />
+                <label className="text-xs font-medium mb-1 block">First Name *</label>
+                <Input value={form.firstName} onChange={(e) => set('firstName', e.target.value)} placeholder="Eric" className="h-8 text-xs" />
               </div>
               <div>
-                <label className="text-xs font-medium mb-1 block">Confirm Password *</label>
-                <Input type="password" value={form.confirmPassword} onChange={(e) => set('confirmPassword', e.target.value)} placeholder="Repeat password" className="h-8 text-xs" />
+                <label className="text-xs font-medium mb-1 block">Last Name *</label>
+                <Input value={form.lastName} onChange={(e) => set('lastName', e.target.value)} placeholder="Boateng" className="h-8 text-xs" />
               </div>
             </div>
-            {form.confirmPassword && !passwordMatch && <p className="text-xs text-destructive mt-1">Passwords do not match</p>}
+            <div>
+              <label className="text-xs font-medium mb-1 block">Email Address *</label>
+              <Input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} placeholder="eric@company.com" className="h-8 text-xs" />
+            </div>
+            <div>
+              <label className="text-xs font-medium mb-1 block">Job Title</label>
+              <Input value={form.jobTitle} onChange={(e) => set('jobTitle', e.target.value)} placeholder="Finance Officer" className="h-8 text-xs" />
+            </div>
+            <div>
+              <label className="text-xs font-medium mb-1 block">Role *</label>
+              <Select value={form.role} onChange={(e) => set('role', e.target.value as UserRole)} className="h-8 text-xs">
+                {ASSIGNABLE_ROLES.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
+              </Select>
+            </div>
+            <div className="rounded-md bg-muted/50 border px-3 py-2">
+              <p className="text-xs text-muted-foreground">
+                A secure temporary password will be generated automatically and shown once after creation.
+              </p>
+            </div>
+            {mutation.isError && <p className="text-xs text-destructive">{errMsg(mutation.error)}</p>}
+            <div className="flex justify-end gap-2 pt-1">
+              <DialogClose asChild><Button variant="outline" size="sm">Cancel</Button></DialogClose>
+              <Button size="sm" disabled={!canSave || mutation.isPending} onClick={() => mutation.mutate()}>
+                {mutation.isPending ? 'Creating…' : 'Create User'}
+              </Button>
+            </div>
           </div>
-          {mutation.isError && <p className="text-xs text-destructive">{errMsg(mutation.error)}</p>}
-          <div className="flex justify-end gap-2 pt-1">
-            <DialogClose asChild><Button variant="outline" size="sm">Cancel</Button></DialogClose>
-            <Button size="sm" disabled={!canSave || mutation.isPending} onClick={() => mutation.mutate()}>
-              {mutation.isPending ? 'Creating…' : 'Create User'}
-            </Button>
-          </div>
-        </div>
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -107,41 +149,43 @@ function ResetPasswordDialog({ organisationId, userId, userName, onSuccess }: {
   organisationId: string; userId: string; userName: string; onSuccess: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [newPassword, setNewPassword] = useState('');
-  const [confirm, setConfirm] = useState('');
+  const [tempPassword, setTempPassword] = useState<string | null>(null);
 
   const mutation = useMutation({
-    mutationFn: () => usersSvc.adminResetPassword(organisationId, userId, newPassword),
-    onSuccess: () => { setOpen(false); setNewPassword(''); setConfirm(''); onSuccess(); },
+    mutationFn: () => usersSvc.adminResetPassword(organisationId, userId),
+    onSuccess: (res) => { setTempPassword(res.temporaryPassword); onSuccess(); },
   });
 
-  const match = newPassword === confirm;
-  const canSave = newPassword.length >= 8 && match;
+  const close = () => { setOpen(false); setTempPassword(null); };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setTempPassword(null); }}>
       <DialogTrigger asChild>
         <button className="p-1 text-muted-foreground hover:text-foreground" title="Reset password"><KeyRound size={13} /></button>
       </DialogTrigger>
-      <DialogContent title={`Reset Password — ${userName}`} description="Set a new temporary password. The user must change it on next login.">
-        <div className="space-y-3">
-          <div>
-            <label className="text-xs font-medium mb-1 block">New Temporary Password *</label>
-            <Input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Min. 8 characters" className="h-8 text-xs" />
+      <DialogContent title={`Reset Password — ${userName}`} description="Generate a new temporary password. The user must change it on next login.">
+        {tempPassword ? (
+          <div className="space-y-3">
+            <TempPasswordBox password={tempPassword} />
+            <div className="flex justify-end pt-1">
+              <Button size="sm" onClick={close}>Done</Button>
+            </div>
           </div>
-          <div>
-            <label className="text-xs font-medium mb-1 block">Confirm Password *</label>
-            <Input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Repeat password" className="h-8 text-xs" />
+        ) : (
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              This will generate a new secure temporary password for <strong>{userName}</strong> and
+              revoke their existing sessions. The password will be shown once.
+            </p>
+            {mutation.isError && <p className="text-xs text-destructive">{errMsg(mutation.error)}</p>}
+            <div className="flex justify-end gap-2 pt-1">
+              <DialogClose asChild><Button variant="outline" size="sm">Cancel</Button></DialogClose>
+              <Button size="sm" disabled={mutation.isPending} onClick={() => mutation.mutate()}>
+                {mutation.isPending ? 'Resetting…' : 'Reset Password'}
+              </Button>
+            </div>
           </div>
-          {confirm && !match && <p className="text-xs text-destructive">Passwords do not match</p>}
-          {mutation.isError && <p className="text-xs text-destructive">{errMsg(mutation.error)}</p>}
-          <div className="flex justify-end gap-2 pt-1">
-            <DialogClose asChild><Button variant="outline" size="sm">Cancel</Button></DialogClose>
-            <Button size="sm" disabled={!canSave || mutation.isPending} onClick={() => mutation.mutate()}>
-              {mutation.isPending ? 'Resetting…' : 'Reset Password'}
-            </Button>
-          </div>
-        </div>
+        )}
       </DialogContent>
     </Dialog>
   );
