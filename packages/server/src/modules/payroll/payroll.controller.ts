@@ -1,8 +1,19 @@
 import { Request, Response } from 'express';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { sendSuccess, sendCreated, sendNoContent, sendPaginated } from '../../utils/response';
-import { ValidationError } from '../../utils/errors';
 import * as svc from './payroll.service';
+import {
+  upsertStatutoryConfigSchema,
+  createEmployeeSchema,
+  updateEmployeeSchema,
+  createSalaryComponentSchema,
+  updateSalaryComponentSchema,
+  assignComponentSchema,
+  createLoanSchema,
+  updateLoanSchema,
+  createPayrollRunSchema,
+  listPayrollRunsSchema,
+} from './payroll.schemas';
 
 // ─── Statutory Config ─────────────────────────────────────────────────────────
 
@@ -12,9 +23,8 @@ export const listStatutoryConfigs = asyncHandler(async (req: Request, res: Respo
 });
 
 export const upsertStatutoryConfig = asyncHandler(async (req: Request, res: Response) => {
-  const taxYear = parseInt(req.body.taxYear, 10);
-  if (!taxYear || isNaN(taxYear)) throw new ValidationError('taxYear is required');
-  const data = await svc.upsertStatutoryConfig(req.params.organisationId, { ...req.body, taxYear });
+  const input = upsertStatutoryConfigSchema.parse(req.body);
+  const data = await svc.upsertStatutoryConfig(req.params.organisationId, input);
   return sendCreated(res, data, 'Statutory config saved');
 });
 
@@ -32,23 +42,20 @@ export const getEmployee = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const createEmployee = asyncHandler(async (req: Request, res: Response) => {
-  const { employeeNumber, firstName, lastName, startDate, basicSalary } = req.body;
-  if (!employeeNumber || !firstName || !lastName || !startDate || basicSalary === undefined) {
-    throw new ValidationError('employeeNumber, firstName, lastName, startDate, and basicSalary are required');
-  }
-  const data = await svc.createEmployee(req.params.organisationId, req.body);
+  const input = createEmployeeSchema.parse(req.body);
+  const data = await svc.createEmployee(req.params.organisationId, input);
   return sendCreated(res, data, 'Employee created');
 });
 
 export const updateEmployee = asyncHandler(async (req: Request, res: Response) => {
-  const data = await svc.updateEmployee(req.params.organisationId, req.params.id, req.body);
+  const input = updateEmployeeSchema.parse(req.body);
+  const data = await svc.updateEmployee(req.params.organisationId, req.params.id, input);
   return sendSuccess(res, data);
 });
 
 export const assignComponent = asyncHandler(async (req: Request, res: Response) => {
-  const { componentId, effectiveFrom } = req.body;
-  if (!componentId || !effectiveFrom) throw new ValidationError('componentId and effectiveFrom are required');
-  const data = await svc.assignComponent(req.params.organisationId, req.params.id, req.body);
+  const input = assignComponentSchema.parse(req.body);
+  const data = await svc.assignComponent(req.params.organisationId, req.params.id, input);
   return sendCreated(res, data, 'Component assigned');
 });
 
@@ -65,16 +72,14 @@ export const listLoans = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const createLoan = asyncHandler(async (req: Request, res: Response) => {
-  const { description, principalAmount, instalmentAmount, startDate } = req.body;
-  if (!description || !principalAmount || !instalmentAmount || !startDate) {
-    throw new ValidationError('description, principalAmount, instalmentAmount, and startDate are required');
-  }
-  const data = await svc.createLoan(req.params.organisationId, req.params.employeeId, req.body, req.user!.sub);
+  const input = createLoanSchema.parse(req.body);
+  const data = await svc.createLoan(req.params.organisationId, req.params.employeeId, input, req.user!.sub);
   return sendCreated(res, data, 'Loan created');
 });
 
 export const updateLoan = asyncHandler(async (req: Request, res: Response) => {
-  const data = await svc.updateLoan(req.params.organisationId, req.params.loanId, req.body);
+  const input = updateLoanSchema.parse(req.body);
+  const data = await svc.updateLoan(req.params.organisationId, req.params.loanId, input);
   return sendSuccess(res, data);
 });
 
@@ -87,22 +92,21 @@ export const listSalaryComponents = asyncHandler(async (req: Request, res: Respo
 });
 
 export const createSalaryComponent = asyncHandler(async (req: Request, res: Response) => {
-  const { code, name, type } = req.body;
-  if (!code || !name || !type) throw new ValidationError('code, name, and type are required');
-  const data = await svc.createSalaryComponent(req.params.organisationId, req.body);
+  const input = createSalaryComponentSchema.parse(req.body);
+  const data = await svc.createSalaryComponent(req.params.organisationId, input);
   return sendCreated(res, data, 'Salary component created');
 });
 
 export const updateSalaryComponent = asyncHandler(async (req: Request, res: Response) => {
-  const data = await svc.updateSalaryComponent(req.params.organisationId, req.params.id, req.body);
+  const input = updateSalaryComponentSchema.parse(req.body);
+  const data = await svc.updateSalaryComponent(req.params.organisationId, req.params.id, input);
   return sendSuccess(res, data);
 });
 
 // ─── Payroll Runs ─────────────────────────────────────────────────────────────
 
 export const listPayrollRuns = asyncHandler(async (req: Request, res: Response) => {
-  const page     = req.query.page     ? parseInt(req.query.page     as string, 10) : 1;
-  const pageSize = req.query.pageSize ? parseInt(req.query.pageSize as string, 10) : 20;
+  const { page, pageSize } = listPayrollRunsSchema.parse(req.query);
   const { runs, pagination } = await svc.listPayrollRuns(req.params.organisationId, { page, pageSize });
   return sendPaginated(res, runs, pagination);
 });
@@ -113,11 +117,8 @@ export const getPayrollRun = asyncHandler(async (req: Request, res: Response) =>
 });
 
 export const createPayrollRun = asyncHandler(async (req: Request, res: Response) => {
-  const { periodId, paymentDate, description, wagesPayableAccountId, payePayableAccountId, ssnitPayableAccountId, pensionPayableAccountId } = req.body;
-  if (!periodId || !paymentDate || !description || !wagesPayableAccountId || !payePayableAccountId || !ssnitPayableAccountId || !pensionPayableAccountId) {
-    throw new ValidationError('periodId, paymentDate, description, wagesPayableAccountId, payePayableAccountId, ssnitPayableAccountId, pensionPayableAccountId are required');
-  }
-  const data = await svc.createPayrollRun(req.params.organisationId, req.user!.sub, req.body);
+  const input = createPayrollRunSchema.parse(req.body);
+  const data = await svc.createPayrollRun(req.params.organisationId, req.user!.sub, input);
   return sendCreated(res, data, 'Payroll run created');
 });
 
@@ -141,6 +142,11 @@ export const payPayrollRun = asyncHandler(async (req: Request, res: Response) =>
   return sendSuccess(res, data, 'Payroll run marked as paid and GL posted');
 });
 
+export const lockPayrollRun = asyncHandler(async (req: Request, res: Response) => {
+  const data = await svc.lockPayrollRun(req.params.organisationId, req.params.id, req.user!.sub);
+  return sendSuccess(res, data, 'Payroll run locked');
+});
+
 export const downloadPaymentFile = asyncHandler(async (req: Request, res: Response) => {
   const csv = await svc.generatePaymentFile(req.params.organisationId, req.params.id);
   res.setHeader('Content-Type', 'text/csv');
@@ -154,7 +160,7 @@ export const processPayroll = asyncHandler(async (req: Request, res: Response) =
   const body = req.body as Partial<svc.PayrollInput>;
   const requiredStrings = ['periodId', 'payrollDate', 'description', 'wagesAccountId', 'taxPayableAccountId', 'pensionPayableAccountId', 'bankAccountId'] as const;
   for (const field of requiredStrings) {
-    if (!body[field] || typeof body[field] !== 'string') throw new ValidationError(`${field} is required`);
+    if (!body[field] || typeof body[field] !== 'string') throw new Error(`${field} is required`);
   }
   const entry = await svc.processPayroll(req.params.organisationId, req.user!.sub, body as svc.PayrollInput);
   return sendCreated(res, entry, `Payroll journal entry ${entry.journalNumber} created and posted`);

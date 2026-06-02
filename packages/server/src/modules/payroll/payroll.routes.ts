@@ -38,6 +38,7 @@ payrollRouter.delete('/runs/:id',               requireRole(ACCOUNTANT),      ct
 payrollRouter.post('/runs/:id/submit',          requireRole(ACCOUNTANT),      ctrl.submitPayrollRun);
 payrollRouter.post('/runs/:id/approve',         requireRole(FINANCE_MANAGER), ctrl.approvePayrollRun);
 payrollRouter.post('/runs/:id/pay',             requireRole(FINANCE_MANAGER), ctrl.payPayrollRun);
+payrollRouter.post('/runs/:id/lock',            requireRole(FINANCE_MANAGER), ctrl.lockPayrollRun);
 payrollRouter.get('/runs/:id/payment-file',     requireRole(FINANCE_MANAGER), ctrl.downloadPaymentFile);
 
 // ─── Legacy journal-based payroll ────────────────────────────────────────────

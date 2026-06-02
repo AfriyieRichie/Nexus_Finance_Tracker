@@ -1836,6 +1836,8 @@ model PayrollRun {
   approvedAt  DateTime?
   paidBy      String?
   paidAt      DateTime?
+  lockedBy    String?
+  lockedAt    DateTime?
   journalEntryId String?
   notes       String?
   createdAt   DateTime @default(now())

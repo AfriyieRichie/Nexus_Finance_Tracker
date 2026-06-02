@@ -993,6 +993,19 @@ export async function payPayrollRun(organisationId: string, id: string, userId: 
   return updatedRun;
 }
 
+// ─── Lock Run ─────────────────────────────────────────────────────────────────
+
+export async function lockPayrollRun(organisationId: string, id: string, userId: string) {
+  const run = await prisma.payrollRun.findFirst({ where: { id, organisationId } });
+  if (!run) throw new NotFoundError('Payroll run not found');
+  if (run.status !== PayrollRunStatus.PAID) throw new ValidationError('Only PAID runs can be locked');
+
+  return prisma.payrollRun.update({
+    where: { id },
+    data:  { status: PayrollRunStatus.LOCKED, lockedBy: userId, lockedAt: new Date() },
+  });
+}
+
 // ─── Payment File ─────────────────────────────────────────────────────────────
 
 export async function generatePaymentFile(organisationId: string, id: string): Promise<string> {
@@ -1008,6 +1021,7 @@ export async function generatePaymentFile(organisationId: string, id: string): P
   });
   if (!run) throw new NotFoundError('Payroll run not found');
   if (run.status === PayrollRunStatus.DRAFT) throw new ValidationError('Payment file can only be generated for submitted/approved/paid runs');
+  if (run.status === PayrollRunStatus.LOCKED) throw new ForbiddenError('Payment file cannot be regenerated after the run is locked');
 
   const rows = [
     'Employee Number,Full Name,Bank,Branch,Account Number,Net Pay',
