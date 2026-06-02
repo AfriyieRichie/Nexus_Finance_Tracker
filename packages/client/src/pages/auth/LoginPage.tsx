@@ -37,7 +37,7 @@ export function LoginPage() {
       // Fetch full profile
       const profile = await api.get('/auth/me').then((r) => r.data.data);
       setUser(profile);
-      void navigate('/dashboard');
+      void navigate('/');
     },
   });
 

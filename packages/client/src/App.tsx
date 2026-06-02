@@ -53,6 +53,7 @@ import { ApprovalsPage } from './pages/approvals/ApprovalsPage';
 import { AuditPage } from './pages/audit/AuditPage';
 import { UserManagementPage } from './pages/admin/UserManagementPage';
 import { ForcePasswordChangePage } from './pages/auth/ForcePasswordChangePage';
+import { LandingPage } from './pages/landing/LandingPage';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)();
@@ -62,7 +63,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 function PublicRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)();
-  if (isAuthenticated) return <Navigate to="/dashboard" replace />;
+  if (isAuthenticated) return <Navigate to="/" replace />;
   return <>{children}</>;
 }
 
@@ -149,9 +150,22 @@ export default function App() {
           <Route path="/admin/users" element={<UserManagementPage />} />
         </Route>
 
-        {/* Default */}
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        {/* Landing page — standalone (no AppShell sidebar) */}
+        <Route
+          path="/"
+          element={
+            <ProtectedRoute>
+              <MustChangePasswordGuard>
+                <OrgGuard>
+                  <LandingPage />
+                </OrgGuard>
+              </MustChangePasswordGuard>
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Fallback */}
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
     </ErrorBoundary>

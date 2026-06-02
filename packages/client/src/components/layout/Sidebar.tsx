@@ -170,12 +170,14 @@ export function Sidebar() {
 
   return (
     <aside className="flex flex-col w-60 shrink-0 border-r bg-card h-screen sticky top-0 overflow-y-auto">
-      {/* Logo */}
+      {/* Logo — click to return to landing page */}
       <div className="flex items-center gap-2.5 h-14 px-4 border-b">
-        <div className="w-7 h-7 rounded-md bg-primary flex items-center justify-center">
-          <BarChart3 size={14} className="text-primary-foreground" />
-        </div>
-        <span className="font-semibold text-sm tracking-tight flex-1">Nexus Accounting</span>
+        <NavLink to="/" className="flex items-center gap-2.5 flex-1 min-w-0 group" title="Home">
+          <div className="w-7 h-7 rounded-md bg-primary flex items-center justify-center shrink-0 group-hover:opacity-80 transition-opacity">
+            <BarChart3 size={14} className="text-primary-foreground" />
+          </div>
+          <span className="font-semibold text-sm tracking-tight truncate group-hover:text-primary transition-colors">Nexus Accounting</span>
+        </NavLink>
         <button
           onClick={() => void qc.invalidateQueries()}
           title="Refresh data"
