@@ -43,25 +43,6 @@ function NexusMark() {
   );
 }
 
-// ── Gold Nexus logo (diamond with cut-out N) for the brand backdrop ───────────
-function GoldNexusLogo({ size = 150 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 200 200" fill="none">
-      <defs>
-        <clipPath id="gold-clip"><rect x="18" y="18" width="164" height="164" rx="26" transform="rotate(45 100 100)" /></clipPath>
-      </defs>
-      {/* gold diamond */}
-      <rect x="18" y="18" width="164" height="164" rx="26" transform="rotate(45 100 100)" fill={GOLD} />
-      {/* N cut out (teal showing through) */}
-      <g clipPath="url(#gold-clip)">
-        <rect x="52" y="46" width="20" height="112" rx="10" fill={TEAL} />
-        <rect x="128" y="46" width="20" height="112" rx="10" fill={TEAL} />
-        <polygon points="52,46 72,46 148,158 128,158" fill={TEAL} />
-      </g>
-    </svg>
-  );
-}
-
 // ── Faint scattered "memphis" doodle pattern that fills the whole page ────────
 function DoodleBackdrop() {
   const stroke = 'rgba(255,255,255,0.05)';
@@ -272,7 +253,7 @@ export function LoginPage() {
                 }} />
               ))}
               <div style={{ animation: 'lp-logo 0.8s cubic-bezier(0.34,1.56,0.64,1) both' }}>
-                <GoldNexusLogo size={150} />
+                <img src="/nexus-logo.png" alt="Nexus" style={{ width: 170, height: 170, objectFit: 'contain' }} />
               </div>
             </div>
 
