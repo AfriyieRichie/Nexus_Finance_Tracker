@@ -806,7 +806,7 @@ export async function getBalanceSheet(
 
     totalLiabilitiesAndEquity:      totalLiabAndEquity.toFixed(2),
     priorTotalLiabilitiesAndEquity: priorTotalLiabAndEquity,
-    isBalanced: totalAssets.toFixed(2) === totalLiabAndEquity.toFixed(2),
+    isBalanced: totalAssets.sub(totalLiabAndEquity).abs().lessThan(new Prisma.Decimal('0.01')),
   };
 }
 
@@ -1203,18 +1203,18 @@ export async function getChangesInEquity(organisationId: string, options: Change
     ? buildDateFilter(toDate)
     : {};
 
-  // Equity GL accounts with activity in the period
-  const equityAgg  = await aggregateByClass(organisationId, [AccountClass.EQUITY], periodFilter);
-  const equityIds  = [...equityAgg.keys()];
-  const equityAccounts = equityIds.length
-    ? await prisma.account.findMany({
-        where:   { id: { in: equityIds }, organisationId, isDeleted: false },
-        select:  { id: true, code: true, name: true, class: true, subClass: true, type: true, level: true },
-        orderBy: { code: 'asc' },
-      })
-    : [];
-
-  const openingEquityAgg = await aggregateByClass(organisationId, [AccountClass.EQUITY], openingFilter);
+  // Fetch ALL equity accounts (not just those with period activity) so that
+  // stable components like Share Capital always appear in the statement even
+  // when they have no movement in the current period.
+  const [equityAccounts, equityAgg, openingEquityAgg] = await Promise.all([
+    prisma.account.findMany({
+      where:   { organisationId, class: AccountClass.EQUITY, isDeleted: false },
+      select:  { id: true, code: true, name: true, class: true, subClass: true, type: true, level: true },
+      orderBy: { code: 'asc' },
+    }),
+    aggregateByClass(organisationId, [AccountClass.EQUITY], periodFilter),
+    aggregateByClass(organisationId, [AccountClass.EQUITY], openingFilter),
+  ]);
 
   // Accumulated P&L before the period (retained earnings not yet closed to equity GL)
   const priorNetPnL = await computeNetPnL(organisationId, openingFilter);
