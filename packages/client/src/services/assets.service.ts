@@ -140,7 +140,7 @@ export async function listDepreciationRuns(organisationId: string) {
 }
 
 export async function disposeAsset(organisationId: string, assetId: string, data: {
-  disposalDate: string; disposalProceeds: number; periodId: string; bankAccountId?: string;
+  disposalDate: string; disposalProceeds: number; periodId: string; proceedsAccountId?: string;
 }) {
   const res = await api.post(`/organisations/${organisationId}/assets/${assetId}/dispose`, data);
   return res.data.data;
@@ -154,10 +154,29 @@ export async function revalueAsset(organisationId: string, assetId: string, data
 }
 
 export async function impairAsset(organisationId: string, assetId: string, data: {
-  impairmentDate: string; impairmentAmount: number; periodId: string; impairmentAccountId?: string; notes?: string;
+  impairmentDate: string; recoverableAmount: number; periodId: string; impairmentAccountId?: string; notes?: string;
 }) {
   const res = await api.post(`/organisations/${organisationId}/assets/${assetId}/impair`, data);
   return res.data.data;
+}
+
+export async function reverseImpairment(organisationId: string, assetId: string, data: {
+  reversalDate: string; reversalAmount: number; periodId: string; impairmentAccountId?: string; notes?: string;
+}) {
+  const res = await api.post(`/organisations/${organisationId}/assets/${assetId}/impairment-reversal`, data);
+  return res.data.data;
+}
+
+export interface DepreciationScheduleRow {
+  period: number;
+  depreciation: string;
+  accumulatedDepreciation: string;
+  carryingValue: string;
+}
+
+export async function getDepreciationSchedule(organisationId: string, assetId: string, months = 60) {
+  const res = await api.get(`/organisations/${organisationId}/assets/${assetId}/depreciation-schedule`, { params: { months } });
+  return res.data.data as DepreciationScheduleRow[];
 }
 
 export async function setAssetStatus(organisationId: string, assetId: string, data: { status: 'ACTIVE' | 'INACTIVE'; reason?: string }) {

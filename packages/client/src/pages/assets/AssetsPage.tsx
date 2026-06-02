@@ -262,7 +262,7 @@ function DepreciationRunDialog({ organisationId }: { organisationId: string }) {
 
 function AssetDetailPanel({ organisationId, assetId, onClose }: { organisationId: string; assetId: string; onClose: () => void }) {
   const qc = useQueryClient();
-  const [tab, setTab] = useState<'info' | 'history' | 'revalue' | 'impair' | 'dispose'>('info');
+  const [tab, setTab] = useState<'info' | 'history' | 'schedule' | 'revalue' | 'impair' | 'dispose'>('info');
   const [periodId, setPeriodId] = useState('');
 
   const { data: asset, isLoading } = useQuery({
@@ -295,16 +295,36 @@ function AssetDetailPanel({ organisationId, assetId, onClose }: { organisationId
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['asset', assetId] }); void qc.invalidateQueries({ queryKey: ['assets'] }); setTab('info'); },
   });
 
-  // Impairment form
-  const [impairForm, setImpairForm] = useState({ impairmentAmount: '', impairmentDate: new Date().toISOString().split('T')[0], notes: '' });
+  // Impairment form (IAS 36 — enter recoverable amount; loss = carrying value − recoverable)
+  const [impairForm, setImpairForm] = useState({ recoverableAmount: '', impairmentDate: new Date().toISOString().split('T')[0], notes: '' });
   const impairMutation = useMutation({
     mutationFn: () => assetSvc.impairAsset(organisationId, assetId, {
       impairmentDate: impairForm.impairmentDate,
-      impairmentAmount: Number(impairForm.impairmentAmount),
+      recoverableAmount: Number(impairForm.recoverableAmount),
       periodId,
       notes: impairForm.notes || undefined,
     }),
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['asset', assetId] }); void qc.invalidateQueries({ queryKey: ['assets'] }); setTab('info'); },
+  });
+
+  // Impairment reversal form (IAS 36.111)
+  const [reverseForm, setReverseForm] = useState({ reversalAmount: '', reversalDate: new Date().toISOString().split('T')[0], notes: '' });
+  const reverseMutation = useMutation({
+    mutationFn: () => assetSvc.reverseImpairment(organisationId, assetId, {
+      reversalDate: reverseForm.reversalDate,
+      reversalAmount: Number(reverseForm.reversalAmount),
+      periodId,
+      notes: reverseForm.notes || undefined,
+    }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['asset', assetId] }); void qc.invalidateQueries({ queryKey: ['assets'] }); setReverseForm({ reversalAmount: '', reversalDate: new Date().toISOString().split('T')[0], notes: '' }); },
+  });
+
+  // Depreciation schedule projection
+  const [scheduleMonths, setScheduleMonths] = useState(60);
+  const { data: schedule, isFetching: scheduleLoading } = useQuery({
+    queryKey: ['dep-schedule', organisationId, assetId, scheduleMonths],
+    queryFn: () => assetSvc.getDepreciationSchedule(organisationId, assetId, scheduleMonths),
+    enabled: tab === 'schedule',
   });
 
   // Status toggle
@@ -314,13 +334,13 @@ function AssetDetailPanel({ organisationId, assetId, onClose }: { organisationId
   });
 
   // Dispose form
-  const [disposeForm, setDisposeForm] = useState({ disposalDate: new Date().toISOString().split('T')[0], disposalProceeds: '0', bankAccountId: '' });
+  const [disposeForm, setDisposeForm] = useState({ disposalDate: new Date().toISOString().split('T')[0], disposalProceeds: '0', proceedsAccountId: '' });
   const disposeMutation = useMutation({
     mutationFn: () => assetSvc.disposeAsset(organisationId, assetId, {
       disposalDate: disposeForm.disposalDate,
       disposalProceeds: Number(disposeForm.disposalProceeds),
       periodId,
-      bankAccountId: disposeForm.bankAccountId || undefined,
+      proceedsAccountId: disposeForm.proceedsAccountId || undefined,
     }),
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['asset', assetId] }); void qc.invalidateQueries({ queryKey: ['assets'] }); onClose(); },
   });
@@ -348,11 +368,11 @@ function AssetDetailPanel({ organisationId, assetId, onClose }: { organisationId
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b text-xs">
-        {(['info', 'history', 'revalue', 'impair', 'dispose'] as const).map((t) => (
+      <div className="flex border-b text-xs overflow-x-auto">
+        {(['info', 'history', 'schedule', 'revalue', 'impair', 'dispose'] as const).map((t) => (
           <button key={t} onClick={() => setTab(t)}
-            className={`px-4 py-2 capitalize font-medium ${tab === t ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
-            {t === 'revalue' ? 'Revaluation' : t === 'impair' ? 'Impairment' : t}
+            className={`px-4 py-2 capitalize font-medium whitespace-nowrap ${tab === t ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
+            {t === 'revalue' ? 'Revaluation' : t === 'impair' ? 'Impairment' : t === 'schedule' ? 'Schedule' : t}
           </button>
         ))}
       </div>
@@ -502,25 +522,102 @@ function AssetDetailPanel({ organisationId, assetId, onClose }: { organisationId
         )}
 
         {tab === 'impair' && asset.status !== 'DISPOSED' && (
-          <div className="space-y-3">
-            <p className="text-xs text-muted-foreground">Record an impairment loss per IAS 36. Posts Dr Impairment Loss / Cr Asset. Current carrying value: <strong>{fmt(nbv)}</strong></p>
-            <div><label className="text-xs font-medium mb-1 block">Accounting Period *</label>
-              <Select value={periodId} onChange={(e) => setPeriodId(e.target.value)} className="h-8 text-xs">
-                <option value="">Select period…</option>
-                {openPeriods.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </Select></div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><label className="text-xs font-medium mb-1 block">Impairment Date *</label>
-                <Input type="date" value={impairForm.impairmentDate} onChange={(e) => setImpairForm((f) => ({ ...f, impairmentDate: e.target.value }))} className="h-8 text-xs" /></div>
-              <div><label className="text-xs font-medium mb-1 block">Impairment Amount *</label>
-                <Input type="number" value={impairForm.impairmentAmount} onChange={(e) => setImpairForm((f) => ({ ...f, impairmentAmount: e.target.value }))} placeholder="0.00" className="h-8 text-xs" /></div>
+          <div className="space-y-4">
+            {/* Record impairment */}
+            <div className="space-y-3">
+              <p className="text-xs text-muted-foreground">Record an impairment loss per IAS 36. Enter the <strong>recoverable amount</strong> (higher of fair value less costs to sell and value in use). Loss = carrying value − recoverable amount. Current carrying value: <strong>{fmt(nbv)}</strong></p>
+              <div><label className="text-xs font-medium mb-1 block">Accounting Period *</label>
+                <Select value={periodId} onChange={(e) => setPeriodId(e.target.value)} className="h-8 text-xs">
+                  <option value="">Select period…</option>
+                  {openPeriods.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </Select></div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className="text-xs font-medium mb-1 block">Impairment Date *</label>
+                  <Input type="date" value={impairForm.impairmentDate} onChange={(e) => setImpairForm((f) => ({ ...f, impairmentDate: e.target.value }))} className="h-8 text-xs" /></div>
+                <div><label className="text-xs font-medium mb-1 block">Recoverable Amount *</label>
+                  <Input type="number" value={impairForm.recoverableAmount} onChange={(e) => setImpairForm((f) => ({ ...f, recoverableAmount: e.target.value }))} placeholder="0.00" className="h-8 text-xs" /></div>
+              </div>
+              {impairForm.recoverableAmount !== '' && (
+                Number(impairForm.recoverableAmount) >= nbv
+                  ? <p className="text-[11px] text-amber-600">Recoverable amount is not below carrying value — no impairment required.</p>
+                  : <div className="text-xs p-2 rounded bg-destructive/10 text-destructive">Impairment loss: <strong>{fmt(nbv - Number(impairForm.recoverableAmount))}</strong></div>
+              )}
+              <div><label className="text-xs font-medium mb-1 block">Notes</label>
+                <Input value={impairForm.notes} onChange={(e) => setImpairForm((f) => ({ ...f, notes: e.target.value }))} placeholder="Reason for impairment…" className="h-8 text-xs" /></div>
+              {impairMutation.isError && <p className="text-xs text-destructive">{errMsg(impairMutation.error)}</p>}
+              <Button size="sm" className="w-full" variant="destructive"
+                disabled={!periodId || !impairForm.recoverableAmount || Number(impairForm.recoverableAmount) >= nbv || impairMutation.isPending}
+                onClick={() => impairMutation.mutate()}>
+                <AlertTriangle size={14} /> {impairMutation.isPending ? 'Posting…' : 'Record Impairment'}
+              </Button>
             </div>
-            <div><label className="text-xs font-medium mb-1 block">Notes</label>
-              <Input value={impairForm.notes} onChange={(e) => setImpairForm((f) => ({ ...f, notes: e.target.value }))} placeholder="Reason for impairment…" className="h-8 text-xs" /></div>
-            {impairMutation.isError && <p className="text-xs text-destructive">{errMsg(impairMutation.error)}</p>}
-            <Button size="sm" className="w-full" variant="destructive" disabled={!periodId || !impairForm.impairmentAmount || impairMutation.isPending} onClick={() => impairMutation.mutate()}>
-              <AlertTriangle size={14} /> {impairMutation.isPending ? 'Posting…' : 'Record Impairment'}
-            </Button>
+
+            {/* Reverse impairment (IAS 36.111) — only when a prior impairment exists */}
+            {impairment > 0 && (
+              <div className="space-y-3 border-t pt-4">
+                <p className="text-xs text-muted-foreground">
+                  Reverse a prior impairment per IAS 36.111. Cumulative impairment to date: <strong>{fmt(impairment)}</strong>.
+                  The reversal cannot raise carrying value above what it would have been without the original impairment.
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div><label className="text-xs font-medium mb-1 block">Reversal Date *</label>
+                    <Input type="date" value={reverseForm.reversalDate} onChange={(e) => setReverseForm((f) => ({ ...f, reversalDate: e.target.value }))} className="h-8 text-xs" /></div>
+                  <div><label className="text-xs font-medium mb-1 block">Reversal Amount *</label>
+                    <Input type="number" value={reverseForm.reversalAmount} onChange={(e) => setReverseForm((f) => ({ ...f, reversalAmount: e.target.value }))} placeholder="0.00" className="h-8 text-xs" /></div>
+                </div>
+                <div><label className="text-xs font-medium mb-1 block">Notes</label>
+                  <Input value={reverseForm.notes} onChange={(e) => setReverseForm((f) => ({ ...f, notes: e.target.value }))} placeholder="Reason for reversal…" className="h-8 text-xs" /></div>
+                {reverseMutation.isError && <p className="text-xs text-destructive">{errMsg(reverseMutation.error)}</p>}
+                <Button size="sm" className="w-full"
+                  disabled={!periodId || !reverseForm.reversalAmount || Number(reverseForm.reversalAmount) > impairment || reverseMutation.isPending}
+                  onClick={() => reverseMutation.mutate()}>
+                  <TrendingUp size={14} /> {reverseMutation.isPending ? 'Posting…' : 'Reverse Impairment'}
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === 'schedule' && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-muted-foreground">Projected depreciation (read-only — no journals posted).</p>
+              <Select value={String(scheduleMonths)} onChange={(e) => setScheduleMonths(Number(e.target.value))} className="h-7 text-xs w-28">
+                <option value="12">12 months</option>
+                <option value="24">24 months</option>
+                <option value="36">36 months</option>
+                <option value="60">60 months</option>
+                <option value="120">120 months</option>
+              </Select>
+            </div>
+            {scheduleLoading ? (
+              <Skeleton className="h-48 w-full" />
+            ) : !schedule?.length ? (
+              <p className="text-xs text-muted-foreground py-6 text-center">No further depreciation — asset is fully depreciated or disposed.</p>
+            ) : (
+              <div className="border rounded-lg overflow-hidden max-h-80 overflow-y-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/50 sticky top-0">
+                    <tr>
+                      <th className="text-left px-3 py-1.5 font-medium">Period</th>
+                      <th className="text-right px-3 py-1.5 font-medium">Depreciation</th>
+                      <th className="text-right px-3 py-1.5 font-medium">Accum. Deprn</th>
+                      <th className="text-right px-3 py-1.5 font-medium">Carrying Value</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {schedule.map((row) => (
+                      <tr key={row.period} className="border-t">
+                        <td className="px-3 py-1.5 text-muted-foreground">{row.period}</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{fmt(row.depreciation)}</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{fmt(row.accumulatedDepreciation)}</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{fmt(row.carryingValue)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 
@@ -543,10 +640,10 @@ function AssetDetailPanel({ organisationId, assetId, onClose }: { organisationId
                 {Number(disposeForm.disposalProceeds) >= nbv ? 'Gain on disposal' : 'Loss on disposal'}: {fmt(Math.abs(Number(disposeForm.disposalProceeds) - nbv))}
               </div>
             )}
-            <div><label className="text-xs font-medium mb-1 block">Bank Account (if proceeds received)</label>
+            <div><label className="text-xs font-medium mb-1 block">Proceeds Account (if proceeds received)</label>
               <AccountSelect
-                value={disposeForm.bankAccountId}
-                onChange={(id) => setDisposeForm((f) => ({ ...f, bankAccountId: id }))}
+                value={disposeForm.proceedsAccountId}
+                onChange={(id) => setDisposeForm((f) => ({ ...f, proceedsAccountId: id }))}
                 accounts={bankAccounts}
                 placeholder="None"
               /></div>
