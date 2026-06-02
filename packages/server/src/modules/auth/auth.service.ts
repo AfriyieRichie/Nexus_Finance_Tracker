@@ -213,17 +213,19 @@ export async function refreshTokens(
 
 export async function logout(rawRefreshToken: string): Promise<void> {
   const tokenHash = hashToken(rawRefreshToken);
-  await prisma.refreshToken.updateMany({
+  const token = await prisma.refreshToken.findFirst({
     where: { tokenHash },
-    data: { isRevoked: true },
+    select: { userId: true },
   });
+  await prisma.refreshToken.updateMany({ where: { tokenHash }, data: { isRevoked: true } });
+  if (token?.userId) {
+    auditLog({ userId: token.userId, action: 'LOGOUT', module: 'AUTH', entityType: 'USER', entityId: token.userId, description: 'User logged out' });
+  }
 }
 
 export async function logoutAll(userId: string): Promise<void> {
-  await prisma.refreshToken.updateMany({
-    where: { userId },
-    data: { isRevoked: true },
-  });
+  await prisma.refreshToken.updateMany({ where: { userId }, data: { isRevoked: true } });
+  auditLog({ userId, action: 'LOGOUT_ALL', module: 'AUTH', entityType: 'USER', entityId: userId, description: 'All sessions terminated' });
 }
 
 export async function getMe(userId: string) {

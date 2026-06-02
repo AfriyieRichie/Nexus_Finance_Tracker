@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { ConflictError, NotFoundError, ValidationError } from '../../utils/errors';
 import * as journalService from '../journals/journal.service';
+import { auditLog } from '../audit-trail/audit.service';
 import type {
   CreateBankAccountInput, ImportStatementInput, MatchLineInput, ListStatementsQuery,
   AutoMatchInput, ConfirmReconciliationInput, CreateJournalFromLineInput,
@@ -80,7 +81,7 @@ export async function importStatement(organisationId: string, input: ImportState
     }
   }
 
-  return prisma.bankStatement.create({
+  const statement = await prisma.bankStatement.create({
     data: {
       bankAccountId: input.bankAccountId,
       statementDate: new Date(input.statementDate),
@@ -98,6 +99,8 @@ export async function importStatement(organisationId: string, input: ImportState
     },
     include: { lines: true },
   });
+  auditLog({ organisationId, action: 'STATEMENT_IMPORTED', module: 'BANK_RECONCILIATION', entityType: 'BANK_STATEMENT', entityId: statement.id, description: `Bank statement imported — ${input.lines.length} lines, closing balance ${input.closingBalance}`, after: { statementDate: input.statementDate, lineCount: input.lines.length, closingBalance: input.closingBalance } });
+  return statement;
 }
 
 export async function listStatements(organisationId: string, query: ListStatementsQuery) {
@@ -369,7 +372,7 @@ export async function confirmReconciliation(
     }
   }
 
-  return prisma.bankStatement.update({
+  const confirmed = await prisma.bankStatement.update({
     where: { id: statementId },
     data: {
       isReconciled: true,
@@ -378,6 +381,8 @@ export async function confirmReconciliation(
       reconciledBy: userId,
     },
   });
+  auditLog({ organisationId, userId, action: 'RECONCILIATION_CONFIRMED', module: 'BANK_RECONCILIATION', entityType: 'BANK_STATEMENT', entityId: statementId, description: `Bank statement reconciled and locked` });
+  return confirmed;
 }
 
 // ─── Create Journal from Unmatched Line ──────────────────────────────────────
@@ -491,17 +496,18 @@ export async function unlockReconciliation(
   _userId: string,
   input: UnlockReconciliationInput,
 ) {
-  void input.reason; // stored in audit log in future; acknowledged here
   const stmt = await prisma.bankStatement.findFirst({
     where: { id: statementId, bankAccount: { organisationId } },
   });
   if (!stmt) throw new NotFoundError('Statement not found');
   if (!stmt.isLocked) throw new ValidationError('Statement is not locked');
 
-  return prisma.bankStatement.update({
+  const unlocked = await prisma.bankStatement.update({
     where: { id: statementId },
     data: { isLocked: false, isReconciled: false, reconciledAt: null, reconciledBy: null },
   });
+  auditLog({ organisationId, userId: _userId, action: 'RECONCILIATION_UNLOCKED', module: 'BANK_RECONCILIATION', entityType: 'BANK_STATEMENT', entityId: statementId, description: `Bank statement reconciliation unlocked${input.reason ? `. Reason: ${input.reason}` : ''}`, after: { reason: input.reason } });
+  return unlocked;
 }
 
 // ─── Phase 3: Reconciliation Report ──────────────────────────────────────────

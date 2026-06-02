@@ -2,6 +2,7 @@ import { Prisma, MovementType, MovementStatus, StocktakeStatus } from '@prisma/c
 import { prisma } from '../../config/database';
 import { NotFoundError, ValidationError, ConflictError } from '../../utils/errors';
 import * as journalService from '../journals/journal.service';
+import { auditLog } from '../audit-trail/audit.service';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -902,10 +903,12 @@ export async function approveMovement(
   // Process (will transition to POSTED)
   await processMovement(movementId, userId);
 
-  return prisma.inventoryMovement.findFirst({
+  const posted = await prisma.inventoryMovement.findFirst({
     where: { id: movementId },
     include: { item: { select: { code: true, name: true } } },
   });
+  auditLog({ organisationId, userId, action: 'MOVEMENT_APPROVED', module: 'INVENTORY', entityType: 'INVENTORY_MOVEMENT', entityId: movementId, entityRef: movement.reference ?? movementId, description: `Inventory movement approved and posted — ${movement.movementType} qty ${movement.quantity}` });
+  return posted;
 }
 
 export async function rejectMovement(
@@ -1136,7 +1139,7 @@ export async function postStocktakeVariances(
     });
   }
 
-  return prisma.stocktakeSession.update({
+  const postedSession = await prisma.stocktakeSession.update({
     where: { id: sessionId },
     data: {
       status: StocktakeStatus.POSTED,
@@ -1144,6 +1147,8 @@ export async function postStocktakeVariances(
       postedAt: new Date(),
     },
   });
+  auditLog({ organisationId, userId, action: 'STOCKTAKE_POSTED', module: 'INVENTORY', entityType: 'STOCKTAKE_SESSION', entityId: sessionId, entityRef: postedSession.name, description: `Stocktake session '${postedSession.name}' variances posted to GL` });
+  return postedSession;
 }
 
 export async function cancelStocktakeSession(
@@ -1445,14 +1450,9 @@ export async function writeDownToNRV(
     });
   });
 
-  return {
-    itemId,
-    itemCode: item.code,
-    previousUnitCost: currentCost.toFixed(4),
-    nrvPerUnit: nrv.toFixed(4),
-    totalWriteDown: totalWriteDown.toFixed(2),
-    journalEntryId: je.id,
-  };
+  const result = { itemId, itemCode: item.code, previousUnitCost: currentCost.toFixed(4), nrvPerUnit: nrv.toFixed(4), totalWriteDown: totalWriteDown.toFixed(2), journalEntryId: je.id };
+  auditLog({ organisationId, userId, action: 'NRV_WRITEDOWN', module: 'INVENTORY', entityType: 'INVENTORY_ITEM', entityId: itemId, entityRef: item.code, description: `NRV write-down posted for ${item.name} — write-down ${totalWriteDown.toFixed(2)}`, before: { unitCost: currentCost.toFixed(4) }, after: { nrvPerUnit: nrv.toFixed(4), totalWriteDown: totalWriteDown.toFixed(2) } });
+  return result;
 }
 
 export async function getStockBalance(organisationId: string, itemId: string) {

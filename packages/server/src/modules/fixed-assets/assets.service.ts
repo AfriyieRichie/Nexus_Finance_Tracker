@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { ConflictError, NotFoundError, ValidationError } from '../../utils/errors';
 import * as journalService from '../journals/journal.service';
+import { auditLog } from '../audit-trail/audit.service';
 import type {
   CreateAssetInput, UpdateAssetInput, ListAssetsQuery,
   RunDepreciationInput, ReverseDepreciationInput,
@@ -277,6 +278,7 @@ export async function createAsset(organisationId: string, input: CreateAssetInpu
     }
   }
 
+  auditLog({ organisationId, userId, action: 'ASSET_CREATED', module: 'FIXED_ASSETS', entityType: 'FIXED_ASSET', entityId: asset.id, entityRef: `${asset.code} — ${asset.name}`, description: `Asset '${asset.name}' (${asset.code}) created, cost ${asset.acquisitionCost}`, after: { code: asset.code, name: asset.name, acquisitionCost: asset.acquisitionCost } });
   return asset;
 }
 
@@ -555,6 +557,7 @@ export async function runDepreciation(
         },
       },
     });
+    auditLog({ organisationId, userId, action: 'DEPRECIATION_RUN', module: 'FIXED_ASSETS', entityType: 'DEPRECIATION_RUN', entityId: run.id, description: `Depreciation run posted — ${entries.length} assets, total ${runTotal.toFixed(2)}`, after: { asOfDate: input.asOfDate, processed: entries.length, totalAmount: runTotal.toFixed(2) } });
     return { preview: false, processed: entries.length, totalAmount: runTotal.toFixed(2), runId: run.id, entries, skipped };
   }
 
@@ -793,13 +796,9 @@ export async function disposeAsset(
     },
   });
 
-  return {
-    assetId,
-    disposalDate: input.disposalDate,
-    carryingValue: currentCarryingValue.toFixed(2),
-    proceeds: proceeds.toFixed(2),
-    gainOrLoss: gainOrLoss.toFixed(2),
-  };
+  const disposal = { assetId, disposalDate: input.disposalDate, carryingValue: currentCarryingValue.toFixed(2), proceeds: proceeds.toFixed(2), gainOrLoss: gainOrLoss.toFixed(2) };
+  auditLog({ organisationId, userId, action: 'ASSET_DISPOSED', module: 'FIXED_ASSETS', entityType: 'FIXED_ASSET', entityId: assetId, description: `Asset disposed — proceeds ${proceeds.toFixed(2)}, gain/loss ${gainOrLoss.toFixed(2)}`, after: disposal });
+  return disposal;
 }
 
 // ─── Revaluation (IAS 16) ────────────────────────────────────────────────────
@@ -908,6 +907,7 @@ export async function revalueAsset(
     },
   });
 
+  auditLog({ organisationId, userId, action: 'ASSET_REVALUED', module: 'FIXED_ASSETS', entityType: 'FIXED_ASSET', entityId: assetId, description: `Asset revalued to ${fairValue.toFixed(2)} (${surplusDeficit.greaterThan(0) ? 'surplus' : 'deficit'} ${surplusDeficit.abs().toFixed(2)})`, before: { carryingValue: asset.carryingValue }, after: { fairValue: fairValue.toFixed(2), surplusDeficit: surplusDeficit.toFixed(2) } });
   return { revaluation, surplusDeficit: surplusDeficit.toFixed(2), journalEntryId: je.id };
 }
 
@@ -998,6 +998,7 @@ export async function impairAsset(
     },
   });
 
+  auditLog({ organisationId, userId, action: 'ASSET_IMPAIRED', module: 'FIXED_ASSETS', entityType: 'FIXED_ASSET', entityId: assetId, description: `Asset impaired — loss ${impairmentAmount.toFixed(2)}, new carrying value ${newCarryingValue.toFixed(2)}`, before: { carryingValue: asset.carryingValue }, after: { impairmentAmount: impairmentAmount.toFixed(2), newCarryingValue: newCarryingValue.toFixed(2) } });
   return { impairment, newCarryingValue: newCarryingValue.toFixed(2), journalEntryId: je.id };
 }
 
@@ -1099,6 +1100,7 @@ export async function reverseImpairment(
     },
   });
 
+  auditLog({ organisationId, userId, action: 'IMPAIRMENT_REVERSED', module: 'FIXED_ASSETS', entityType: 'FIXED_ASSET', entityId: assetId, description: `Impairment reversal — amount ${reversalAmount.toFixed(2)}, new carrying value ${newCarryingValue.toFixed(2)}`, after: { reversalAmount: reversalAmount.toFixed(2), newCarryingValue: newCarryingValue.toFixed(2) } });
   return { reversal, newCarryingValue: newCarryingValue.toFixed(2), journalEntryId: je.id };
 }
 

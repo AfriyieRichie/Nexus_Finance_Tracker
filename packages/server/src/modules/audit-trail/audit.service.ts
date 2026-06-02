@@ -122,7 +122,7 @@ export async function exportCsv(
     return `"${s}"`;
   };
 
-  const header = ['Timestamp', 'User', 'Email', 'Module', 'Action', 'Entity Type', 'Entity Ref', 'Entity ID', 'Description', 'IP Address'];
+  const header = ['Timestamp', 'User', 'Email', 'Module', 'Action', 'Entity Type', 'Entity Ref', 'Entity ID', 'Description', 'IP Address', 'Previous Value', 'New Value'];
   const rows = logs.map((l) => [
     new Date(l.timestamp).toISOString(),
     l.user ? `${l.user.firstName} ${l.user.lastName}` : '',
@@ -134,6 +134,8 @@ export async function exportCsv(
     l.entityId  ?? '',
     l.description ?? '',
     l.ipAddress ?? '',
+    l.previousValue != null ? JSON.stringify(l.previousValue) : '',
+    l.newValue      != null ? JSON.stringify(l.newValue)      : '',
   ].map(esc).join(','));
 
   return [header.map(esc).join(','), ...rows].join('\r\n');

@@ -1,7 +1,7 @@
 import { PeriodStatus } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { ConflictError, NotFoundError, ForbiddenError, ValidationError } from '../../utils/errors';
-import { createAuditLog } from '../audit-trail/audit.service';
+import { auditLog } from '../audit-trail/audit.service';
 import type { CreateFiscalYearInput, ListPeriodsQuery } from './periods.schemas';
 
 const MONTH_NAMES = [
@@ -177,10 +177,12 @@ export async function closePeriod(organisationId: string, periodId: string, user
     );
   }
 
-  return prisma.accountingPeriod.update({
+  const updated = await prisma.accountingPeriod.update({
     where: { id: periodId },
     data: { status: PeriodStatus.CLOSED, closedBy: userId, closedAt: new Date() },
   });
+  auditLog({ organisationId, userId, action: 'PERIOD_CLOSED', module: 'PERIODS', entityType: 'ACCOUNTING_PERIOD', entityId: periodId, entityRef: period.name, description: `Period '${period.name}' (FY${period.fiscalYear}) closed` });
+  return updated;
 }
 
 export async function reopenPeriod(
@@ -203,14 +205,7 @@ export async function reopenPeriod(
     data: { status: PeriodStatus.OPEN, closedBy: null, closedAt: null },
   });
 
-  await createAuditLog({
-    organisationId,
-    userId,
-    action: 'PERIOD_REOPEN',
-    entityType: 'ACCOUNTING_PERIOD',
-    entityId: periodId,
-    newValue: { reason, periodName: period.name, fiscalYear: period.fiscalYear },
-  });
+  auditLog({ organisationId, userId, action: 'PERIOD_REOPENED', module: 'PERIODS', entityType: 'ACCOUNTING_PERIOD', entityId: periodId, entityRef: period.name, description: `Period '${period.name}' (FY${period.fiscalYear}) reopened. Reason: ${reason}` });
 
   return updated;
 }
@@ -222,10 +217,12 @@ export async function lockPeriod(organisationId: string, periodId: string, userI
     throw new ForbiddenError('Only CLOSED periods can be locked. Close the period first.');
   }
 
-  return prisma.accountingPeriod.update({
+  const locked = await prisma.accountingPeriod.update({
     where: { id: periodId },
     data: { status: PeriodStatus.LOCKED, closedBy: userId, closedAt: new Date() },
   });
+  auditLog({ organisationId, userId, action: 'PERIOD_LOCKED', module: 'PERIODS', entityType: 'ACCOUNTING_PERIOD', entityId: periodId, entityRef: period.name, description: `Period '${period.name}' (FY${period.fiscalYear}) locked` });
+  return locked;
 }
 
 // ─── Overdue Open Periods ─────────────────────────────────────────────────────
@@ -277,5 +274,6 @@ export async function yearEndClose(
     data: { status: PeriodStatus.LOCKED, closedBy: userId, closedAt: new Date() },
   });
 
+  auditLog({ organisationId, userId, action: 'YEAR_END_CLOSED', module: 'PERIODS', entityType: 'FISCAL_YEAR', entityRef: `FY${fiscalYear}`, description: `Year-end close completed for FY${fiscalYear} — ${periods.length} period(s) locked`, after: { fiscalYear, periodsLocked: periods.length } });
   return { locked: periods.length };
 }

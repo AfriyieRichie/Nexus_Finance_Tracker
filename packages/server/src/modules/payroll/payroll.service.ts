@@ -3,6 +3,7 @@ import { prisma } from '../../config/database';
 import { ValidationError, NotFoundError, ForbiddenError, ConflictError } from '../../utils/errors';
 import { buildPagination } from '../../utils/response';
 import { createJournalEntry, postJournalEntry } from '../journals/journal.service';
+import { auditLog } from '../audit-trail/audit.service';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -820,6 +821,7 @@ export async function createPayrollRun(
     });
   });
 
+  auditLog({ organisationId, userId, action: 'PAYROLL_RUN_CREATED', module: 'PAYROLL', entityType: 'PAYROLL_RUN', entityId: run!.id, entityRef: run!.runNumber, description: `Payroll run ${run!.runNumber} created — ${run!.payslips.length} employees, net pay ${totalNetPay}`, after: { runNumber: run!.runNumber, totalGross, totalNetPay, employeeCount: run!.payslips.length } });
   return run!;
 }
 
@@ -844,10 +846,12 @@ export async function submitPayrollRun(organisationId: string, id: string, userI
   // No four-eyes check between creator and submitter — the payroll preparer creates and submits.
   // Four-eyes applies at approval and payment stages below.
 
-  return prisma.payrollRun.update({
+  const submitted = await prisma.payrollRun.update({
     where: { id },
     data:  { status: PayrollRunStatus.SUBMITTED, submittedBy: userId, submittedAt: new Date() },
   });
+  auditLog({ organisationId, userId, action: 'PAYROLL_RUN_SUBMITTED', module: 'PAYROLL', entityType: 'PAYROLL_RUN', entityId: id, entityRef: run.runNumber, description: `Payroll run ${run.runNumber} submitted for approval` });
+  return submitted;
 }
 
 export async function approvePayrollRun(organisationId: string, id: string, userId: string) {
@@ -856,10 +860,12 @@ export async function approvePayrollRun(organisationId: string, id: string, user
   if (run.status !== PayrollRunStatus.SUBMITTED)  throw new ValidationError('Only SUBMITTED runs can be approved');
   if ([run.createdBy, run.submittedBy].includes(userId)) throw new ForbiddenError('The approver must differ from the creator and submitter');
 
-  return prisma.payrollRun.update({
+  const approved = await prisma.payrollRun.update({
     where: { id },
     data:  { status: PayrollRunStatus.APPROVED, approvedBy: userId, approvedAt: new Date() },
   });
+  auditLog({ organisationId, userId, action: 'PAYROLL_RUN_APPROVED', module: 'PAYROLL', entityType: 'PAYROLL_RUN', entityId: id, entityRef: run.runNumber, description: `Payroll run ${run.runNumber} approved` });
+  return approved;
 }
 
 export async function payPayrollRun(organisationId: string, id: string, userId: string) {
@@ -990,6 +996,7 @@ export async function payPayrollRun(organisationId: string, id: string, userId: 
     });
   }
 
+  auditLog({ organisationId, userId, action: 'PAYROLL_RUN_PAID', module: 'PAYROLL', entityType: 'PAYROLL_RUN', entityId: id, entityRef: run.runNumber, description: `Payroll run ${run.runNumber} paid — GL journal ${je.journalNumber} posted`, after: { journalEntryId: je.id, totalNetPay: run.totalNetPay } });
   return updatedRun;
 }
 
@@ -1000,10 +1007,12 @@ export async function lockPayrollRun(organisationId: string, id: string, userId:
   if (!run) throw new NotFoundError('Payroll run not found');
   if (run.status !== PayrollRunStatus.PAID) throw new ValidationError('Only PAID runs can be locked');
 
-  return prisma.payrollRun.update({
+  const lockedRun = await prisma.payrollRun.update({
     where: { id },
     data:  { status: PayrollRunStatus.LOCKED, lockedBy: userId, lockedAt: new Date() },
   });
+  auditLog({ organisationId, userId, action: 'PAYROLL_RUN_LOCKED', module: 'PAYROLL', entityType: 'PAYROLL_RUN', entityId: id, entityRef: run.runNumber, description: `Payroll run ${run.runNumber} locked — payment file can no longer be regenerated` });
+  return lockedRun;
 }
 
 // ─── Payment File ─────────────────────────────────────────────────────────────

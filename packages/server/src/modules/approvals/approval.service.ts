@@ -7,6 +7,7 @@ import {
   NotificationType,
   EntryStatus,
 } from '@prisma/client';
+import { auditLog } from '../audit-trail/audit.service';
 import { prisma } from '../../config/database';
 import {
   NotFoundError,
@@ -57,7 +58,7 @@ export async function createWorkflow(organisationId: string, input: CreateWorkfl
     data:  { isActive: false },
   });
 
-  return prisma.approvalWorkflow.create({
+  const wf = await prisma.approvalWorkflow.create({
     data: {
       organisationId,
       name: input.name,
@@ -67,6 +68,8 @@ export async function createWorkflow(organisationId: string, input: CreateWorkfl
     },
     include: { levels: { include: { approvers: { include: { user: { select: { id: true, firstName: true, lastName: true, email: true } } } } }, orderBy: { levelNumber: 'asc' } } },
   });
+  auditLog({ organisationId, action: 'WORKFLOW_CREATED', module: 'APPROVALS', entityType: 'APPROVAL_WORKFLOW', entityId: wf.id, entityRef: wf.name, description: `Approval workflow '${wf.name}' created for ${wf.entityType}` });
+  return wf;
 }
 
 export async function listWorkflows(organisationId: string) {
@@ -210,7 +213,7 @@ export async function createDelegation(
   const to   = new Date(input.validTo);
   if (to <= from) throw new ValidationError('validTo must be after validFrom');
 
-  return prisma.approvalDelegation.create({
+  const del = await prisma.approvalDelegation.create({
     data: {
       organisationId,
       delegatedBy,
@@ -226,6 +229,8 @@ export async function createDelegation(
       delegatee: { select: { id: true, firstName: true, lastName: true } },
     },
   });
+  auditLog({ organisationId, userId: delegatedBy, action: 'DELEGATION_CREATED', module: 'APPROVALS', entityType: 'APPROVAL_DELEGATION', entityId: del.id, description: `Approval delegation created: ${delegatedBy} → ${input.delegatedTo}, valid ${input.validFrom} to ${input.validTo}`, after: { delegatedTo: input.delegatedTo, validFrom: input.validFrom, validTo: input.validTo, workflowId: input.workflowId } });
+  return del;
 }
 
 export async function listDelegations(organisationId: string, userId?: string) {
@@ -249,10 +254,12 @@ export async function revokeDelegation(organisationId: string, id: string, userI
   if (!delegation) throw new NotFoundError('Delegation not found');
   if (delegation.delegatedBy !== userId) throw new ForbiddenError('Only the delegator can revoke this delegation');
 
-  return prisma.approvalDelegation.update({
+  const revoked = await prisma.approvalDelegation.update({
     where: { id },
     data:  { isActive: false },
   });
+  auditLog({ organisationId, userId, action: 'DELEGATION_REVOKED', module: 'APPROVALS', entityType: 'APPROVAL_DELEGATION', entityId: id, description: `Approval delegation revoked by ${userId}` });
+  return revoked;
 }
 
 // ─── Check if user can act via delegation ─────────────────────────────────────
@@ -543,7 +550,7 @@ export async function decide(
     },
   });
 
-  return checkLevelSatisfied(request, currentLevel, organisationId);
+  return checkLevelSatisfied(request, currentLevel, organisationId, userId);
 }
 
 async function handleRejection(
@@ -593,6 +600,7 @@ async function handleRejection(
     'APPROVAL_REQUEST',
   );
 
+  auditLog({ organisationId: request.workflow.organisationId ?? undefined, userId, action: 'APPROVAL_REJECTED', module: 'APPROVALS', entityType: 'APPROVAL_REQUEST', entityId: request.id, description: `Approval request rejected at level ${request.currentLevel}${comments ? `. Reason: ${comments}` : ''}`, after: { decision: 'REJECTED', level: request.currentLevel, entityType: request.entityType } });
   return { status: 'REJECTED', requestId: request.id };
 }
 
@@ -628,6 +636,7 @@ async function handleDelegation(
     'APPROVAL_REQUEST',
   );
 
+  auditLog({ organisationId, userId, action: 'APPROVAL_DELEGATED', module: 'APPROVALS', entityType: 'APPROVAL_REQUEST', entityId: request.id, description: `Approval request delegated to user ${delegatedTo} at level ${request.currentLevel}`, after: { delegatedTo, level: request.currentLevel } });
   return { status: 'DELEGATED', requestId: request.id };
 }
 
@@ -659,6 +668,7 @@ async function checkLevelSatisfied(
   request: Awaited<ReturnType<typeof getRequest>>,
   currentLevel: Awaited<ReturnType<typeof getRequest>>['workflow']['levels'][0],
   organisationId: string,
+  userId: string,
 ) {
   // Original approver IDs on this level (never inflated by ad-hoc delegation)
   const originalApproverIds = new Set(currentLevel.approvers.map((a) => a.user.id));
@@ -768,6 +778,7 @@ async function checkLevelSatisfied(
     'APPROVAL_REQUEST',
   );
 
+  auditLog({ organisationId, userId, action: 'APPROVAL_APPROVED', module: 'APPROVALS', entityType: 'APPROVAL_REQUEST', entityId: request.id, description: `Approval request fully approved — ${request.entityType} entity ${request.entityId}`, after: { entityType: request.entityType, entityId: request.entityId } });
   return { status: 'APPROVED', requestId: request.id };
 }
 
