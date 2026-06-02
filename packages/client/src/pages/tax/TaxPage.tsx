@@ -6,6 +6,8 @@ import {
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import * as taxSvc from '@/services/tax.service';
+import { listPeriods } from '@/services/periods.service';
+import { listAccounts } from '@/services/accounts.service';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -497,27 +499,75 @@ function VatReturnView({ organisationId }: { organisationId: string }) {
 function RunRevaluationDialog({ organisationId }: { organisationId: string }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [periodId, setPeriodId] = useState('');
   const [periodEndDate, setPeriodEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const [fxGainLossAccountId, setFxGainLossAccountId] = useState('');
   const [notes, setNotes] = useState('');
 
-  const mutation = useMutation({
-    mutationFn: () => taxSvc.runFxRevaluation(organisationId, { periodEndDate, notes: notes || undefined }),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['fx-revaluations'] }); setOpen(false); },
+  const { data: periods = [] } = useQuery({
+    queryKey: ['periods', organisationId],
+    queryFn: () => listPeriods(organisationId),
+    enabled: open,
   });
+  const { data: accountsData } = useQuery({
+    queryKey: ['accounts', organisationId, 'posting'],
+    queryFn: () => listAccounts(organisationId, { isActive: true, isControlAccount: false, postingOnly: true }),
+    enabled: open,
+  });
+  const accounts = accountsData?.accounts ?? [];
+
+  const openPeriods = [...periods]
+    .filter((p) => p.status === 'OPEN')
+    .sort((a, b) => b.fiscalYear * 100 + b.periodNumber - (a.fiscalYear * 100 + a.periodNumber));
+
+  function selectPeriod(id: string) {
+    setPeriodId(id);
+    const p = periods.find((x) => x.id === id);
+    if (p) setPeriodEndDate(p.endDate.slice(0, 10));
+  }
+
+  const mutation = useMutation({
+    mutationFn: () => taxSvc.runFxRevaluation(organisationId, { periodEndDate, periodId, fxGainLossAccountId, notes: notes || undefined }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['fx-revaluations'] });
+      setOpen(false); setPeriodId(''); setFxGainLossAccountId(''); setNotes('');
+    },
+  });
+
+  const canRun = periodId && fxGainLossAccountId && periodEndDate;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button size="sm"><Plus size={14} /> Run Revaluation</Button>
       </DialogTrigger>
-      <DialogContent title="FX Revaluation Run" description="Revalues all open foreign currency balances to the period closing rate (IAS 21).">
+      <DialogContent title="FX Revaluation Run" description="Revalues all open foreign currency balances to the period closing rate and posts the gain/loss journal (IAS 21).">
         <div className="space-y-3">
+          <div>
+            <label className="text-xs font-medium mb-1 block">Accounting Period *</label>
+            <Select value={periodId} onChange={(e) => selectPeriod(e.target.value)} className="h-8 text-xs">
+              <option value="">Select period…</option>
+              {openPeriods.map((p) => (
+                <option key={p.id} value={p.id}>{p.name} · FY{p.fiscalYear}</option>
+              ))}
+            </Select>
+            <p className="text-[10px] text-muted-foreground mt-1">The revaluation journal posts to this period.</p>
+          </div>
           <div>
             <label className="text-xs font-medium mb-1 block">Period End Date *</label>
             <Input type="date" value={periodEndDate} onChange={(e) => setPeriodEndDate(e.target.value)} className="h-8 text-xs" />
             <p className="text-[10px] text-muted-foreground mt-1">
-              Uses PERIOD_CLOSING rate on or before this date. Falls back to the most recent available rate.
+              Balances are revalued using the PERIOD_CLOSING rate on or before this date.
             </p>
+          </div>
+          <div>
+            <label className="text-xs font-medium mb-1 block">FX Gain / Loss Account *</label>
+            <AccountSelect
+              value={fxGainLossAccountId}
+              onChange={setFxGainLossAccountId}
+              accounts={accounts}
+              placeholder="Select P&L account for FX gain/loss…"
+            />
           </div>
           <div>
             <label className="text-xs font-medium mb-1 block">Notes</label>
@@ -526,7 +576,7 @@ function RunRevaluationDialog({ organisationId }: { organisationId: string }) {
           {mutation.isError && <ErrorMsg error={mutation.error} />}
           <div className="flex justify-end gap-2 pt-1">
             <DialogClose asChild><Button variant="outline" size="sm">Cancel</Button></DialogClose>
-            <Button size="sm" disabled={mutation.isPending} onClick={() => mutation.mutate()}>
+            <Button size="sm" disabled={!canRun || mutation.isPending} onClick={() => mutation.mutate()}>
               {mutation.isPending ? 'Running…' : 'Run'}
             </Button>
           </div>
@@ -536,8 +586,58 @@ function RunRevaluationDialog({ organisationId }: { organisationId: string }) {
   );
 }
 
-function FxRevaluationView({ organisationId }: { organisationId: string }) {
+function ReverseRevaluationDialog({ organisationId, revId }: { organisationId: string; revId: string }) {
   const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [periodId, setPeriodId] = useState('');
+  const [reverseDate, setReverseDate] = useState(new Date().toISOString().split('T')[0]);
+
+  const { data: periods = [] } = useQuery({
+    queryKey: ['periods', organisationId],
+    queryFn: () => listPeriods(organisationId),
+    enabled: open,
+  });
+  const openPeriods = [...periods]
+    .filter((p) => p.status === 'OPEN')
+    .sort((a, b) => b.fiscalYear * 100 + b.periodNumber - (a.fiscalYear * 100 + a.periodNumber));
+
+  const mutation = useMutation({
+    mutationFn: () => taxSvc.reverseFxRevaluation(organisationId, revId, { reverseDate, periodId }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['fx-revaluations'] }); setOpen(false); setPeriodId(''); },
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <button className="text-xs text-muted-foreground hover:text-destructive">Reverse</button>
+      </DialogTrigger>
+      <DialogContent title="Reverse FX Revaluation" description="Posts a reversing journal entry and marks the revaluation as reversed.">
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs font-medium mb-1 block">Reversal Period *</label>
+            <Select value={periodId} onChange={(e) => setPeriodId(e.target.value)} className="h-8 text-xs">
+              <option value="">Select period…</option>
+              {openPeriods.map((p) => <option key={p.id} value={p.id}>{p.name} · FY{p.fiscalYear}</option>)}
+            </Select>
+          </div>
+          <div>
+            <label className="text-xs font-medium mb-1 block">Reversal Date *</label>
+            <Input type="date" value={reverseDate} onChange={(e) => setReverseDate(e.target.value)} className="h-8 text-xs" />
+          </div>
+          {mutation.isError && <ErrorMsg error={mutation.error} />}
+          <div className="flex justify-end gap-2 pt-1">
+            <DialogClose asChild><Button variant="outline" size="sm">Cancel</Button></DialogClose>
+            <Button size="sm" variant="destructive" disabled={!periodId || mutation.isPending} onClick={() => mutation.mutate()}>
+              {mutation.isPending ? 'Reversing…' : 'Reverse'}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function FxRevaluationView({ organisationId }: { organisationId: string }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const { data: revs, isLoading } = useQuery({
@@ -550,11 +650,6 @@ function FxRevaluationView({ organisationId }: { organisationId: string }) {
     queryKey: ['fx-revaluation-detail', organisationId, expandedId],
     queryFn: () => taxSvc.getFxRevaluation(organisationId, expandedId!),
     enabled: !!expandedId,
-  });
-
-  const reverseReval = useMutation({
-    mutationFn: (id: string) => taxSvc.reverseFxRevaluation(organisationId, id),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['fx-revaluations'] }),
   });
 
   return (
@@ -597,11 +692,7 @@ function FxRevaluationView({ organisationId }: { organisationId: string }) {
                             {expandedId === r.id ? 'Hide' : 'View'}
                           </button>
                           {r.status === 'POSTED' && (
-                            <button
-                              className="text-xs text-muted-foreground hover:text-destructive"
-                              onClick={() => { if (confirm('Reverse this revaluation?')) reverseReval.mutate(r.id); }}>
-                              Reverse
-                            </button>
+                            <ReverseRevaluationDialog organisationId={organisationId} revId={r.id} />
                           )}
                         </div>
                       </TableCell>

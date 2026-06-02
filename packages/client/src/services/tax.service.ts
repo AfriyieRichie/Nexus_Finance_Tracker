@@ -170,12 +170,16 @@ export const listFxRevaluations = (organisationId: string) =>
 
 export const runFxRevaluation = (
   organisationId: string,
-  data: { periodEndDate: string; notes?: string },
+  data: { periodEndDate: string; periodId: string; fxGainLossAccountId: string; notes?: string },
 ) =>
   api.post(`/organisations/${organisationId}/tax/fx-revaluations`, data).then((r) => r.data.data as FxRevaluationDetail);
 
 export const getFxRevaluation = (organisationId: string, id: string) =>
   api.get(`/organisations/${organisationId}/tax/fx-revaluations/${id}`).then((r) => r.data.data as FxRevaluationDetail);
 
-export const reverseFxRevaluation = (organisationId: string, id: string) =>
-  api.post(`/organisations/${organisationId}/tax/fx-revaluations/${id}/reverse`).then((r) => r.data.data as FxRevaluation);
+export const reverseFxRevaluation = (
+  organisationId: string,
+  id: string,
+  data: { reverseDate: string; periodId: string },
+) =>
+  api.post(`/organisations/${organisationId}/tax/fx-revaluations/${id}/reverse`, data).then((r) => r.data.data as FxRevaluation);
