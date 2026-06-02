@@ -1,6 +1,7 @@
-import { Prisma, TaxTreatment, ExchangeRateType, VatReturnStatus, FxRevaluationStatus } from '@prisma/client';
+import { Prisma, TaxTreatment, ExchangeRateType, VatReturnStatus, FxRevaluationStatus, JournalType } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { NotFoundError, ValidationError, ConflictError, ForbiddenError } from '../../utils/errors';
+import { createAndPostSystemEntry, reverseJournalEntry } from '../journals/journal.service';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -46,7 +47,14 @@ export interface GenerateVatReturnInput {
 
 export interface RunFxRevaluationInput {
   periodEndDate: string;
+  periodId: string;
+  fxGainLossAccountId: string;
   notes?: string;
+}
+
+export interface ReverseFxRevaluationInput {
+  reverseDate: string;
+  periodId: string;
 }
 
 // ─── Tax Codes ────────────────────────────────────────────────────────────────
@@ -124,7 +132,11 @@ export async function updateTaxCode(organisationId: string, id: string, input: U
 }
 
 export async function deleteTaxCode(organisationId: string, id: string) {
-  await getTaxCode(organisationId, id);
+  const tc = await getTaxCode(organisationId, id);
+  const usageCount = await prisma.journalLine.count({ where: { taxCode: tc.code } });
+  if (usageCount > 0) {
+    throw new ForbiddenError(`Tax code '${tc.code}' is used on ${usageCount} journal line(s) and cannot be deleted. Deactivate it instead.`);
+  }
   await prisma.taxCode.delete({ where: { id } });
 }
 
@@ -233,6 +245,19 @@ export async function generateVatReturn(
 
   if (periodStart >= periodEnd) throw new ValidationError('periodEnd must be after periodStart');
 
+  // Guard against overlapping returns
+  const overlap = await prisma.vatReturn.findFirst({
+    where: {
+      organisationId,
+      status: { not: VatReturnStatus.DRAFT }, // allow re-draft but not overlap with filed/submitted
+      periodStart: { lte: periodEnd },
+      periodEnd: { gte: periodStart },
+    },
+  });
+  if (overlap) {
+    throw new ConflictError(`A ${overlap.status} VAT return already exists covering an overlapping period`);
+  }
+
   // Fetch all posted journal lines with a tax code in the period
   const taxLines = await prisma.journalLine.findMany({
     where: {
@@ -274,7 +299,11 @@ export async function generateVatReturn(
   for (const line of taxLines) {
     const tc = line.taxCode ? tcMap.get(line.taxCode) : null;
     if (!tc) continue;
-    if (tc.treatment === TaxTreatment.EXEMPT || tc.treatment === TaxTreatment.ZERO_RATED) continue;
+    if (
+      tc.treatment === TaxTreatment.EXEMPT ||
+      tc.treatment === TaxTreatment.ZERO_RATED ||
+      tc.treatment === TaxTreatment.WITHHOLDING
+    ) continue;
 
     const taxAmt = line.taxAmount ?? new Prisma.Decimal(0);
     const netAmt = line.debitAmount.minus(line.creditAmount).abs();
@@ -536,12 +565,51 @@ export async function runFxRevaluation(
     throw new ValidationError('No revaluation differences found — all balances are zero or no closing rates exist');
   }
 
-  // Create the FX revaluation record (journal entry can be posted separately)
+  // Build the GL journal (IAS 21.28):
+  // Per account: DR account (gainLoss > 0) or CR account (gainLoss < 0)
+  // Net FX: CR FxGainLoss (net gain) or DR FxGainLoss (net loss)
+  const org2 = await prisma.organisation.findUnique({ where: { id: organisationId }, select: { baseCurrency: true } });
+  const currency = org2?.baseCurrency ?? baseCurrency;
+
+  type JLine = { accountId: string; description: string; debitAmount: number; creditAmount: number; currency: string; exchangeRate: number };
+  const journalLines: JLine[] = [];
+
+  for (const line of revalLines) {
+    const absGainLoss = line.gainLoss.abs().toNumber();
+    if (line.gainLoss.greaterThan(0)) {
+      journalLines.push({ accountId: line.accountId, description: `FX revaluation gain — ${line.currency}`, debitAmount: absGainLoss, creditAmount: 0, currency, exchangeRate: 1 });
+    } else {
+      journalLines.push({ accountId: line.accountId, description: `FX revaluation loss — ${line.currency}`, debitAmount: 0, creditAmount: absGainLoss, currency, exchangeRate: 1 });
+    }
+  }
+
+  // Net FxGainLoss line
+  const netGainLoss = totalGainLoss.toNumber();
+  journalLines.push({
+    accountId: input.fxGainLossAccountId,
+    description: netGainLoss >= 0 ? 'FX revaluation — net gain' : 'FX revaluation — net loss',
+    debitAmount:  netGainLoss < 0 ? Math.abs(netGainLoss) : 0,
+    creditAmount: netGainLoss >= 0 ? netGainLoss : 0,
+    currency,
+    exchangeRate: 1,
+  });
+
+  const je = await createAndPostSystemEntry(organisationId, {
+    type: JournalType.ADJUSTMENT,
+    description: `FX Revaluation — ${input.periodEndDate}`,
+    entryDate: input.periodEndDate,
+    periodId: input.periodId,
+    currency,
+    exchangeRate: 1,
+    lines: journalLines,
+  }, userId);
+
   return prisma.fxRevaluation.create({
     data: {
       organisationId,
       periodEndDate: new Date(input.periodEndDate + 'T00:00:00Z'),
       status: FxRevaluationStatus.POSTED,
+      journalEntryId: je.id,
       generatedBy: userId,
       notes: input.notes ?? null,
       lines: { create: revalLines },
@@ -576,13 +644,28 @@ export async function getFxRevaluation(organisationId: string, id: string) {
   return rev;
 }
 
-export async function reverseFxRevaluation(organisationId: string, id: string) {
+export async function reverseFxRevaluation(
+  organisationId: string,
+  id: string,
+  userId: string,
+  input: ReverseFxRevaluationInput,
+) {
   const rev = await prisma.fxRevaluation.findFirst({ where: { id, organisationId } });
   if (!rev) throw new NotFoundError('FX revaluation');
   if (rev.status === FxRevaluationStatus.REVERSED) throw new ForbiddenError('Already reversed');
+  if (!rev.journalEntryId) throw new ValidationError('No GL journal found on this revaluation — cannot reverse');
+
+  const reversalJe = await reverseJournalEntry(organisationId, rev.journalEntryId, userId, {
+    reverseDate: input.reverseDate,
+    periodId: input.periodId,
+    description: `Reversal of FX Revaluation — ${rev.periodEndDate.toISOString().slice(0, 10)}`,
+  });
 
   return prisma.fxRevaluation.update({
     where: { id },
-    data: { status: FxRevaluationStatus.REVERSED },
+    data: {
+      status: FxRevaluationStatus.REVERSED,
+      reversalJournalEntryId: reversalJe.id,
+    },
   });
 }
