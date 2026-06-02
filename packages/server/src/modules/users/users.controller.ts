@@ -2,13 +2,16 @@ import { Request, Response } from 'express';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { sendSuccess, sendCreated } from '../../utils/response';
 import {
-  createUserSchema, updateUserRoleSchema,
-  updateUserStatusSchema, adminResetPasswordSchema,
+  createUserSchema, updateUserRoleSchema, updateUserStatusSchema,
 } from './users.schemas';
 import * as svc from './users.service';
 
 export const listUsers = asyncHandler(async (req: Request, res: Response) => {
   return sendSuccess(res, await svc.listOrgUsers(req.params.organisationId));
+});
+
+export const getUser = asyncHandler(async (req: Request, res: Response) => {
+  return sendSuccess(res, await svc.getOrgUser(req.params.organisationId, req.params.userId));
 });
 
 export const createUser = asyncHandler(async (req: Request, res: Response) => {
@@ -31,9 +34,8 @@ export const updateStatus = asyncHandler(async (req: Request, res: Response) => 
 });
 
 export const resetPassword = asyncHandler(async (req: Request, res: Response) => {
-  const { newPassword } = adminResetPasswordSchema.parse(req.body);
-  const result = await svc.adminResetPassword(req.params.organisationId, req.params.userId, newPassword, req.user!.sub);
-  return sendSuccess(res, result, 'Password reset — user must change password on next login');
+  const result = await svc.adminResetPassword(req.params.organisationId, req.params.userId, req.user!.sub);
+  return sendSuccess(res, result, 'Password reset — share the temporary password with the user securely');
 });
 
 export const unlockUser = asyncHandler(async (req: Request, res: Response) => {

@@ -10,6 +10,7 @@ router.use(requireRole('ORG_ADMIN'));
 
 router.get('/', ctrl.listUsers);
 router.post('/', ctrl.createUser);
+router.get('/:userId', ctrl.getUser);
 router.patch('/:userId/role', ctrl.updateRole);
 router.patch('/:userId/status', ctrl.updateStatus);
 router.post('/:userId/reset-password', ctrl.resetPassword);

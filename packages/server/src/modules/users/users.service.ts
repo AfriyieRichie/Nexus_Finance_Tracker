@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { UserRole } from '@prisma/client';
 import { prisma } from '../../config/database';
@@ -6,6 +7,13 @@ import { auditLog } from '../audit-trail/audit.service';
 import type { CreateUserInput } from './users.schemas';
 
 const BCRYPT_ROUNDS = 12;
+
+// Generates a secure temporary password that satisfies common policies:
+// "Nx!" prefix (uppercase, lowercase, special) + 12 URL-safe base64 chars (mixed case + digits).
+// Returned to the caller once in plaintext — never stored; user must change on first login.
+function generateTemporaryPassword(): string {
+  return `Nx!${crypto.randomBytes(9).toString('base64url')}`;
+}
 
 export async function listOrgUsers(organisationId: string) {
   const orgUsers = await prisma.organisationUser.findMany({
@@ -43,6 +51,24 @@ export async function listOrgUsers(organisationId: string) {
     }));
 }
 
+export async function getOrgUser(organisationId: string, userId: string) {
+  const orgUser = await prisma.organisationUser.findUnique({
+    where: { organisationId_userId: { organisationId, userId } },
+    select: {
+      role: true, isActive: true, joinedAt: true,
+      user: {
+        select: {
+          id: true, email: true, firstName: true, lastName: true, jobTitle: true,
+          isActive: true, isSuperAdmin: true, mustChangePassword: true,
+          lockedAt: true, lastLoginAt: true, createdAt: true,
+        },
+      },
+    },
+  });
+  if (!orgUser) throw new NotFoundError('User not found in this organisation');
+  return { ...orgUser.user!, role: orgUser.role, orgIsActive: orgUser.isActive, joinedAt: orgUser.joinedAt };
+}
+
 export async function createOrgUser(
   organisationId: string,
   input: CreateUserInput,
@@ -69,7 +95,8 @@ export async function createOrgUser(
     return { id: existing.id, email: existing.email, firstName: existing.firstName, lastName: existing.lastName };
   }
 
-  const passwordHash = await bcrypt.hash(input.temporaryPassword, BCRYPT_ROUNDS);
+  const temporaryPassword = generateTemporaryPassword();
+  const passwordHash = await bcrypt.hash(temporaryPassword, BCRYPT_ROUNDS);
 
   const user = await prisma.user.create({
     data: {
@@ -93,7 +120,8 @@ export async function createOrgUser(
     description: `User ${user.email} created with role ${input.role}`,
   });
 
-  return user;
+  // temporaryPassword returned once in plaintext — never stored. Admin must share it securely.
+  return { ...user, temporaryPassword };
 }
 
 export async function updateUserRole(
@@ -163,7 +191,6 @@ export async function setUserStatus(
 export async function adminResetPassword(
   organisationId: string,
   userId: string,
-  newPassword: string,
   requesterId: string,
 ) {
   if (userId === requesterId) throw new ForbiddenError('Use Change Password to update your own password');
@@ -174,7 +201,8 @@ export async function adminResetPassword(
   });
   if (!orgUser) throw new NotFoundError('User not found in this organisation');
 
-  const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+  const temporaryPassword = generateTemporaryPassword();
+  const passwordHash = await bcrypt.hash(temporaryPassword, BCRYPT_ROUNDS);
 
   await prisma.$transaction([
     prisma.user.update({
@@ -191,7 +219,8 @@ export async function adminResetPassword(
     description: `Admin reset password for ${orgUser.user.email}`,
   });
 
-  return { userId, mustChangePassword: true };
+  // temporaryPassword returned once in plaintext — never stored. Admin must share it securely.
+  return { userId, mustChangePassword: true, temporaryPassword };
 }
 
 export async function unlockUser(
