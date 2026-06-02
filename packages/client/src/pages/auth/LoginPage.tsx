@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useMutation } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
-import { Mail, Lock, Eye, EyeOff } from 'lucide-react';
+import { User, Lock, Eye, EyeOff } from 'lucide-react';
 import { api } from '../../services/api';
 import { useAuthStore } from '../../stores/auth.store';
 
@@ -19,25 +19,6 @@ interface LoginResponse {
     user: { id: string; email: string; firstName: string; lastName: string };
     tokens: { accessToken: string; refreshToken: string };
   };
-}
-
-// ─── Nexus diamond-N logo (white on transparent) ──────────────────────────────
-function NexusLogo({ size = 40, fill = '#ffffff' }: { size?: number; fill?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 200 200" fill="none">
-      <rect x="18" y="18" width="164" height="164" rx="26" transform="rotate(45 100 100)" fill={fill} opacity="0.0" />
-      <defs>
-        <clipPath id="lp-clip">
-          <rect x="18" y="18" width="164" height="164" rx="26" transform="rotate(45 100 100)" />
-        </clipPath>
-      </defs>
-      <g clipPath="url(#lp-clip)">
-        <rect x="52" y="46" width="20" height="112" rx="10" fill={fill} />
-        <rect x="128" y="46" width="20" height="112" rx="10" fill={fill} />
-        <polygon points="52,46 72,46 148,158 128,158" fill={fill} />
-      </g>
-    </svg>
-  );
 }
 
 // ─── Wordmark logo (top-left of form) ──────────────────────────────────────────
@@ -181,20 +162,28 @@ export function LoginPage() {
         .lp-input {
           width: 100%;
           border-radius: 999px;
-          border: 1.5px solid #e3e8ef;
+          border: 1.5px solid #d6dde8;
           background: #ffffff;
-          padding: 13px 18px 13px 46px;
-          font-size: 13.5px;
+          padding: 13px 18px 13px 58px;
+          font-size: 12.5px;
+          font-weight: 500;
+          letter-spacing: 0.08em;
           color: #1e293b;
           outline: none;
           transition: border-color 0.15s, box-shadow 0.15s;
         }
-        .lp-input::placeholder { color: #9aa6b8; letter-spacing: 0.02em; }
+        .lp-input::placeholder { color: #9aa6b8; letter-spacing: 0.1em; font-weight: 600; }
         .lp-input:focus {
           border-color: #1e3a5f;
           box-shadow: 0 0 0 4px rgba(30,58,95,0.08);
         }
         .lp-input.err { border-color: #dc2626; }
+        .lp-divider {
+          position: absolute; left: 46px; top: 50%;
+          transform: translateY(-50%);
+          width: 1.5px; height: 20px;
+          background: #dbe1ea; pointer-events: none;
+        }
         .lp-btn {
           width: 100%;
           padding: 13px;
@@ -216,7 +205,7 @@ export function LoginPage() {
         }
         .lp-btn:active:not(:disabled) { transform: translateY(0); }
         .lp-btn:disabled { opacity: 0.6; cursor: not-allowed; }
-        .lp-icon { position: absolute; left: 17px; top: 50%; transform: translateY(-50%); color: #9aa6b8; pointer-events: none; }
+        .lp-icon { position: absolute; left: 18px; top: 50%; transform: translateY(-50%); color: #475569; pointer-events: none; }
         .lp-eye { position: absolute; right: 15px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: #9aa6b8; padding: 4px; display: flex; }
         .lp-eye:hover { color: #475569; }
         .lp-art { flex: 1; position: relative; overflow: hidden; }
@@ -284,22 +273,23 @@ export function LoginPage() {
               maxWidth: 300,
               margin: '0 auto',
             }}>
-              {/* Circular emblem */}
+              {/* Circular avatar emblem */}
               <div style={{
-                width: 70, height: 70, borderRadius: '50%',
-                background: '#1e3a5f',
+                width: 72, height: 72, borderRadius: '50%',
+                background: 'linear-gradient(135deg, #2c4a8c 0%, #2f5cb4 100%)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                margin: '0 auto 28px',
-                boxShadow: '0 8px 22px rgba(30,58,95,0.28)',
+                margin: '0 auto 30px',
+                boxShadow: '0 8px 22px rgba(44,74,140,0.32)',
               }}>
-                <NexusLogo size={34} />
+                <User size={34} color="#ffffff" strokeWidth={2.2} />
               </div>
 
               <form onSubmit={handleSubmit((d) => loginMutation.mutate(d))} noValidate>
                 {/* Email */}
                 <div style={{ marginBottom: 14 }}>
                   <div style={{ position: 'relative' }}>
-                    <Mail size={16} className="lp-icon" />
+                    <User size={16} className="lp-icon" />
+                    <span className="lp-divider" />
                     <input
                       type="email"
                       autoComplete="email"
@@ -315,6 +305,7 @@ export function LoginPage() {
                 <div style={{ marginBottom: 14 }}>
                   <div style={{ position: 'relative' }}>
                     <Lock size={16} className="lp-icon" />
+                    <span className="lp-divider" />
                     <input
                       type={showPassword ? 'text' : 'password'}
                       autoComplete="current-password"
