@@ -179,6 +179,8 @@ export interface PayrollRun {
   approvedAt: string | null;
   paidBy: string | null;
   paidAt: string | null;
+  lockedBy: string | null;
+  lockedAt: string | null;
   journalEntryId: string | null;
   notes: string | null;
   createdAt: string;
@@ -286,6 +288,9 @@ export const approvePayrollRun = (organisationId: string, id: string) =>
 
 export const payPayrollRun = (organisationId: string, id: string) =>
   api.post(`/organisations/${organisationId}/payroll/runs/${id}/pay`).then((r) => r.data.data as PayrollRun);
+
+export const lockPayrollRun = (organisationId: string, id: string) =>
+  api.post(`/organisations/${organisationId}/payroll/runs/${id}/lock`).then((r) => r.data.data as PayrollRun);
 
 export const downloadPaymentFile = (organisationId: string, id: string) =>
   api.get(`/organisations/${organisationId}/payroll/runs/${id}/payment-file`, { responseType: 'blob' });

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Users, Settings, Play, Download, ChevronDown, ChevronRight, CheckCircle, XCircle, Plus, Trash2 } from 'lucide-react';
+import { Users, Settings, Play, Download, ChevronDown, ChevronRight, CheckCircle, XCircle, Plus, Trash2, Lock } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import * as payrollSvc from '@/services/payroll.service';
 import type { PayrollRun, Employee, SalaryComponent, Payslip, SalaryComponentType, EmployeeLoan, OvertimeType } from '@/services/payroll.service';
@@ -1316,6 +1316,7 @@ function RunDetail({ organisationId, run }: { organisationId: string; run: Payro
   const submit  = useMutation({ mutationFn: () => payrollSvc.submitPayrollRun(organisationId, run.id),  onSuccess: onWorkflowSuccess, onError: onWorkflowError });
   const approve = useMutation({ mutationFn: () => payrollSvc.approvePayrollRun(organisationId, run.id), onSuccess: onWorkflowSuccess, onError: onWorkflowError });
   const pay     = useMutation({ mutationFn: () => payrollSvc.payPayrollRun(organisationId, run.id),     onSuccess: onWorkflowSuccess, onError: onWorkflowError });
+  const lock    = useMutation({ mutationFn: () => payrollSvc.lockPayrollRun(organisationId, run.id),    onSuccess: onWorkflowSuccess, onError: onWorkflowError });
   const del     = useMutation({ mutationFn: () => payrollSvc.deletePayrollRun(organisationId, run.id),  onSuccess: onWorkflowSuccess, onError: onWorkflowError });
 
   async function downloadCSV() {
@@ -1369,6 +1370,16 @@ function RunDetail({ organisationId, run }: { organisationId: string; run: Payro
         )}
         {(run.status === 'SUBMITTED' || run.status === 'APPROVED' || run.status === 'PAID') && (
           <Button size="sm" variant="outline" onClick={downloadCSV}><Download className="w-4 h-4 mr-1" />Payment CSV</Button>
+        )}
+        {run.status === 'PAID' && (
+          <Button size="sm" variant="outline" className="text-slate-700 border-slate-300 hover:bg-slate-50"
+            onClick={() => { if (window.confirm('Lock this run? The payment file cannot be regenerated after locking. Download it first if needed.')) lock.mutate(); }}
+            disabled={lock.isPending}>
+            <Lock className="w-4 h-4 mr-1" />{lock.isPending ? 'Locking…' : 'Lock Run'}
+          </Button>
+        )}
+        {run.status === 'LOCKED' && (
+          <span className="inline-flex items-center text-xs text-muted-foreground"><Lock className="w-3.5 h-3.5 mr-1" />Locked — payment file can no longer be regenerated</span>
         )}
       </div>
 
