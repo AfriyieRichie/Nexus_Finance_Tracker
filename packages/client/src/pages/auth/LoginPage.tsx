@@ -21,17 +21,20 @@ interface LoginResponse {
   };
 }
 
-// ─── Wordmark logo (top-left of form) ──────────────────────────────────────────
+// ── Palette (matches the brand backdrop) ──────────────────────────────────────
+const TEAL = '#123f51';
+const TEAL_DEEP = '#0e3243';
+const GOLD = '#d3aa49';
+
+// ── Small wordmark logo (top-left of the form) ────────────────────────────────
 function NexusMark() {
   return (
     <svg width={34} height={34} viewBox="0 0 200 200" fill="none">
       <rect x="18" y="18" width="164" height="164" rx="26" transform="rotate(45 100 100)" fill="#1e3a5f" />
       <defs>
-        <clipPath id="lp-mark-clip">
-          <rect x="18" y="18" width="164" height="164" rx="26" transform="rotate(45 100 100)" />
-        </clipPath>
+        <clipPath id="mark-clip"><rect x="18" y="18" width="164" height="164" rx="26" transform="rotate(45 100 100)" /></clipPath>
       </defs>
-      <g clipPath="url(#lp-mark-clip)">
+      <g clipPath="url(#mark-clip)">
         <rect x="52" y="46" width="20" height="112" rx="10" fill="#ffffff" />
         <rect x="128" y="46" width="20" height="112" rx="10" fill="#ffffff" />
         <polygon points="52,46 72,46 148,158 128,158" fill="#ffffff" />
@@ -40,85 +43,75 @@ function NexusMark() {
   );
 }
 
-// ─── Fluid wave art (blue field + cream diagonal wave ribbon) ──────────────────
-function FluidWave() {
+// ── Gold Nexus logo (diamond with cut-out N) for the brand backdrop ───────────
+function GoldNexusLogo({ size = 150 }: { size?: number }) {
   return (
-    <svg
-      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
-      viewBox="0 0 700 560"
-      preserveAspectRatio="xMidYMid slice"
-    >
+    <svg width={size} height={size} viewBox="0 0 200 200" fill="none">
       <defs>
-        <linearGradient id="w-blue2" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#2c4f9e" />
-          <stop offset="45%" stopColor="#2f5cb4" />
-          <stop offset="100%" stopColor="#1b3566" />
-        </linearGradient>
-        <linearGradient id="w-cream" x1="0.1" y1="0" x2="0.7" y2="1">
-          <stop offset="0%" stopColor="#f6eed9" />
-          <stop offset="48%" stopColor="#ecdfc1" />
-          <stop offset="100%" stopColor="#d9c8a2" />
-        </linearGradient>
-        <radialGradient id="w-glow" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stopColor="#5a86db" />
-          <stop offset="100%" stopColor="#5a86db" stopOpacity="0" />
-        </radialGradient>
-        <filter id="w-soft" x="-40%" y="-40%" width="180%" height="180%">
-          <feGaussianBlur stdDeviation="16" />
-        </filter>
-        <filter id="w-softer" x="-50%" y="-50%" width="200%" height="200%">
-          <feGaussianBlur stdDeviation="42" />
-        </filter>
+        <clipPath id="gold-clip"><rect x="18" y="18" width="164" height="164" rx="26" transform="rotate(45 100 100)" /></clipPath>
       </defs>
-
-      {/* Blue base */}
-      <rect x="0" y="0" width="700" height="560" fill="url(#w-blue2)" />
-
-      {/* Bright blue glow — top right */}
-      <ellipse cx="600" cy="70" rx="280" ry="240" fill="url(#w-glow)" filter="url(#w-softer)" />
-      {/* Brighter wash — far right edge */}
-      <ellipse cx="720" cy="320" rx="200" ry="320" fill="url(#w-glow)" filter="url(#w-softer)" opacity="0.7" />
-
-      {/* Cream diagonal wave ribbon (soft-blurred) */}
-      <g filter="url(#w-soft)">
-        <path
-          fill="url(#w-cream)"
-          d="M 560 -60
-             C 360 40, 470 210, 360 300
-             C 285 360, 250 330, 210 400
-             C 175 460, 250 520, 150 640
-             L -80 640
-             C -80 420, -80 120, -80 -60 Z"
-        />
-        {/* Cream bright crest highlight */}
-        <path
-          fill="#f8f1e0"
-          opacity="0.55"
-          d="M 470 -40
-             C 330 70, 410 210, 320 290
-             C 270 335, 250 320, 235 360
-             C 250 330, 285 360, 360 300
-             C 470 210, 360 40, 470 -40 Z"
-        />
-      </g>
-
-      {/* Blue fold shadow along the wave's right edge (depth) */}
-      <g filter="url(#w-soft)">
-        <path
-          fill="#16306a"
-          opacity="0.45"
-          d="M 380 280
-             C 300 350, 270 330, 232 392
-             C 270 345, 300 360, 372 300
-             C 430 250, 410 200, 430 250
-             C 415 240, 420 250, 380 280 Z"
-        />
+      {/* gold diamond */}
+      <rect x="18" y="18" width="164" height="164" rx="26" transform="rotate(45 100 100)" fill={GOLD} />
+      {/* N cut out (teal showing through) */}
+      <g clipPath="url(#gold-clip)">
+        <rect x="52" y="46" width="20" height="112" rx="10" fill={TEAL} />
+        <rect x="128" y="46" width="20" height="112" rx="10" fill={TEAL} />
+        <polygon points="52,46 72,46 148,158 128,158" fill={TEAL} />
       </g>
     </svg>
   );
 }
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
+// ── Faint scattered "memphis" doodle pattern that fills the whole page ────────
+function DoodleBackdrop() {
+  const stroke = 'rgba(255,255,255,0.05)';
+  const dot = 'rgba(255,255,255,0.05)';
+  return (
+    <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} aria-hidden>
+      <defs>
+        <pattern id="doodles" width="200" height="200" patternUnits="userSpaceOnUse" patternTransform="rotate(2)">
+          <g fill="none" stroke={stroke} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+            {/* circle */}
+            <circle cx="26" cy="28" r="11" />
+            {/* X */}
+            <path d="M62 18 L78 34 M78 18 L62 34" />
+            {/* plus */}
+            <path d="M118 16 V40 M106 28 H130" />
+            {/* triangle */}
+            <path d="M34 78 L52 78 L43 60 Z" />
+            {/* squiggle */}
+            <path d="M84 70 q8 -12 16 0 q8 12 16 0" />
+            {/* small diamond */}
+            <path d="M150 64 l12 12 l-12 12 l-12 -12 Z" />
+            {/* wavy line */}
+            <path d="M16 120 q10 -10 20 0 q10 10 20 0" />
+            {/* chevron */}
+            <path d="M150 116 l12 12 l-12 12" />
+            {/* smiley-ish circle */}
+            <circle cx="78" cy="132" r="13" />
+            {/* bracket */}
+            <path d="M120 150 q-12 0 -12 14 q0 14 12 14" />
+            {/* short diagonal */}
+            <path d="M40 158 L58 176" />
+          </g>
+          <g fill={dot}>
+            {/* dot clusters & eyes */}
+            <circle cx="150" cy="34" r="2.6" />
+            <circle cx="160" cy="40" r="2.6" />
+            <circle cx="170" cy="34" r="2.6" />
+            <circle cx="73" cy="129" r="2.2" />
+            <circle cx="83" cy="129" r="2.2" />
+            <circle cx="180" cy="150" r="2.6" />
+            <circle cx="20" cy="186" r="2.6" />
+          </g>
+        </pattern>
+      </defs>
+      <rect width="100%" height="100%" fill="url(#doodles)" />
+    </svg>
+  );
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
 export function LoginPage() {
   const navigate = useNavigate();
   const { setTokens, setUser } = useAuthStore();
@@ -129,8 +122,7 @@ export function LoginPage() {
   });
 
   const loginMutation = useMutation({
-    mutationFn: (data: LoginForm) =>
-      api.post<LoginResponse>('/auth/login', data).then((r) => r.data),
+    mutationFn: (data: LoginForm) => api.post<LoginResponse>('/auth/login', data).then((r) => r.data),
     onSuccess: async (result) => {
       const { tokens } = result.data;
       setTokens(tokens.accessToken, tokens.refreshToken);
@@ -147,115 +139,56 @@ export function LoginPage() {
   return (
     <>
       <style>{`
-        @keyframes lp-wave {
-          0%, 100% { transform: scale(1) translate(0,0); }
-          50%      { transform: scale(1.05) translate(-1.2%, 1%); }
-        }
-        @keyframes lp-card {
-          from { opacity: 0; transform: translateY(24px) scale(0.985); }
-          to   { opacity: 1; transform: translateY(0) scale(1); }
-        }
-        @keyframes lp-welcome {
-          from { opacity: 0; transform: translateX(24px); }
-          to   { opacity: 1; transform: translateX(0); }
-        }
+        @keyframes lp-card { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes lp-logo { from { opacity: 0; transform: scale(0.7); } to { opacity: 1; transform: scale(1); } }
+        @keyframes lp-ripple { 0%,100% { transform: scale(1); opacity: 0.55; } 50% { transform: scale(1.04); opacity: 0.8; } }
         .lp-input {
-          width: 100%;
-          border-radius: 999px;
-          border: 1.5px solid #d6dde8;
-          background: #ffffff;
-          padding: 13px 18px 13px 58px;
-          font-size: 12.5px;
-          font-weight: 500;
-          letter-spacing: 0.08em;
-          color: #1e293b;
-          outline: none;
-          transition: border-color 0.15s, box-shadow 0.15s;
+          width: 100%; border-radius: 999px; border: 1.5px solid #d6dde8; background: #fff;
+          padding: 13px 18px 13px 46px; font-size: 12.5px; font-weight: 500; letter-spacing: 0.08em;
+          color: #1e293b; outline: none; transition: border-color 0.15s, box-shadow 0.15s;
         }
         .lp-input::placeholder { color: #9aa6b8; letter-spacing: 0.1em; font-weight: 600; }
-        .lp-input:focus {
-          border-color: #1e3a5f;
-          box-shadow: 0 0 0 4px rgba(30,58,95,0.08);
-        }
+        .lp-input:focus { border-color: #123f51; box-shadow: 0 0 0 4px rgba(18,63,81,0.1); }
         .lp-input.err { border-color: #dc2626; }
-        .lp-divider {
-          position: absolute; left: 46px; top: 50%;
-          transform: translateY(-50%);
-          width: 1.5px; height: 20px;
-          background: #dbe1ea; pointer-events: none;
-        }
+        .lp-divider { position: absolute; left: 46px; top: 50%; transform: translateY(-50%); width: 1.5px; height: 20px; background: #dbe1ea; pointer-events: none; }
         .lp-btn {
-          width: 100%;
-          padding: 13px;
-          border-radius: 999px;
-          background: #1a2b47;
-          color: white;
-          font-size: 13px;
-          font-weight: 700;
-          letter-spacing: 0.16em;
-          text-transform: uppercase;
-          cursor: pointer;
-          border: none;
-          transition: background 0.18s, transform 0.1s, box-shadow 0.18s;
+          width: 100%; padding: 13px; border-radius: 999px; background: #123f51; color: #fff;
+          font-size: 13px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase;
+          cursor: pointer; border: none; transition: background 0.18s, transform 0.1s, box-shadow 0.18s;
         }
-        .lp-btn:hover:not(:disabled) {
-          background: #11203a;
-          box-shadow: 0 10px 26px rgba(17,32,58,0.3);
-          transform: translateY(-1px);
-        }
+        .lp-btn:hover:not(:disabled) { background: #0e3243; box-shadow: 0 10px 26px rgba(18,63,81,0.3); transform: translateY(-1px); }
         .lp-btn:active:not(:disabled) { transform: translateY(0); }
         .lp-btn:disabled { opacity: 0.6; cursor: not-allowed; }
         .lp-icon { position: absolute; left: 18px; top: 50%; transform: translateY(-50%); color: #475569; pointer-events: none; }
         .lp-eye { position: absolute; right: 15px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: #9aa6b8; padding: 4px; display: flex; }
         .lp-eye:hover { color: #475569; }
-        .lp-art { flex: 1; position: relative; overflow: hidden; }
-        .lp-art-inner { position: absolute; inset: -4%; animation: lp-wave 20s ease-in-out infinite; }
-        @media (max-width: 880px) {
-          .lp-art { display: none; }
-          .lp-form { flex: 1 1 100% !important; }
-          .lp-card { height: auto !important; min-height: 0 !important; }
-        }
+        @media (max-width: 900px) { .lp-brand { display: none !important; } }
       `}</style>
 
-      {/* ── Dark navy page background ── */}
+      {/* Full teal doodle backdrop */}
       <div style={{
-        minHeight: '100vh',
-        background: 'linear-gradient(135deg, #22386b 0%, #1c2f5c 100%)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
+        position: 'relative', minHeight: '100vh', overflow: 'hidden',
+        background: `radial-gradient(120% 120% at 70% 30%, ${TEAL} 0%, ${TEAL_DEEP} 100%)`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
         padding: '40px 24px',
       }}>
+        <DoodleBackdrop />
 
-        {/* ── Centered card ── */}
-        <div
-          className="lp-card"
-          style={{
-            display: 'flex',
-            width: '100%',
-            maxWidth: 1060,
-            height: 'min(86vh, 640px)',
-            background: '#ffffff',
-            borderRadius: 22,
-            overflow: 'hidden',
-            boxShadow: '0 40px 90px rgba(0,0,0,0.45)',
+        {/* Content row */}
+        <div style={{
+          position: 'relative', zIndex: 2, width: '100%', maxWidth: 1080,
+          display: 'flex', alignItems: 'center', gap: 48,
+        }}>
+
+          {/* ── Form card (kept as-is) ── */}
+          <div style={{
+            flex: '0 0 400px', maxWidth: 400, width: '100%',
+            background: '#fff', borderRadius: 22, padding: '36px 40px',
+            boxShadow: '0 30px 80px rgba(0,0,0,0.4)',
             animation: 'lp-card 0.6s ease-out both',
-          }}
-        >
-
-          {/* ── LEFT: minimal white form ── */}
-          <div
-            className="lp-form"
-            style={{
-              flex: '0 0 40%',
-              display: 'flex',
-              flexDirection: 'column',
-              padding: '32px 44px',
-              position: 'relative',
-            }}
-          >
+          }}>
             {/* Wordmark */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 8 }}>
               <NexusMark />
               <div style={{ lineHeight: 1.05 }}>
                 <div style={{ fontSize: 13, fontWeight: 800, color: '#1e3a5f' }}>Nexus Finance</div>
@@ -263,161 +196,93 @@ export function LoginPage() {
               </div>
             </div>
 
-            {/* Centered form */}
-            <div style={{
-              flex: 1,
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'center',
-              width: '100%',
-              maxWidth: 300,
-              margin: '0 auto',
-            }}>
+            <div style={{ textAlign: 'center', marginTop: 18, marginBottom: 22 }}>
               {/* Circular avatar emblem */}
               <div style={{
-                width: 72, height: 72, borderRadius: '50%',
-                background: 'linear-gradient(135deg, #2c4a8c 0%, #2f5cb4 100%)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                margin: '0 auto 30px',
-                boxShadow: '0 8px 22px rgba(44,74,140,0.32)',
+                width: 70, height: 70, borderRadius: '50%',
+                background: `linear-gradient(135deg, ${TEAL} 0%, #1c5a72 100%)`,
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                boxShadow: '0 8px 22px rgba(18,63,81,0.3)',
               }}>
-                <User size={34} color="#ffffff" strokeWidth={2.2} />
+                <User size={34} color="#fff" strokeWidth={2.2} />
+              </div>
+            </div>
+
+            <form onSubmit={handleSubmit((d) => loginMutation.mutate(d))} noValidate>
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ position: 'relative' }}>
+                  <User size={16} className="lp-icon" />
+                  <span className="lp-divider" />
+                  <input type="email" autoComplete="email" placeholder="EMAIL ADDRESS"
+                    className={`lp-input${errors.email ? ' err' : ''}`} {...register('email')} />
+                </div>
+                {errors.email && <p style={{ marginTop: 5, fontSize: 11.5, color: '#dc2626', paddingLeft: 18 }}>{errors.email.message}</p>}
               </div>
 
-              <form onSubmit={handleSubmit((d) => loginMutation.mutate(d))} noValidate>
-                {/* Email */}
-                <div style={{ marginBottom: 14 }}>
-                  <div style={{ position: 'relative' }}>
-                    <User size={16} className="lp-icon" />
-                    <span className="lp-divider" />
-                    <input
-                      type="email"
-                      autoComplete="email"
-                      placeholder="EMAIL ADDRESS"
-                      className={`lp-input${errors.email ? ' err' : ''}`}
-                      {...register('email')}
-                    />
-                  </div>
-                  {errors.email && <p style={{ marginTop: 5, fontSize: 11.5, color: '#dc2626', paddingLeft: 18 }}>{errors.email.message}</p>}
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ position: 'relative' }}>
+                  <Lock size={16} className="lp-icon" />
+                  <span className="lp-divider" />
+                  <input type={showPassword ? 'text' : 'password'} autoComplete="current-password" placeholder="PASSWORD"
+                    className={`lp-input${errors.password ? ' err' : ''}`} style={{ paddingRight: 44 }} {...register('password')} />
+                  <button type="button" className="lp-eye" onClick={() => setShowPassword((v) => !v)} tabIndex={-1}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}>
+                    {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
                 </div>
+                {errors.password && <p style={{ marginTop: 5, fontSize: 11.5, color: '#dc2626', paddingLeft: 18 }}>{errors.password.message}</p>}
+              </div>
 
-                {/* Password */}
-                <div style={{ marginBottom: 14 }}>
-                  <div style={{ position: 'relative' }}>
-                    <Lock size={16} className="lp-icon" />
-                    <span className="lp-divider" />
-                    <input
-                      type={showPassword ? 'text' : 'password'}
-                      autoComplete="current-password"
-                      placeholder="PASSWORD"
-                      className={`lp-input${errors.password ? ' err' : ''}`}
-                      style={{ paddingRight: 44 }}
-                      {...register('password')}
-                    />
-                    <button
-                      type="button"
-                      className="lp-eye"
-                      onClick={() => setShowPassword((v) => !v)}
-                      tabIndex={-1}
-                      aria-label={showPassword ? 'Hide password' : 'Show password'}
-                    >
-                      {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
-                    </button>
-                  </div>
-                  {errors.password && <p style={{ marginTop: 5, fontSize: 11.5, color: '#dc2626', paddingLeft: 18 }}>{errors.password.message}</p>}
+              {loginMutation.isError && (
+                <div style={{ marginBottom: 14, borderRadius: 12, background: '#fef2f2', border: '1px solid #fecaca', padding: '10px 14px', fontSize: 12.5, color: '#dc2626' }}>
+                  {errorMessage}
                 </div>
+              )}
 
-                {loginMutation.isError && (
-                  <div style={{
-                    marginBottom: 14, borderRadius: 12,
-                    background: '#fef2f2', border: '1px solid #fecaca',
-                    padding: '10px 14px', fontSize: 12.5, color: '#dc2626',
-                  }}>
-                    {errorMessage}
-                  </div>
-                )}
+              <button type="submit" disabled={loginMutation.isPending} className="lp-btn">
+                {loginMutation.isPending ? 'Signing in…' : 'Login'}
+              </button>
 
-                <button type="submit" disabled={loginMutation.isPending} className="lp-btn">
-                  {loginMutation.isPending ? 'Signing in…' : 'Login'}
-                </button>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 16 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#64748b', cursor: 'pointer' }}>
+                  <input type="checkbox" defaultChecked style={{ width: 13, height: 13, accentColor: TEAL }} />
+                  Remember me
+                </label>
+                <span style={{ fontSize: 12, color: '#94a3b8', cursor: 'default' }} title="Contact your administrator to reset your password">
+                  Forgot your password?
+                </span>
+              </div>
+            </form>
 
-                {/* Remember / forgot */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 16 }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#64748b', cursor: 'pointer' }}>
-                    <input type="checkbox" defaultChecked style={{ width: 13, height: 13, accentColor: '#1e3a5f' }} />
-                    Remember me
-                  </label>
-                  <span
-                    style={{ fontSize: 12, color: '#94a3b8', cursor: 'default' }}
-                    title="Contact your administrator to reset your password"
-                  >
-                    Forgot your password?
-                  </span>
-                </div>
-              </form>
-            </div>
-
-            {/* Dots */}
-            <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#1e3a5f' }} />
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#cbd5e1' }} />
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#cbd5e1' }} />
-            </div>
+            <p style={{ marginTop: 22, textAlign: 'center', fontSize: 13, color: '#94a3b8' }}>
+              Don't have an account?{' '}
+              <Link to="/register" style={{ color: TEAL, fontWeight: 600, textDecoration: 'none' }}>Create one</Link>
+            </p>
           </div>
 
-          {/* ── RIGHT: fluid wave art ── */}
-          <div className="lp-art">
-            <div className="lp-art-inner">
-              <FluidWave />
+          {/* ── Brand backdrop element (gold logo + ripples + tagline) ── */}
+          <div className="lp-brand" style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+            {/* Concentric rounded-square ripples */}
+            <div style={{ position: 'relative', width: 460, height: 460, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {[460, 380, 300, 230].map((s, i) => (
+                <div key={s} style={{
+                  position: 'absolute', width: s, height: s, borderRadius: s * 0.28,
+                  border: '1.5px solid rgba(255,255,255,0.08)',
+                  animation: `lp-ripple ${7 + i}s ease-in-out infinite`,
+                }} />
+              ))}
+              <div style={{ animation: 'lp-logo 0.8s cubic-bezier(0.34,1.56,0.64,1) both' }}>
+                <GoldNexusLogo size={150} />
+              </div>
             </div>
 
-            {/* Top-right sign-up pill */}
-            <Link
-              to="/register"
-              style={{
-                position: 'absolute', top: 28, right: 40, zIndex: 2,
-                padding: '7px 20px', borderRadius: 22,
-                background: '#16243b', color: 'white',
-                fontSize: 12.5, fontWeight: 600, letterSpacing: '0.04em',
-                textDecoration: 'none',
-              }}
-            >
-              Sign up
-            </Link>
-
-            {/* Welcome block — lower right */}
-            <div style={{
-              position: 'absolute', right: 48, bottom: 64, zIndex: 2,
-              textAlign: 'right', maxWidth: 360,
-              animation: 'lp-welcome 0.7s 0.3s ease-out both',
-            }}>
-              <h2 style={{
-                fontSize: 'clamp(2.6rem, 4.5vw, 3.6rem)', fontWeight: 800,
-                color: 'white', lineHeight: 1, marginBottom: 12,
-                letterSpacing: '-0.02em',
-                textShadow: '0 6px 36px rgba(15,23,42,0.4)',
-              }}>
-                Welcome.
-              </h2>
-              <p style={{
-                fontSize: 13.5, color: 'rgba(255,255,255,0.88)',
-                lineHeight: 1.6,
-                textShadow: '0 2px 14px rgba(15,23,42,0.35)',
-              }}>
-                Enterprise-grade financial management — IAS/IFRS compliant
-                accounting, real-time statements, and Ghana GRA payroll.
+            <div style={{ textAlign: 'center', marginTop: 28 }}>
+              <h1 style={{ color: '#fff', fontSize: 30, fontWeight: 800, letterSpacing: '-0.01em', marginBottom: 8 }}>
+                Nexus Finance Tracker
+              </h1>
+              <p style={{ color: GOLD, fontSize: 14, fontWeight: 500, letterSpacing: '0.04em' }}>
+                Business Intelligence for Business Improvement
               </p>
-            </div>
-
-            {/* Bottom-right sign-up prompt */}
-            <div style={{
-              position: 'absolute', right: 48, bottom: 28, zIndex: 2,
-              fontSize: 12.5, color: 'rgba(255,255,255,0.7)',
-            }}>
-              Not a member?{' '}
-              <Link to="/register" style={{ color: 'white', fontWeight: 700, textDecoration: 'none' }}>
-                Sign up now
-              </Link>
             </div>
           </div>
         </div>
