@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Archive, Plus, BarChart3, RefreshCw, CheckCircle, XCircle, ClipboardList, AlertTriangle, Package, MapPin, Download } from 'lucide-react';
+import { Archive, Plus, BarChart3, RefreshCw, CheckCircle, XCircle, ClipboardList, AlertTriangle, Package, MapPin, Download, TrendingDown } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import * as inv from '@/services/inventory.service';
 import { listAccounts } from '@/services/accounts.service';
@@ -487,6 +487,90 @@ function CreateMovementDialog({ organisationId, item, onSuccess }: { organisatio
   );
 }
 
+// ─── NrvWriteDownDialog (IAS 2.9 — lower of cost or NRV) ───────────────────────
+
+function NrvWriteDownDialog({ organisationId, item, onSuccess }: { organisationId: string; item: inv.InventoryItem; onSuccess: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [nrvPerUnit, setNrvPerUnit] = useState('');
+  const [periodId, setPeriodId] = useState('');
+  const [writeDownAccountId, setWriteDownAccountId] = useState('');
+  const [notes, setNotes] = useState('');
+  const [result, setResult] = useState<inv.NrvWriteDownResult | null>(null);
+
+  const { data: periods } = useQuery({ queryKey: ['periods', organisationId, 'open'], queryFn: () => listPeriods(organisationId, { status: 'OPEN' }), enabled: open });
+  const { data: accountsData } = useQuery({ queryKey: ['accounts', organisationId, 'posting'], queryFn: () => listAccounts(organisationId, { pageSize: 300, isControlAccount: false, postingOnly: true }), enabled: open });
+  const expAccounts = (accountsData?.accounts ?? []).filter((a) => a.class === 'EXPENSE' && a.isActive);
+
+  const reset = () => { setNrvPerUnit(''); setPeriodId(''); setWriteDownAccountId(''); setNotes(''); setResult(null); };
+
+  const mutation = useMutation({
+    mutationFn: () => inv.nrvWriteDown(organisationId, item.id, {
+      nrvPerUnit: Number(nrvPerUnit), periodId, writeDownAccountId, notes: notes || undefined,
+    }),
+    onSuccess: (res) => { setResult(res); onSuccess(); },
+  });
+
+  const currentCost = Number(item.unitCost);
+  const nrv = Number(nrvPerUnit);
+  const wouldWriteDown = nrvPerUnit !== '' && nrv < currentCost;
+  const canPost = wouldWriteDown && periodId && writeDownAccountId;
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) reset(); }}>
+      <DialogTrigger asChild>
+        <button className="p-1 text-muted-foreground hover:text-amber-600" title="NRV write-down (IAS 2)"><TrendingDown size={14} /></button>
+      </DialogTrigger>
+      <DialogContent title={`NRV Write-Down — ${item.code}`} description="Write inventory down to net realisable value when NRV is below cost (IAS 2.9).">
+        {result ? (
+          <div className="space-y-3">
+            <div className="rounded-lg bg-success/10 border border-success/20 p-3 text-xs space-y-1">
+              <p className="font-medium text-success">Write-down posted</p>
+              <p className="text-muted-foreground">Previous unit cost: <strong>{fmt(result.previousUnitCost)}</strong> → NRV: <strong>{fmt(result.nrvPerUnit)}</strong></p>
+              <p className="text-muted-foreground">Total write-down: <strong>{fmt(result.totalWriteDown)}</strong></p>
+            </div>
+            <div className="flex justify-end"><Button size="sm" onClick={() => { setOpen(false); reset(); }}>Done</Button></div>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="rounded-md bg-muted/50 border px-3 py-2 text-xs text-muted-foreground">
+              <strong>{item.name}</strong> · current unit cost <strong>{fmt(item.unitCost)}</strong> · {fmt(item.quantityOnHand)} {item.unit} on hand
+            </div>
+            <div>
+              <label className="text-xs font-medium mb-1 block">NRV per Unit *</label>
+              <Input type="number" step="0.01" value={nrvPerUnit} onChange={(e) => setNrvPerUnit(e.target.value)} placeholder="Net realisable value per unit" className="h-8 text-xs" />
+              {nrvPerUnit !== '' && nrv >= currentCost && (
+                <p className="text-[11px] text-amber-600 mt-1">NRV is not below cost — no write-down required.</p>
+              )}
+            </div>
+            <div>
+              <label className="text-xs font-medium mb-1 block">Write-Down Expense Account *</label>
+              <AccountSelect value={writeDownAccountId} onChange={setWriteDownAccountId} accounts={expAccounts} placeholder="Select expense account…" />
+            </div>
+            <div>
+              <label className="text-xs font-medium mb-1 block">Accounting Period *</label>
+              <Select value={periodId} onChange={(e) => setPeriodId(e.target.value)} className="h-8 text-xs">
+                <option value="">Select period…</option>
+                {(periods ?? []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </Select>
+            </div>
+            <div>
+              <label className="text-xs font-medium mb-1 block">Notes</label>
+              <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional" className="h-8 text-xs" />
+            </div>
+            {mutation.isError && <p className="text-xs text-destructive">{(mutation.error as any)?.response?.data?.error?.message ?? 'Error posting write-down'}</p>}
+            <div className="flex justify-end gap-2 pt-1">
+              <DialogClose asChild><Button variant="outline" size="sm">Cancel</Button></DialogClose>
+              <Button size="sm" disabled={!canPost || mutation.isPending} onClick={() => mutation.mutate()}>
+                {mutation.isPending ? 'Posting…' : 'Post Write-Down'}
+              </Button>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─── StocktakeSessionView ─────────────────────────────────────────────────────
 
 function StocktakeSessionView({ organisationId, session, onBack }: { organisationId: string; session: inv.StocktakeSession; onBack: () => void }) {
@@ -496,7 +580,10 @@ function StocktakeSessionView({ organisationId, session, onBack }: { organisatio
     queryFn: () => inv.getStocktakeSession(organisationId, session.id),
   });
   const { data: periods } = useQuery({ queryKey: ['periods', organisationId, 'open'], queryFn: () => listPeriods(organisationId, { status: 'OPEN' }) });
+  const { data: postAccountsData } = useQuery({ queryKey: ['accounts', organisationId, 'posting'], queryFn: () => listAccounts(organisationId, { pageSize: 300, isControlAccount: false, postingOnly: true }) });
+  const postAccounts = postAccountsData?.accounts ?? [];
   const [periodId, setPeriodId] = useState('');
+  const [contraAccountId, setContraAccountId] = useState('');
 
   const updateCount = useMutation({
     mutationFn: ({ itemId, countedQuantity }: { itemId: string; countedQuantity: number }) =>
@@ -505,7 +592,7 @@ function StocktakeSessionView({ organisationId, session, onBack }: { organisatio
   });
 
   const postVariances = useMutation({
-    mutationFn: () => inv.postStocktakeVariances(organisationId, session.id, periodId),
+    mutationFn: () => inv.postStocktakeVariances(organisationId, session.id, periodId, contraAccountId),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['stocktake-session', session.id] });
       void qc.invalidateQueries({ queryKey: ['stocktake-sessions', organisationId] });
@@ -533,11 +620,14 @@ function StocktakeSessionView({ organisationId, session, onBack }: { organisatio
         </div>
         {!isLocked && allCounted && variances.length > 0 && (
           <div className="flex items-center gap-2">
-            <Select value={periodId} onChange={(e) => setPeriodId(e.target.value)} className="h-8 text-xs">
-              <option value="">Select period…</option>
+            <Select value={periodId} onChange={(e) => setPeriodId(e.target.value)} className="h-8 text-xs w-32">
+              <option value="">Period…</option>
               {(periods ?? []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </Select>
-            <Button size="sm" disabled={!periodId || postVariances.isPending} onClick={() => postVariances.mutate()}>
+            <div className="w-52">
+              <AccountSelect value={contraAccountId} onChange={setContraAccountId} accounts={postAccounts} placeholder="Contra account…" />
+            </div>
+            <Button size="sm" disabled={!periodId || !contraAccountId || postVariances.isPending} onClick={() => postVariances.mutate()}>
               {postVariances.isPending ? 'Posting…' : `Post ${variances.length} Variance(s)`}
             </Button>
           </div>
@@ -800,6 +890,11 @@ export function InventoryPage() {
                                 onSuccess={() => void qc.invalidateQueries({ queryKey: ['inventory', orgId] })}
                               />
                               <CreateMovementDialog
+                                organisationId={orgId}
+                                item={item}
+                                onSuccess={() => void qc.invalidateQueries({ queryKey: ['inventory', orgId] })}
+                              />
+                              <NrvWriteDownDialog
                                 organisationId={orgId}
                                 item={item}
                                 onSuccess={() => void qc.invalidateQueries({ queryKey: ['inventory', orgId] })}

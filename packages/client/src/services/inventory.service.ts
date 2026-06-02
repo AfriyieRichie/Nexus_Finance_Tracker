@@ -129,11 +129,28 @@ export const getStocktakeSession = (orgId: string, sessionId: string) =>
 export const updateStocktakeCount = (orgId: string, sessionId: string, itemId: string, data: { countedQuantity: number; notes?: string }) =>
   api.patch(`/organisations/${orgId}/inventory/stocktake/${sessionId}/counts/${itemId}`, data).then((r) => r.data.data as StocktakeCount);
 
-export const postStocktakeVariances = (orgId: string, sessionId: string, periodId: string) =>
-  api.post(`/organisations/${orgId}/inventory/stocktake/${sessionId}/post`, { periodId }).then((r) => r.data.data as StocktakeSession);
+export const postStocktakeVariances = (orgId: string, sessionId: string, periodId: string, contraAccountId: string) =>
+  api.post(`/organisations/${orgId}/inventory/stocktake/${sessionId}/post`, { periodId, contraAccountId }).then((r) => r.data.data as StocktakeSession);
 
 export const cancelStocktakeSession = (orgId: string, sessionId: string) =>
   api.post(`/organisations/${orgId}/inventory/stocktake/${sessionId}/cancel`).then((r) => r.data.data as StocktakeSession);
+
+// ── NRV Write-down (IAS 2.9) ──────────────────────────────────────────────────
+export interface NrvWriteDownResult {
+  itemId: string;
+  itemCode: string;
+  previousUnitCost: string;
+  nrvPerUnit: string;
+  totalWriteDown: string;
+  journalEntryId: string;
+}
+
+export const nrvWriteDown = (
+  orgId: string,
+  itemId: string,
+  data: { nrvPerUnit: number; periodId: string; writeDownAccountId: string; locationId?: string; notes?: string },
+) =>
+  api.post(`/organisations/${orgId}/inventory/${itemId}/nrv-writedown`, data).then((r) => r.data.data as NrvWriteDownResult);
 
 // ── Valuation ─────────────────────────────────────────────────────────────────
 export const getValuationReport = (orgId: string, asAt?: string) =>
