@@ -10,6 +10,7 @@
     "lint": "eslint src --ext .ts --max-warnings 0",
     "test": "jest --runInBand",
     "test:coverage": "jest --runInBand --coverage",
+    "db:check-drift": "node scripts/check-db-drift.cjs",
     "prisma:generate": "prisma generate",
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
