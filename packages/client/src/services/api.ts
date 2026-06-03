@@ -32,11 +32,48 @@ function processQueue(error: unknown, token: string | null) {
   failedQueue = [];
 }
 
+// "basicSalary" -> "Basic Salary", "fiscalYear" -> "Fiscal Year"
+function humanizeField(field: string): string {
+  return field
+    .replace(/([A-Z])/g, ' $1')
+    .replace(/[_-]+/g, ' ')
+    .replace(/^./, (c) => c.toUpperCase())
+    .replace(/\bId\b/g, '')
+    .trim();
+}
+
+// If the response carries Zod field errors (error.details), fold them into the
+// message fields the UI displays so "Invalid request data" becomes e.g.
+// "Basic Salary: Number must be greater than 0". No-op for other errors.
+function enrichValidationMessage(error: AxiosError): void {
+  const data = error.response?.data as
+    | { message?: string; error?: { message?: string; details?: Record<string, string[] | string> } }
+    | undefined;
+  const details = data?.error?.details;
+  if (!data || !details || typeof details !== 'object') return;
+  const parts = Object.entries(details)
+    .map(([field, msgs]) => {
+      const text = (Array.isArray(msgs) ? msgs : [msgs]).filter(Boolean).join(', ');
+      return text ? `${humanizeField(field)}: ${text}` : '';
+    })
+    .filter(Boolean);
+  if (parts.length === 0) return;
+  const message = parts.join(' · ');
+  if (data.error) data.error.message = message;
+  data.message = message;
+}
+
 // Auto-refresh access token on 401
 api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
+
+    // Surface server-side validation detail. The API returns field-level errors in
+    // error.details (e.g. { basicSalary: ["..."] }) but most forms only display the
+    // generic error.message ("Invalid request data"). Rewrite the message fields the
+    // UI reads so every form shows which field failed, without touching each form.
+    enrichValidationMessage(error);
 
     if (error.response?.status !== 401 || originalRequest._retry) {
       return Promise.reject(error);
