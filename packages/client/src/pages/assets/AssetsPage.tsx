@@ -746,6 +746,7 @@ function CategoriesTab({ organisationId }: { organisationId: string }) {
                   value={form.assetCostAccountId}
                   onChange={(id) => set('assetCostAccountId', id)}
                   accounts={fixedAssetAccounts}
+                  prioritize={(a) => /cost/i.test(a.name)}
                   placeholder="— Select account —"
                 />
               </div>
@@ -755,6 +756,7 @@ function CategoriesTab({ organisationId }: { organisationId: string }) {
                   value={form.accumulatedDepreciationAccountId}
                   onChange={(id) => set('accumulatedDepreciationAccountId', id)}
                   accounts={fixedAssetAccounts}
+                  prioritize={(a) => /accum/i.test(a.name)}
                   placeholder="— Select account —"
                 />
               </div>
@@ -764,6 +766,7 @@ function CategoriesTab({ organisationId }: { organisationId: string }) {
                   value={form.depreciationExpenseAccountId}
                   onChange={(id) => set('depreciationExpenseAccountId', id)}
                   accounts={expenseAccounts}
+                  prioritize={(a) => /deprec|amort/i.test(a.name)}
                   placeholder="— Select account —"
                 />
               </div>

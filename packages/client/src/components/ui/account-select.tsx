@@ -8,6 +8,7 @@ export interface AccountOption {
   code: string;
   name: string;
   class?: string;
+  type?: string;
   isActive?: boolean;
 }
 
@@ -18,6 +19,10 @@ interface AccountSelectProps {
   placeholder?: string;
   disabled?: boolean;
   className?: string;
+  // Optional: bubble the most relevant accounts to the top of the list (e.g. the
+  // Depreciation field surfaces depreciation accounts first). Sort is stable, so
+  // accounts keep their code order within the prioritised / non-prioritised groups.
+  prioritize?: (a: AccountOption) => boolean;
 }
 
 interface DropdownPos {
@@ -36,6 +41,7 @@ export function AccountSelect({
   placeholder = 'Select account…',
   disabled,
   className,
+  prioritize,
 }: AccountSelectProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -95,14 +101,16 @@ export function AccountSelect({
   }, [open, calcPos]);
 
   const filtered = useMemo(() => {
-    if (!query.trim()) return accounts.filter((a) => a.isActive !== false);
-    const q = query.toLowerCase();
-    return accounts.filter(
+    const q = query.trim().toLowerCase();
+    const base = accounts.filter(
       (a) =>
         a.isActive !== false &&
-        (a.code.toLowerCase().includes(q) || a.name.toLowerCase().includes(q)),
+        (!q || a.code.toLowerCase().includes(q) || a.name.toLowerCase().includes(q)),
     );
-  }, [accounts, query]);
+    if (!prioritize) return base;
+    // Stable sort: prioritised accounts first, original (code) order preserved within each group.
+    return [...base].sort((a, b) => Number(prioritize(b)) - Number(prioritize(a)));
+  }, [accounts, query, prioritize]);
 
   const groups = useMemo(() => {
     const classes = new Set(filtered.map((a) => a.class).filter(Boolean));

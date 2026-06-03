@@ -198,6 +198,7 @@ function NewItemDialog({ organisationId }: { organisationId: string }) {
               value={form.inventoryAccountId}
               onChange={(id) => set('inventoryAccountId', id)}
               accounts={invAccounts}
+              prioritize={(a) => a.type === 'INVENTORY' || /inventory/i.test(a.name)}
               placeholder="Select asset account…"
             />
             <p className="text-[10px] text-muted-foreground mt-0.5">Posting account where stock value is held — e.g. Merchandise Inventory (not a control/parent account).</p>
@@ -207,6 +208,7 @@ function NewItemDialog({ organisationId }: { organisationId: string }) {
               value={form.cogsAccountId}
               onChange={(id) => set('cogsAccountId', id)}
               accounts={expAccounts}
+              prioritize={(a) => a.type === 'COST_OF_SALES' || /cost of (goods|sales)|cogs/i.test(a.name)}
               placeholder="Select expense account…"
             />
             <p className="text-[10px] text-muted-foreground mt-0.5">Posting expense account charged when stock is issued — e.g. Cost of Goods Sold. If none appear, add an expense account in Chart of Accounts.</p>
@@ -295,11 +297,11 @@ function EditItemDialog({ organisationId, item, onSuccess }: { organisationId: s
             <p className="text-xs font-semibold mb-2">GL Account Links</p>
             <div className="space-y-3">
               <div><label className="text-xs font-medium mb-1 block">Inventory Account</label>
-                <AccountSelect value={form.inventoryAccountId} onChange={(id) => set('inventoryAccountId', id)} accounts={invAccounts} placeholder="Select asset account…" />
+                <AccountSelect value={form.inventoryAccountId} onChange={(id) => set('inventoryAccountId', id)} accounts={invAccounts} prioritize={(a) => a.type === 'INVENTORY' || /inventory/i.test(a.name)} placeholder="Select asset account…" />
                 <p className="text-[10px] text-muted-foreground mt-0.5">Required for GL posting on receipts. Must be an asset account.</p>
               </div>
               <div><label className="text-xs font-medium mb-1 block">COGS / Cost of Sales Account</label>
-                <AccountSelect value={form.cogsAccountId} onChange={(id) => set('cogsAccountId', id)} accounts={expAccounts} placeholder="Select expense account…" />
+                <AccountSelect value={form.cogsAccountId} onChange={(id) => set('cogsAccountId', id)} accounts={expAccounts} prioritize={(a) => a.type === 'COST_OF_SALES' || /cost of (goods|sales)|cogs/i.test(a.name)} placeholder="Select expense account…" />
                 <p className="text-[10px] text-muted-foreground mt-0.5">Used when stock is issued. Leave blank to use contra account.</p>
               </div>
             </div>
