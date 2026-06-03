@@ -121,6 +121,7 @@ function StatutoryTab({ organisationId }: { organisationId: string }) {
   function addBand() { setBands((prev) => [...prev, { min: '', max: '', rate: '' }]); }
   function removeBand(i: number) { setBands((prev) => prev.filter((_, idx) => idx !== i)); }
 
+  const [saveError, setSaveError] = useState<string | null>(null);
   const save = useMutation({
     mutationFn: () => payrollSvc.upsertStatutoryConfig(organisationId, {
       taxYear:           parseInt(form.taxYear, 10),
@@ -134,7 +135,15 @@ function StatutoryTab({ organisationId }: { organisationId: string }) {
         rate: Number(b.rate),
       })),
     }),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['payroll-statutory', organisationId] }); setOpen(false); },
+    onSuccess: () => { setSaveError(null); void qc.invalidateQueries({ queryKey: ['payroll-statutory', organisationId] }); setOpen(false); },
+    onError: (err: unknown) => {
+      const data = (err as { response?: { data?: { error?: { message?: string; details?: Record<string, string[]> }; message?: string } } })?.response?.data;
+      const details = data?.error?.details;
+      const msg = details && Object.keys(details).length > 0
+        ? Object.entries(details).map(([f, m]) => `${f}: ${(m ?? []).join(', ')}`).join(' · ')
+        : (data?.error?.message ?? data?.message ?? (err as Error)?.message ?? 'Failed to save configuration');
+      setSaveError(msg);
+    },
   });
 
   return (
@@ -211,9 +220,10 @@ function StatutoryTab({ organisationId }: { organisationId: string }) {
               <p className="text-xs text-muted-foreground mt-1">Leave "To" blank for the top band (no upper limit).</p>
             </div>
           </div>
+          {saveError && <p className="text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2 mt-3">{saveError}</p>}
           <div className="flex justify-end gap-2 mt-4">
             <DialogClose asChild><Button variant="outline">Cancel</Button></DialogClose>
-            <Button onClick={() => save.mutate()} disabled={save.isPending}>Save</Button>
+            <Button onClick={() => { setSaveError(null); save.mutate(); }} disabled={save.isPending}>{save.isPending ? 'Saving…' : 'Save'}</Button>
           </div>
         </DialogContent>
       </Dialog>

@@ -5,15 +5,16 @@ const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
 // ─── Statutory Config ─────────────────────────────────────────────────────────
 
 export const upsertStatutoryConfigSchema = z.object({
-  taxYear: z.number().int().min(2000).max(2100),
-  ssnitEmployeeRate: z.number().min(0).max(1).optional(),
-  ssnitEmployerRate: z.number().min(0).max(1).optional(),
-  tier2Rate: z.number().min(0).max(1).optional(),
-  personalRelief: z.number().nonnegative().optional(),
+  // The client submits rates as strings (e.g. "0.055"); coerce so they validate.
+  taxYear: z.coerce.number().int().min(2000).max(2100),
+  ssnitEmployeeRate: z.coerce.number().min(0).max(1).optional(),
+  ssnitEmployerRate: z.coerce.number().min(0).max(1).optional(),
+  tier2Rate: z.coerce.number().min(0).max(1).optional(),
+  personalRelief: z.coerce.number().nonnegative().optional(),
   payeBands: z.array(z.object({
-    min: z.number().nonnegative(),
-    max: z.number().positive().nullable(),
-    rate: z.number().min(0).max(100),
+    min: z.coerce.number().nonnegative(),
+    max: z.coerce.number().positive().nullable(),
+    rate: z.coerce.number().min(0).max(100),
   })).optional(),
 });
 
