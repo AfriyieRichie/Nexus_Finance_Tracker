@@ -91,14 +91,15 @@ function TaxCodeDialog({
   const [glAccountId, setGlAccountId] = useState(existing?.glAccountId ?? '');
   const [description, setDescription] = useState(existing?.description ?? '');
 
-  const { data: accounts } = useQuery({
-    queryKey: ['accounts-simple', organisationId],
-    queryFn: () =>
-      fetch(`/api/v1/organisations/${organisationId}/accounts?isActive=true`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('accessToken')}` },
-      }).then((r) => r.json()).then((d) => d.data as Array<{ id: string; code: string; name: string; class: string }>),
+  // Use the shared listAccounts service (correct server origin + auth + token
+  // refresh). The previous raw fetch() used a relative URL and a non-existent
+  // localStorage token, so it never returned accounts in production.
+  const { data: accountsData } = useQuery({
+    queryKey: ['accounts', organisationId, 'posting'],
+    queryFn: () => listAccounts(organisationId, { isActive: true, isControlAccount: false, postingOnly: true }),
     enabled: open,
   });
+  const accounts = accountsData?.accounts ?? [];
 
   const isEdit = !!existing;
 
@@ -161,7 +162,8 @@ function TaxCodeDialog({
             <AccountSelect
               value={glAccountId}
               onChange={setGlAccountId}
-              accounts={(accounts ?? []).filter((a: { class: string }) => a.class === 'LIABILITY' || a.class === 'ASSET')}
+              accounts={accounts.filter((a) => a.class === 'LIABILITY' || a.class === 'ASSET')}
+              prioritize={(a) => /vat|gst|tax|withhold/i.test(a.name) || a.type === 'TAX_PAYABLE' || a.type === 'TAX_RECEIVABLE'}
               placeholder="— None —"
             />
           </div>
