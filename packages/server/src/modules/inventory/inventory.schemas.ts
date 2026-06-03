@@ -43,10 +43,11 @@ export const createItemSchema = z.object({
   categoryId: z.string().uuid().optional(),
   unit: z.string().min(1).max(20).optional(),
   costMethod: costMethodEnum.default('WEIGHTED_AVERAGE'),
-  unitCost: z.number().nonnegative().optional(),
-  standardCost: z.number().nonnegative().optional(),
-  reorderLevel: z.number().nonnegative().optional(),
-  reorderQuantity: z.number().positive().optional(),
+  // Forms submit these as strings; coerce so "400" becomes 400 instead of failing.
+  unitCost: z.coerce.number().nonnegative().optional(),
+  standardCost: z.coerce.number().nonnegative().optional(),
+  reorderLevel: z.coerce.number().nonnegative().optional(),
+  reorderQuantity: z.coerce.number().positive().optional(),
   inventoryAccountId: z.string().uuid().optional(),
   cogsAccountId: z.string().uuid().optional(),
   purchasePriceVarianceAccountId: z.string().uuid().optional(),
@@ -71,8 +72,8 @@ export const createMovementSchema = z.object({
   itemId: z.string().uuid(),
   locationId: z.string().uuid().optional(),
   movementType: movementTypeEnum,
-  quantity: z.number().positive(),
-  unitCost: z.number().nonnegative().optional(),
+  quantity: z.coerce.number().positive(),
+  unitCost: z.coerce.number().nonnegative().optional(),
   contraAccountId: z.string().uuid().optional(),
   periodId: z.string().uuid().optional(),
   reference: z.string().max(100).optional(),
@@ -104,7 +105,7 @@ export const createStocktakeSchema = z.object({
 });
 
 export const updateStocktakeCountSchema = z.object({
-  countedQuantity: z.number().nonnegative(),
+  countedQuantity: z.coerce.number().nonnegative(),
   notes: z.string().optional(),
 });
 
@@ -116,7 +117,7 @@ export const postStocktakeSchema = z.object({
 // ─── NRV Write-down (IAS 2.9) ────────────────────────────────────────────────
 
 export const nrvWriteDownSchema = z.object({
-  nrvPerUnit: z.number().nonnegative(),
+  nrvPerUnit: z.coerce.number().nonnegative(),
   periodId: z.string().uuid(),
   writeDownAccountId: z.string().uuid(),
   locationId: z.string().uuid().optional(),
