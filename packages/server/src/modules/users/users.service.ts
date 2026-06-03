@@ -174,7 +174,20 @@ export async function setUserStatus(
     data: { isActive },
   });
 
-  if (!isActive) {
+  // Keep the global login flag (User.isActive — the one checked at login) in sync
+  // with the organisation membership, so reactivating actually restores access.
+  if (isActive) {
+    // Re-enabling membership must re-enable the login account.
+    await prisma.user.update({ where: { id: userId }, data: { isActive: true } });
+  } else {
+    // Disable the login account only when the user has no OTHER active org membership
+    // (a user may belong to several organisations).
+    const otherActive = await prisma.organisationUser.count({
+      where: { userId, isActive: true, NOT: { organisationId } },
+    });
+    if (otherActive === 0) {
+      await prisma.user.update({ where: { id: userId }, data: { isActive: false } });
+    }
     await prisma.refreshToken.updateMany({ where: { userId }, data: { isRevoked: true } });
   }
 
