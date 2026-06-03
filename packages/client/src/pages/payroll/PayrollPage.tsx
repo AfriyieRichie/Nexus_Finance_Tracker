@@ -566,7 +566,7 @@ function EmployeeDialog({ organisationId, emp, employees, onClose }: {
   // Catch missing required fields before hitting the API, and send the user to
   // the tab that holds the offending field (basicSalary lives on Compensation,
   // which is easy to skip). Returns true if it's safe to save.
-  const guardRequiredFields = (): boolean => {
+  const guardRequiredFields = (scope: 'all' | EmpTab = 'all'): boolean => {
     const checks: { ok: boolean; msg: string; tab: EmpTab }[] = [
       { ok: !!form.employeeNumber.trim(), msg: 'Employee Number is required.', tab: 'personal' },
       { ok: !!form.firstName.trim(),      msg: 'First Name is required.',      tab: 'personal' },
@@ -575,7 +575,9 @@ function EmployeeDialog({ organisationId, emp, employees, onClose }: {
       { ok: form.basicSalary !== '' && Number(form.basicSalary) > 0,
         msg: 'Basic Salary is required and must be greater than 0.',           tab: 'compensation' },
     ];
-    const missing = checks.filter((c) => !c.ok);
+    // scope='all' validates everything (final create); a tab key validates just
+    // that tab's fields so the wizard can advance page-by-page.
+    const missing = checks.filter((c) => !c.ok && (scope === 'all' || c.tab === scope));
     if (missing.length > 0) {
       setActiveTab(missing[0].tab);
       setSaveError(missing[0].msg);
@@ -608,10 +610,28 @@ function EmployeeDialog({ organisationId, emp, employees, onClose }: {
   const canNext = tabIdx < EMP_TABS.length - 1 && !tabLocked(EMP_TABS[tabIdx + 1].key);
   const isPayElements = activeTab === 'pay-elements';
   const isLoans       = activeTab === 'loans';
+  // 'bank' is the last data-entry tab; everything after it needs a saved employee id.
+  const isLastDataTab = activeTab === 'bank';
 
   function goTo(key: EmpTab) {
     if (tabLocked(key)) return;
     setActiveTab(key);
+  }
+
+  // Primary button. For a brand-new employee the wizard advances page-by-page,
+  // validating only the current tab, and performs the actual create when the user
+  // finishes the last data tab (Bank) — then jumps to Pay Elements. When editing an
+  // existing/just-created employee, it validates everything and saves immediately.
+  function handlePrimary() {
+    setSaveError(null);
+    const finaliseNow = !!emp || !!savedEmpId || isLastDataTab;
+    if (finaliseNow) {
+      if (guardRequiredFields('all')) save.mutate();
+      return;
+    }
+    if (guardRequiredFields(activeTab)) {
+      goTo(EMP_TABS[tabIdx + 1].key);
+    }
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -1020,8 +1040,8 @@ function EmployeeDialog({ organisationId, emp, employees, onClose }: {
         <div className="flex gap-2">
           <Button variant="outline" onClick={onClose}>{savedEmpId && !emp ? 'Done' : 'Cancel'}</Button>
           {!isPayElements && !isLoans && (
-            <Button onClick={() => { setSaveError(null); if (guardRequiredFields()) save.mutate(); }} disabled={save.isPending}>
-              {save.isPending ? 'Saving…' : emp ? 'Save' : savedEmpId ? 'Update' : 'Save & Continue →'}
+            <Button onClick={handlePrimary} disabled={save.isPending}>
+              {save.isPending ? 'Saving…' : emp ? 'Save' : savedEmpId ? 'Update' : isLastDataTab ? 'Save & Create →' : 'Save & Continue →'}
             </Button>
           )}
         </div>
