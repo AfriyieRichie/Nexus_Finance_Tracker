@@ -189,7 +189,13 @@ export async function listAccounts(organisationId: string, query: ListAccountsQu
     ...(query.isActive !== undefined && { isActive: query.isActive }),
     ...(query.isControlAccount !== undefined && { isControlAccount: query.isControlAccount }),
     ...(query.parentId !== undefined && { parentId: query.parentId }),
-    ...(query.postingOnly && { children: { none: {} } }),
+    // "Posting accounts" = leaf accounts you can actually post to. Control
+    // accounts are never postable (the journal engine rejects them), so exclude
+    // them too — unless the caller explicitly asked for a control-account filter.
+    ...(query.postingOnly && {
+      children: { none: {} },
+      ...(query.isControlAccount === undefined && { isControlAccount: false }),
+    }),
     ...(query.search && {
       OR: [
         { name: { contains: query.search, mode: 'insensitive' } },
