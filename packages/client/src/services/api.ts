@@ -62,9 +62,13 @@ api.interceptors.response.use(
     }
 
     try {
+      // Use the same API_BASE as the app (the server origin), NOT a relative URL.
+      // A relative URL resolves against the client origin, where the SPA rewrite
+      // returns index.html — so the refresh silently fails and logs the user out
+      // every time the 15-minute access token expires.
       const { data } = await axios.post<{
         data: { accessToken: string; refreshToken: string };
-      }>('/api/v1/auth/refresh', { refreshToken });
+      }>(`${API_BASE}/auth/refresh`, { refreshToken });
 
       const { accessToken: newAccess, refreshToken: newRefresh } = data.data;
       setTokens(newAccess, newRefresh);
