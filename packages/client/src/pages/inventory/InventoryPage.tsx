@@ -193,13 +193,14 @@ function NewItemDialog({ organisationId }: { organisationId: string }) {
               <Input type="number" value={form.reorderQuantity} onChange={(e) => set('reorderQuantity', e.target.value)} placeholder="Suggested PO qty" className="h-8 text-xs" />
             </div>
           </div>
-          <div><label className="text-xs font-medium mb-1 block">Inventory Control Account</label>
+          <div><label className="text-xs font-medium mb-1 block">Inventory Account</label>
             <AccountSelect
               value={form.inventoryAccountId}
               onChange={(id) => set('inventoryAccountId', id)}
               accounts={invAccounts}
               placeholder="Select asset account…"
             />
+            <p className="text-[10px] text-muted-foreground mt-0.5">Posting account where stock value is held — e.g. Merchandise Inventory (not a control/parent account).</p>
           </div>
           <div><label className="text-xs font-medium mb-1 block">COGS / Cost of Sales Account</label>
             <AccountSelect
@@ -208,6 +209,7 @@ function NewItemDialog({ organisationId }: { organisationId: string }) {
               accounts={expAccounts}
               placeholder="Select expense account…"
             />
+            <p className="text-[10px] text-muted-foreground mt-0.5">Posting expense account charged when stock is issued — e.g. Cost of Goods Sold. If none appear, add an expense account in Chart of Accounts.</p>
           </div>
           {mutation.isError && <p className="text-xs text-destructive">{(mutation.error as any)?.response?.data?.message ?? 'Error creating item'}</p>}
           <div className="flex justify-end gap-2 pt-1">
@@ -292,7 +294,7 @@ function EditItemDialog({ organisationId, item, onSuccess }: { organisationId: s
           <div className="border-t pt-3">
             <p className="text-xs font-semibold mb-2">GL Account Links</p>
             <div className="space-y-3">
-              <div><label className="text-xs font-medium mb-1 block">Inventory Control Account</label>
+              <div><label className="text-xs font-medium mb-1 block">Inventory Account</label>
                 <AccountSelect value={form.inventoryAccountId} onChange={(id) => set('inventoryAccountId', id)} accounts={invAccounts} placeholder="Select asset account…" />
                 <p className="text-[10px] text-muted-foreground mt-0.5">Required for GL posting on receipts. Must be an asset account.</p>
               </div>
@@ -340,7 +342,7 @@ function PostGLDialog({ organisationId, movement, onSuccess }: { organisationId:
         <div className="space-y-3">
           <div className="rounded-md bg-orange-50 border border-orange-200 p-3 text-xs text-orange-700">
             This movement was processed without a GL entry. Select the contra account and period to post the journal now.
-            <br /><strong>Important:</strong> The item must have an <em>Inventory Control Account</em> linked — use the Edit button on the Stock Items tab first.
+            <br /><strong>Important:</strong> The item must have an <em>Inventory Account</em> linked — use the Edit button on the Stock Items tab first.
           </div>
           <div>
             <label className="text-xs font-medium mb-1 block">Contra Account *</label>
