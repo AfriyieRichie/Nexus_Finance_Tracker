@@ -57,10 +57,18 @@ function NewBudgetDialog({ organisationId, existingBudgets }: { organisationId: 
   const isRevision = form.budgetType === 'REVISED';
 
   const mutation = useMutation({
-    mutationFn: () => budgets.createBudget(organisationId, {
-      name: form.name, fiscalYear: Number(form.fiscalYear),
-      budgetType: form.budgetType, parentBudgetId: form.parentBudgetId || undefined,
-    }),
+    mutationFn: () => {
+      // A revision derives its name/fiscalYear from the parent budget (the form
+      // doesn't collect them). Send the parent's values so the payload satisfies
+      // the schema's required name/fiscalYear; the server uses the parent's anyway.
+      const parent = isRevision ? approvedBudgets.find((b) => b.id === form.parentBudgetId) : undefined;
+      return budgets.createBudget(organisationId, {
+        name: parent ? parent.name : form.name,
+        fiscalYear: parent ? parent.fiscalYear : Number(form.fiscalYear),
+        budgetType: form.budgetType,
+        parentBudgetId: form.parentBudgetId || undefined,
+      });
+    },
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['budgets', organisationId] }); setOpen(false); setForm({ name: '', fiscalYear: String(new Date().getFullYear()), budgetType: 'ORIGINAL', parentBudgetId: '' }); },
   });
 
