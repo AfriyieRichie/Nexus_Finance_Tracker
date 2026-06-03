@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nexus Finance Tracker — Team Test Plan (UAT)</title>
+<style>
+  :root{
+    --teal:#123f51; --teal-deep:#0e3243; --gold:#d3aa49; --gold-deep:#b8902f;
+    --bg:#f6f8fa; --card:#ffffff; --border:#e3e8ee; --text:#1e293b; --muted:#64748b;
+    --green:#16a34a; --red:#dc2626; --amber:#d97706; --sidebar:#0e3243;
+    --sidebar-text:#b9c6cf; --sidebar-active:#e0b95c; --sidebar-hover:#16455a;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;font-size:14.5px;line-height:1.65;color:var(--text);background:var(--bg);display:flex;min-height:100vh}
+
+  /* Sidebar */
+  #sidebar{width:280px;min-height:100vh;background:var(--sidebar);color:var(--sidebar-text);position:fixed;top:0;left:0;overflow-y:auto;z-index:100}
+  #sidebar .head{padding:22px 20px 16px;border-bottom:1px solid rgba(255,255,255,.08)}
+  #sidebar .head .brand{font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--gold);margin-bottom:4px}
+  #sidebar .head h2{font-size:14px;color:#eef3f6;font-weight:600;line-height:1.3}
+  #sidebar .head p{font-size:11px;color:#7f93a0;margin-top:4px}
+  #toc{padding:10px 0 30px}
+  #toc .lbl{font-size:10px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;color:#5d7480;padding:12px 20px 4px}
+  #toc a{display:block;padding:6px 20px;color:var(--sidebar-text);text-decoration:none;font-size:13px;border-left:3px solid transparent;transition:.15s}
+  #toc a:hover{background:var(--sidebar-hover);color:#fff}
+  #toc a.sub{padding-left:32px;font-size:12px;color:#92a6b1}
+
+  /* Main */
+  #main{margin-left:280px;flex:1;min-width:0}
+  #topbar{background:#fff;border-bottom:1px solid var(--border);padding:14px 44px;position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:14px}
+  #topbar .crumb{font-size:13px;color:var(--muted)}
+  #topbar .tag{margin-left:auto;background:#fef3c7;color:#92400e;border:1px solid #fcd34d;font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px}
+  #content{max-width:1080px;margin:0 auto;padding:40px 44px 90px}
+
+  /* Cover */
+  .cover{background:radial-gradient(120% 120% at 70% 20%,var(--teal) 0%,var(--teal-deep) 100%);color:#fff;padding:54px 44px;margin:-40px -44px 48px;position:relative;overflow:hidden;border-radius:0 0 4px 4px}
+  .cover .tg{font-size:11px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:var(--gold);margin-bottom:14px}
+  .cover h1{font-size:34px;font-weight:800;line-height:1.1;margin-bottom:8px;color:#fff}
+  .cover .sub{font-size:17px;color:#9fb3bd;margin-bottom:28px}
+  .cover .meta{display:grid;grid-template-columns:repeat(3,auto);gap:26px;border-top:1px solid rgba(255,255,255,.12);padding-top:22px}
+  .cover .meta label{display:block;font-size:10px;letter-spacing:1px;text-transform:uppercase;color:#6f8794;margin-bottom:2px}
+  .cover .meta span{font-size:14px;font-weight:600;color:#d7e1e7}
+
+  section{margin-bottom:54px;scroll-margin-top:74px}
+  .shead{display:flex;align-items:center;gap:14px;margin-bottom:18px;padding-bottom:12px;border-bottom:2px solid var(--border)}
+  .snum{background:var(--teal);color:#fff;width:38px;height:38px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;flex-shrink:0}
+  .stitle{font-size:22px;font-weight:700;color:var(--teal)}
+  h2{font-size:17px;font-weight:700;color:var(--teal);margin:26px 0 10px}
+  h3{font-size:14.5px;font-weight:700;color:#334155;margin:18px 0 6px}
+  p{margin-bottom:10px}
+  ul,ol{padding-left:22px;margin:6px 0 14px}
+  li{margin-bottom:4px}
+
+  table{width:100%;border-collapse:collapse;margin:14px 0 22px;font-size:13px;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+  thead tr{background:var(--teal);color:#fff}
+  thead th{padding:10px 12px;text-align:left;font-size:11.5px;font-weight:600;letter-spacing:.3px;text-transform:uppercase}
+  tbody tr{border-bottom:1px solid var(--border)}
+  tbody tr:nth-child(even){background:#fafbfc}
+  tbody tr:hover{background:#f0f7fa}
+  td{padding:9px 12px;vertical-align:top}
+  .ref{font-family:Consolas,monospace;font-weight:700;color:var(--teal);white-space:nowrap}
+  .role{white-space:nowrap;font-weight:600;color:#475569}
+  .status{white-space:nowrap;font-size:12px;color:var(--muted)}
+  .status input{margin-right:3px;vertical-align:middle}
+
+  code{background:#eef2f6;border:1px solid #e0e6ec;border-radius:4px;padding:1px 6px;font-family:Consolas,monospace;font-size:12.5px;color:#b8902f}
+  .callout{border-radius:8px;padding:12px 16px;margin:14px 0 20px;font-size:13.5px;border-left:4px solid;display:flex;gap:10px}
+  .callout .i{font-size:15px;flex-shrink:0}
+  .callout.tip{background:#f0fdf4;border-color:var(--green);color:#14532d}
+  .callout.warn{background:#fffbeb;border-color:var(--amber);color:#78350f}
+  .callout.danger{background:#fef2f2;border-color:var(--red);color:#7f1d1d}
+  .callout.info{background:#eef7fb;border-color:var(--teal);color:#0e3243}
+
+  .pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:.3px}
+  .pill.gold{background:#fdf3dc;color:#8a6516;border:1px solid #f0d488}
+  .pill.teal{background:#e2eef2;color:#13495d;border:1px solid #bcd6df}
+  .pill.green{background:#dcfce7;color:#166534}
+  .pill.red{background:#fee2e2;color:#991b1b}
+
+  .legend{display:flex;gap:18px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin:6px 0 18px}
+  .divider{height:1px;background:linear-gradient(to right,var(--border),transparent);margin:40px 0}
+
+  @media print{
+    #sidebar{display:none}#main{margin-left:0}#topbar{display:none}
+    #content{padding:14px;max-width:100%}section{page-break-inside:avoid}
+    tbody tr:hover{background:transparent}
+  }
+  #sidebar::-webkit-scrollbar{width:4px}
+  #sidebar::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:4px}
+</style>
+</head>
+<body>
+
+<nav id="sidebar">
+  <div class="head">
+    <div class="brand">Nexus Finance Tracker</div>
+    <h2>Team Test Plan (UAT)</h2>
+    <p>Version 1.0 &middot; June 2026</p>
+  </div>
+  <div id="toc">
+    <div class="lbl">Plan</div>
+    <a href="#s1">1. Purpose &amp; Objectives</a>
+    <a href="#s2">2. Scope</a>
+    <a href="#s3">3. Environment &amp; Access</a>
+    <a href="#s4">4. Roles &amp; Responsibilities</a>
+    <a href="#s5">5. Sample Company Data</a>
+    <a href="#s6">6. Approach &amp; Schedule</a>
+    <a href="#s7">7. Entry / Exit Criteria</a>
+    <div class="lbl">Test Execution</div>
+    <a href="#p0">Phase 0 — Setup</a>
+    <a href="#p1">Phase 1 — Master Data</a>
+    <a href="#p2">Phase 2 — Journals &amp; GL</a>
+    <a href="#p3">Phase 3 — AR &amp; AP</a>
+    <a href="#p4">Phase 4 — Inventory</a>
+    <a href="#p5">Phase 5 — Fixed Assets</a>
+    <a href="#p6">Phase 6 — Bank Recon</a>
+    <a href="#p7">Phase 7 — Payroll</a>
+    <a href="#p8">Phase 8 — Budgets</a>
+    <a href="#p9">Phase 9 — Tax &amp; FX</a>
+    <a href="#p10">Phase 10 — Approvals</a>
+    <a href="#p11">Phase 11 — Period Close &amp; Reports</a>
+    <a href="#p12">Phase 12 — Governance</a>
+    <div class="lbl">Control</div>
+    <a href="#rec">Reconciliation Checks</a>
+    <a href="#def">Defect Log</a>
+    <a href="#track">Daily Progress</a>
+    <a href="#sign">Sign-off &amp; Acceptance</a>
+    <a href="#appx">Appendix — Notes</a>
+  </div>
+</nav>
+
+<div id="main">
+  <div id="topbar">
+    <span class="crumb">Nexus Finance Tracker &rsaquo; Quality Assurance &rsaquo; UAT</span>
+    <span class="tag">INTERNAL</span>
+  </div>
+  <div id="content">
+
+    <div class="cover">
+      <div class="tg">Nexus Finance Tracker</div>
+      <h1>Team Test Plan &mdash; User Acceptance Testing</h1>
+      <p class="sub">A guided, end-to-end test run of every module using real transactions</p>
+      <div class="meta">
+        <div><label>Version</label><span>1.0</span></div>
+        <div><label>Date</label><span>June 2026</span></div>
+        <div><label>Test Company</label><span>Akwaaba Trading Ltd</span></div>
+      </div>
+    </div>
+
+    <!-- 1 -->
+    <section id="s1">
+      <div class="shead"><div class="snum">1</div><h1 class="stitle">Purpose &amp; Objectives</h1></div>
+      <p>This document guides the whole team through a structured <strong>User Acceptance Test (UAT)</strong> of Nexus Finance Tracker. The goal is to confirm that every feature works correctly with realistic data, that the accounting is sound (double-entry, balanced statements, correct GL postings), and that controls (approvals, segregation of duties, audit trail) behave as designed — <em>before</em> the system is relied upon for live operations.</p>
+      <h3>Objectives</h3>
+      <ul>
+        <li>Exercise every module with real transactions, end to end.</li>
+        <li>Verify each posting hits the <strong>correct GL accounts</strong> and the books stay balanced.</li>
+        <li>Confirm approval workflows, segregation of duties and the audit trail enforce proper controls.</li>
+        <li>Validate that reports (Trial Balance, Balance Sheet, P&amp;L, Cash Flow, Changes in Equity) reconcile to one another.</li>
+        <li>Capture any defects in a single log for triage and fixing.</li>
+      </ul>
+      <div class="callout info"><span class="i">&#9432;</span><div>Work through the phases <strong>in order</strong>. Accounting data has dependencies — you cannot post a journal before the Chart of Accounts and an open period exist, and you cannot test a period close before transactions are posted.</div></div>
+    </section>
+
+    <!-- 2 -->
+    <section id="s2">
+      <div class="shead"><div class="snum">2</div><h1 class="stitle">Scope</h1></div>
+      <h3>In Scope</h3>
+      <p>All functional modules: Chart of Accounts, Accounting Periods, Journals &amp; General Ledger, Accounts Receivable, Accounts Payable, Inventory, Fixed Assets, Bank Reconciliation, Payroll, Budgets &amp; Cost Centres, Tax &amp; Currency (VAT, FX revaluation), Approval Workflows, Financial Reports, Audit Trail, Dashboard, and User Management.</p>
+      <h3>Out of Scope</h3>
+      <ul>
+        <li>Load / performance / stress testing.</li>
+        <li>Penetration &amp; security testing (handled separately).</li>
+        <li>Third-party integrations / data migration from legacy systems.</li>
+      </ul>
+    </section>
+
+    <!-- 3 -->
+    <section id="s3">
+      <div class="shead"><div class="snum">3</div><h1 class="stitle">Environment &amp; Access</h1></div>
+      <table>
+        <thead><tr><th>Item</th><th>Detail</th></tr></thead>
+        <tbody>
+          <tr><td>Application URL</td><td><code>https://nexus-finance-tracker-client.vercel.app/login</code></td></tr>
+          <tr><td>Test Organisation</td><td><strong>Akwaaba Trading Ltd</strong> &mdash; base currency <strong>GHS</strong></td></tr>
+          <tr><td>Browser</td><td>Latest Chrome / Edge. First load on a new account forces a password change.</td></tr>
+          <tr><td>First login</td><td>Each tester logs in with the temporary password the admin shared, then sets a new password when prompted.</td></tr>
+          <tr><td>Test window</td><td>Fill in: <strong>____________</strong> to <strong>____________</strong></td></tr>
+        </tbody>
+      </table>
+      <div class="callout warn"><span class="i">&#9888;</span><div><strong>Before testing begins</strong>, the Org Admin must confirm all database migrations are applied in Neon (see <a href="#appx">Appendix</a>). Several features (NRV write-down, payroll lock, asset revaluation surplus, inventory PPV) depend on them.</div></div>
+    </section>
+
+    <!-- 4 -->
+    <section id="s4">
+      <div class="shead"><div class="snum">4</div><h1 class="stitle">Roles &amp; Responsibilities</h1></div>
+      <p>Test cases are assigned by <strong>system role</strong>. Approval and segregation-of-duties tests require the action and its approval to be performed by <strong>different people</strong>, so assign at least the roles below to distinct individuals. Write each person's name in the blank column.</p>
+      <table>
+        <thead><tr><th>System Role</th><th>Primary Test Areas</th><th>Assigned Tester (fill in)</th></tr></thead>
+        <tbody>
+          <tr><td class="role">ORG_ADMIN</td><td>Org setup, user management, approval workflow config, period close</td><td>____________________</td></tr>
+          <tr><td class="role">FINANCE_MANAGER</td><td>Approvals, depreciation, payroll approve, budgets, FX revaluation, period lock</td><td>____________________</td></tr>
+          <tr><td class="role">ACCOUNTANT</td><td>Journals, inventory movements, bank rec, payroll prepare, tax codes</td><td>____________________</td></tr>
+          <tr><td class="role">ACCOUNTS_RECEIVABLE_CLERK</td><td>Customer invoices, receipts, credit notes, AR ageing</td><td>____________________</td></tr>
+          <tr><td class="role">ACCOUNTS_PAYABLE_CLERK</td><td>Supplier invoices, payments, supplier credit notes, AP ageing</td><td>____________________</td></tr>
+          <tr><td class="role">APPROVER</td><td>Acting as a workflow approver / delegate</td><td>____________________</td></tr>
+          <tr><td class="role">AUDITOR</td><td>Audit trail review &amp; export, read-only verification</td><td>____________________</td></tr>
+          <tr><td class="role">REPORT_VIEWER</td><td>Dashboard &amp; financial report viewing only</td><td>____________________</td></tr>
+        </tbody>
+      </table>
+      <div class="callout tip"><span class="i">&#10003;</span><div><strong>Pay/approve four-eyes:</strong> Payroll requires the creator, submitter, approver and payer to all differ. Journal approval blocks the submitter from approving their own entry. Plan who does what.</div></div>
+    </section>
+
+    <!-- 5 -->
+    <section id="s5">
+      <div class="shead"><div class="snum">5</div><h1 class="stitle">Sample Company Data &mdash; "Akwaaba Trading Ltd"</h1></div>
+      <p>Everyone uses the same figures so results are reproducible and comparable. Set this up during Phase 1.</p>
+
+      <h2>5.1 Chart of Accounts (key accounts)</h2>
+      <table>
+        <thead><tr><th>Code</th><th>Account</th><th>Class / Type</th></tr></thead>
+        <tbody>
+          <tr><td class="ref">1010</td><td>Main Bank Account (GHS)</td><td>Asset / Bank</td></tr>
+          <tr><td class="ref">1020</td><td>USD Bank Account</td><td>Asset / Bank &middot; currency USD</td></tr>
+          <tr><td class="ref">1030</td><td>Petty Cash</td><td>Asset / Cash</td></tr>
+          <tr><td class="ref">1110</td><td>Trade Receivables</td><td>Asset / Receivable (control)</td></tr>
+          <tr><td class="ref">1210</td><td>Inventory Control</td><td>Asset / Inventory</td></tr>
+          <tr><td class="ref">1510 / 1515</td><td>Motor Vehicles / Accum. Deprn &mdash; Vehicles</td><td>Asset / Fixed Asset</td></tr>
+          <tr><td class="ref">1520 / 1525</td><td>Buildings / Accum. Deprn &mdash; Buildings</td><td>Asset / Fixed Asset</td></tr>
+          <tr><td class="ref">2010</td><td>Trade Payables</td><td>Liability / Payable (control)</td></tr>
+          <tr><td class="ref">2110 / 2120 / 2130 / 2140</td><td>VAT Payable / PAYE Payable / SSNIT Payable / Pension (Tier 2&amp;3) Payable</td><td>Liability / Tax Payable</td></tr>
+          <tr><td class="ref">2200</td><td>Wages / Net Pay Payable</td><td>Liability</td></tr>
+          <tr><td class="ref">3010 / 3020 / 3030</td><td>Share Capital / Retained Earnings / Revaluation Reserve</td><td>Equity</td></tr>
+          <tr><td class="ref">4010 / 4020</td><td>Sales Revenue / Service Revenue</td><td>Revenue</td></tr>
+          <tr><td class="ref">4900</td><td>FX Gain / (Loss)</td><td>Revenue (finance)</td></tr>
+          <tr><td class="ref">5010 / 5015 / 5020</td><td>Cost of Sales / Purchase Price Variance / NRV Write-down</td><td>Expense / Cost of Sales</td></tr>
+          <tr><td class="ref">6010&ndash;6060</td><td>Salaries, Depreciation, Rent, Utilities, Impairment Loss, Bad Debt</td><td>Expense</td></tr>
+          <tr><td class="ref">6900</td><td>Bank Charges &amp; Interest</td><td>Expense (finance cost)</td></tr>
+          <tr><td class="ref">9999</td><td>Suspense / Opening Balance Equity</td><td>Equity (for opening capital)</td></tr>
+        </tbody>
+      </table>
+
+      <h2>5.2 Master records</h2>
+      <table>
+        <thead><tr><th>Type</th><th>Records</th></tr></thead>
+        <tbody>
+          <tr><td>Fiscal year / periods</td><td><strong>FY2026</strong>, 12 monthly periods. Open Jan&ndash;Jun 2026.</td></tr>
+          <tr><td>Customers</td><td><strong>Adom Ventures</strong> (30-day terms); <strong>Kantamanto Retailers</strong> (cash)</td></tr>
+          <tr><td>Suppliers</td><td><strong>Volta Supplies Ltd</strong> (30-day); <strong>Tema Logistics</strong></td></tr>
+          <tr><td>Inventory locations</td><td>Main Warehouse; Accra Showroom</td></tr>
+          <tr><td>Inventory items</td><td><strong>INV-001</strong> Office Chair (AVCO, cost 250); <strong>INV-002</strong> Laptop (FIFO, cost 4,800); <strong>INV-003</strong> A4 Paper (Standard cost 40, PPV acct 5015)</td></tr>
+          <tr><td>Employees</td><td><strong>EMP-001</strong> Kofi Mensah (basic GHS 4,000); <strong>EMP-002</strong> Ama Owusu (basic GHS 6,000, resident)</td></tr>
+          <tr><td>Fixed assets</td><td><strong>VEH-001</strong> Toyota Hilux (cost 180,000; 60 months; reducing balance); <strong>BLD-001</strong> Office Building (cost 500,000; 240 months; straight-line)</td></tr>
+          <tr><td>Tax codes</td><td><strong>VAT-STD</strong> 15% (acct 2110); <strong>EXEMPT</strong> 0%; <strong>WHT-5</strong> 5% withholding</td></tr>
+          <tr><td>Exchange rate</td><td>USD&rarr;GHS spot <strong>12.50</strong> (01 Jan); period-closing <strong>13.20</strong> (30 Jun)</td></tr>
+          <tr><td>Budget</td><td><strong>FY2026 Operating Budget</strong> &mdash; e.g. Rent 6030 = 4,000/month; alert threshold 80%</td></tr>
+        </tbody>
+      </table>
+      <div class="callout info"><span class="i">&#9432;</span><div>Record the opening capital with a journal: <code>DR Main Bank 1010 / CR Share Capital 3010</code> (e.g. GHS 200,000) so there is cash to transact with.</div></div>
+    </section>
+
+    <!-- 6 -->
+    <section id="s6">
+      <div class="shead"><div class="snum">6</div><h1 class="stitle">Approach &amp; Schedule</h1></div>
+      <p>Suggested sequence (adjust dates to your window). Each phase builds on the previous.</p>
+      <table>
+        <thead><tr><th>Day</th><th>Phases</th><th>Focus</th></tr></thead>
+        <tbody>
+          <tr><td>Day 1</td><td>0 &ndash; 1</td><td>Setup, users, chart of accounts, periods, all master data, approval workflows</td></tr>
+          <tr><td>Day 2</td><td>2 &ndash; 3</td><td>Journals &amp; GL, Receivables, Payables</td></tr>
+          <tr><td>Day 3</td><td>4 &ndash; 6</td><td>Inventory, Fixed Assets, Bank Reconciliation</td></tr>
+          <tr><td>Day 4</td><td>7 &ndash; 9</td><td>Payroll, Budgets, Tax &amp; FX revaluation</td></tr>
+          <tr><td>Day 5</td><td>10 &ndash; 12</td><td>Approvals, Period Close &amp; Reports, Governance (audit, users, dashboard)</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- 7 -->
+    <section id="s7">
+      <div class="shead"><div class="snum">7</div><h1 class="stitle">Entry / Exit Criteria</h1></div>
+      <h3>Entry criteria</h3>
+      <ul>
+        <li>All migrations applied; the app loads and the team can log in.</li>
+        <li>Test accounts created with the roles in Section 4.</li>
+        <li>This plan reviewed; the sample data agreed.</li>
+      </ul>
+      <h3>Exit criteria</h3>
+      <ul>
+        <li>Every test case marked <span class="pill green">Pass</span> or has a logged defect.</li>
+        <li>No open <strong>Critical</strong> or <strong>High</strong> defects.</li>
+        <li>All reconciliation checks (Section&nbsp;<a href="#rec">Reconciliation</a>) pass.</li>
+        <li>Sign-off section completed.</li>
+      </ul>
+      <div class="legend">
+        <span><strong>Status legend:</strong></span>
+        <span><span class="pill green">Pass</span> works as expected</span>
+        <span><span class="pill red">Fail</span> defect logged</span>
+        <span><span class="pill gold">Blocked</span> can't run yet</span>
+      </div>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- PHASE 0 -->
+    <section id="p0">
+      <div class="shead"><div class="snum">0</div><h1 class="stitle">Phase 0 &mdash; Setup &amp; Prerequisites</h1></div>
+      <table>
+        <thead><tr><th>Ref</th><th>Scenario &amp; Steps</th><th>Expected Result</th><th>Role</th><th>Status</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td class="ref">0.1</td><td>Confirm migrations applied (Neon) &mdash; run the verification query in the Appendix.</td><td>All enhancement columns/tables present.</td><td class="role">ORG_ADMIN</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">0.2</td><td>Open the app URL; log in as Org Admin.</td><td>Login page (teal/gold) loads; lands on the home hub page.</td><td class="role">ORG_ADMIN</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">0.3</td><td>Add a new user (Settings &rarr; Users &rarr; Add User) for each role; no password field is shown.</td><td>System generates a temp password shown <strong>once</strong> with a Copy button.</td><td class="role">ORG_ADMIN</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">0.4</td><td>Each tester logs in with their temp password.</td><td>Forced to change password on first login; then reaches the hub.</td><td class="role">ALL</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">0.5</td><td>Confirm landing page shows the 12 module tiles, gold logo, and "Open Dashboard".</td><td>Tiles navigate to each module; sidebar logo returns to hub.</td><td class="role">ALL</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- PHASE 1 -->
+    <section id="p1">
+      <div class="shead"><div class="snum">1</div><h1 class="stitle">Phase 1 &mdash; Master Data</h1></div>
+      <table>
+        <thead><tr><th>Ref</th><th>Scenario &amp; Steps</th><th>Expected Result</th><th>Role</th><th>Status</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td class="ref">1.1</td><td>Create the Chart of Accounts (Section 5.1). Try a control account and a child under a parent.</td><td>Accounts save; hierarchy shows; normal balance correct per class.</td><td class="role">ORG_ADMIN</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">1.2</td><td>Lock an account, then try to edit/delete it.</td><td>Locked account cannot be modified or deleted; clear message.</td><td class="role">ORG_ADMIN</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">1.3</td><td>Create FY2026 and open periods Jan&ndash;Jun.</td><td>12 periods created; status OPEN; numbered 1&ndash;12.</td><td class="role">ORG_ADMIN</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">1.4</td><td>Create tax codes VAT-STD 15%, EXEMPT, WHT-5; link VAT to acct 2110.</td><td>Codes saved with correct treatment/rate.</td><td class="role">ACCOUNTANT</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">1.5</td><td>Add exchange rates USD&rarr;GHS: 12.50 spot (Jan), 13.20 period-closing (Jun).</td><td>Rates saved; "Latest rate" shows newest.</td><td class="role">ACCOUNTANT</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">1.6</td><td>Create cost centres (e.g. Admin, Sales) and a department.</td><td>Saved; hierarchy/level respected.</td><td class="role">FINANCE_MANAGER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">1.7</td><td>Create customers Adom Ventures &amp; Kantamanto Retailers.</td><td>Customers saved with terms.</td><td class="role">AR_CLERK</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">1.8</td><td>Create suppliers Volta Supplies &amp; Tema Logistics.</td><td>Suppliers saved.</td><td class="role">AP_CLERK</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">1.9</td><td>Inventory setup: 2 locations, 3 items (INV-001 AVCO, INV-002 FIFO, INV-003 Standard+PPV). Link inventory &amp; COGS accounts; PPV acct on INV-003.</td><td>Items saved with correct costing method and GL links.</td><td class="role">ACCOUNTANT</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">1.10</td><td>Payroll setup: statutory config FY2026 (GRA PAYE bands, SSNIT 5.5%/13%, Tier 2 5%), salary components, 2 employees.</td><td>Config + employees saved; bands editable.</td><td class="role">FINANCE_MANAGER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">1.11</td><td>Fixed asset categories with GL accounts (cost, accum deprn, deprn expense, gain/loss on disposal, retained earnings).</td><td>Categories saved with all account links.</td><td class="role">FINANCE_MANAGER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">1.12</td><td>Configure approval workflows: JOURNAL_ENTRY (2 levels), PAYMENT, BUDGET. Add approvers; set ANY_ONE / ALL_REQUIRED / MAJORITY across levels.</td><td>One active workflow per entity type; creating a second deactivates the first.</td><td class="role">ORG_ADMIN</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">1.13</td><td>Post the opening capital journal (DR 1010 / CR 3010, GHS 200,000) and post it.</td><td>Posted; appears in GL &amp; trial balance.</td><td class="role">ACCOUNTANT</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- PHASE 2 -->
+    <section id="p2">
+      <div class="shead"><div class="snum">2</div><h1 class="stitle">Phase 2 &mdash; Journals &amp; General Ledger</h1></div>
+      <table>
+        <thead><tr><th>Ref</th><th>Scenario &amp; Steps</th><th>Expected Result</th><th>Role</th><th>Status</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td class="ref">2.1</td><td>Create a balanced journal (e.g. DR Rent 6030 4,000 / CR Bank 1010 4,000). Save as draft.</td><td>Saves; unbalanced entries are rejected.</td><td class="role">ACCOUNTANT</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">2.2</td><td>Submit the journal for approval.</td><td>Status &rarr; PENDING_APPROVAL; an approval request is created; level-1 approvers notified.</td><td class="role">ACCOUNTANT</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">2.3</td><td>Submitter tries to approve their own journal.</td><td><strong>Blocked</strong> &mdash; segregation of duties violation.</td><td class="role">ACCOUNTANT</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">2.4</td><td>Approver approves through all levels; entry auto-advances and posts.</td><td>Status &rarr; APPROVED &rarr; POSTED; ledger updated.</td><td class="role">FINANCE_MANAGER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">2.5</td><td>Reverse a posted journal (pick reverse date &amp; period).</td><td>A REVERSAL entry posts with opposite DR/CR; original marked REVERSED.</td><td class="role">FINANCE_MANAGER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">2.6</td><td>Multi-currency journal using USD bank (1020) at rate 12.50.</td><td>Base amounts computed; entry balances in base currency.</td><td class="role">ACCOUNTANT</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">2.7</td><td>View the General Ledger for account 1010 and drill to a transaction.</td><td>Running balance correct; drill opens the source journal.</td><td class="role">REPORT_VIEWER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- PHASE 3 -->
+    <section id="p3">
+      <div class="shead"><div class="snum">3</div><h1 class="stitle">Phase 3 &mdash; Receivables &amp; Payables</h1></div>
+      <h2>3.1 Accounts Receivable</h2>
+      <table>
+        <thead><tr><th>Ref</th><th>Scenario &amp; Steps</th><th>Expected Result</th><th>Role</th><th>Status</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td class="ref">3.1.1</td><td>Raise invoice to Adom Ventures: GHS 5,000 + VAT-STD 15%; post it.</td><td>DR Receivables 1110 5,750 / CR Sales 4010 5,000 / CR VAT 2110 750.</td><td class="role">AR_CLERK</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">3.1.2</td><td>Record a partial receipt of GHS 2,750 to Main Bank.</td><td>DR Bank / CR Receivables; outstanding = 3,000; status PARTIALLY_PAID.</td><td class="role">AR_CLERK</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">3.1.3</td><td>Issue a credit note against the invoice (e.g. 500).</td><td>Receivable reduced; GL reflects reversal of revenue/VAT pro-rata.</td><td class="role">AR_CLERK</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">3.1.4</td><td>Write off a small bad debt on an invoice.</td><td>DR Bad Debt 6060 / CR Receivables; invoice settled.</td><td class="role">FINANCE_MANAGER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">3.1.5</td><td>Open the AR Ageing report.</td><td>Buckets (current/30/60/90+) total to the receivables balance.</td><td class="role">REPORT_VIEWER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+        </tbody>
+      </table>
+      <h2>3.2 Accounts Payable</h2>
+      <table>
+        <thead><tr><th>Ref</th><th>Scenario &amp; Steps</th><th>Expected Result</th><th>Role</th><th>Status</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td class="ref">3.2.1</td><td>Enter supplier invoice from Volta Supplies: GHS 3,000 + VAT; post.</td><td>DR Expense/Inventory + VAT input / CR Payables 2010.</td><td class="role">AP_CLERK</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">3.2.2</td><td>Pay the supplier from Main Bank (full or partial).</td><td>DR Payables / CR Bank; outstanding updates.</td><td class="role">AP_CLERK</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">3.2.3</td><td>Record a supplier credit note.</td><td>Payable reduced; GL correct.</td><td class="role">AP_CLERK</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">3.2.4</td><td>Open the AP Ageing report.</td><td>Buckets total to the payables balance.</td><td class="role">REPORT_VIEWER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- PHASE 4 -->
+    <section id="p4">
+      <div class="shead"><div class="snum">4</div><h1 class="stitle">Phase 4 &mdash; Inventory (IAS 2)</h1></div>
+      <table>
+        <thead><tr><th>Ref</th><th>Scenario &amp; Steps</th><th>Expected Result</th><th>Role</th><th>Status</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td class="ref">4.1</td><td>Receipt 20 &times; INV-001 @ 250 (contra = Payables/Bank).</td><td>DR Inventory 1210 5,000 / CR contra; qty &amp; avg cost update.</td><td class="role">ACCOUNTANT</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">4.2</td><td>Receipt of INV-003 (Standard cost 40) at <strong>actual</strong> 44 with a PPV account set.</td><td>3-line journal: DR Inventory at std (40&times;qty), DR PPV 5015 for variance, CR contra at actual (44&times;qty).</td><td class="role">ACCOUNTANT</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">4.3</td><td>Issue 5 &times; INV-001 (sale/consumption).</td><td>DR COGS 5010 / CR Inventory 1210 at the costing-method rate.</td><td class="role">ACCOUNTANT</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">4.4</td><td>Create an ADJUSTMENT_OUT movement; a second user approves it.</td><td>Requires approval; posts to GL on approval (four-eyes).</td><td class="role">ACCOUNTANT / FINANCE_MANAGER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">4.5</td><td>Run a stocktake: create session, enter counts with a variance, then Post Variances selecting a <strong>period and contra account</strong>.</td><td>STOCKTAKE_IN/OUT movements created &amp; posted to GL; cannot post without a contra account.</td><td class="role">ACCOUNTANT</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">4.6</td><td>NRV write-down on INV-002: enter NRV (e.g. 4,200 &lt; cost 4,800), write-down expense acct, period.</td><td>DR NRV Write-down 5020 / CR Inventory; unit cost &amp; value updated to NRV; result shows total write-down.</td><td class="role">FINANCE_MANAGER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">4.7</td><td>Export the Items list to CSV (with a search filter active).</td><td>CSV downloads the filtered items with all columns.</td><td class="role">ACCOUNTANT</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">4.8</td><td>Open the Inventory Valuation report.</td><td>Grand total equals the Inventory Control balance on the Balance Sheet.</td><td class="role">REPORT_VIEWER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- PHASE 5 -->
+    <section id="p5">
+      <div class="shead"><div class="snum">5</div><h1 class="stitle">Phase 5 &mdash; Fixed Assets (IAS 16 / 36)</h1></div>
+      <table>
+        <thead><tr><th>Ref</th><th>Scenario &amp; Steps</th><th>Expected Result</th><th>Role</th><th>Status</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td class="ref">5.1</td><td>Create VEH-001 (Toyota Hilux, 180,000, 60 mo, reducing balance) &amp; BLD-001 (500,000, 240 mo, straight-line). Auto-post acquisition.</td><td>Assets saved; acquisition journal posts DR asset / CR bank-or-payable.</td><td class="role">FINANCE_MANAGER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">5.2</td><td>Open the <strong>Schedule</strong> tab on an asset; project 60 months.</td><td>Read-only table of period charge / accum / carrying value; no journals posted.</td><td class="role">FINANCE_MANAGER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">5.3</td><td>Run depreciation for a period (Preview, then Post).</td><td>DR Deprn Expense 60xx / CR Accum Deprn; first period prorated by acquisition day.</td><td class="role">FINANCE_MANAGER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">5.4</td><td>Try to run depreciation again for the same period.</td><td>Blocked &mdash; one run per period per asset.</td><td class="role">FINANCE_MANAGER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">5.5</td><td>Revalue BLD-001 upward (e.g. to 540,000) with a revaluation reserve account.</td><td>DR Asset / CR Revaluation Reserve 3030; surplus tracked. Subsequent depreciation transfers surplus to Retained Earnings.</td><td class="role">FINANCE_MANAGER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">5.6</td><td>Impair VEH-001: enter a <strong>recoverable amount</strong> below carrying value.</td><td>UI shows computed loss (CV &minus; recoverable); DR Impairment Loss 6050 / CR Asset.</td><td class="role">FINANCE_MANAGER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">5.7</td><td>Reverse part of the impairment (Impairment tab &rarr; reversal section).</td><td>DR Asset / CR Impairment reversal; cannot exceed prior loss or the no-impairment ceiling.</td><td class="role">FINANCE_MANAGER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">5.8</td><td>Dispose of an asset with proceeds to a <strong>proceeds account</strong>.</td><td>DR proceeds + accum deprn / CR asset; gain or loss posts to gain/loss-on-disposal.</td><td class="role">FINANCE_MANAGER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- PHASE 6 -->
+    <section id="p6">
+      <div class="shead"><div class="snum">6</div><h1 class="stitle">Phase 6 &mdash; Bank Reconciliation</h1></div>
+      <table>
+        <thead><tr><th>Ref</th><th>Scenario &amp; Steps</th><th>Expected Result</th><th>Role</th><th>Status</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td class="ref">6.1</td><td>Import a bank statement for Main Bank (opening/closing balances + several lines).</td><td>Statement &amp; lines saved; continuity validated.</td><td class="role">ACCOUNTANT</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">6.2</td><td>Run Auto-Match, then manually match a remaining line to a ledger entry.</td><td>Matched lines flagged; unmatched remain.</td><td class="role">ACCOUNTANT</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">6.3</td><td>Create a journal from an unmatched line (e.g. a bank charge to 6900).</td><td>Journal posts; line becomes matched.</td><td class="role">ACCOUNTANT</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">6.4</td><td>Confirm &amp; lock the reconciliation.</td><td>Balances must agree (or override flagged); statement locked.</td><td class="role">FINANCE_MANAGER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">6.5</td><td>Unlock the reconciliation with a reason.</td><td>Statement unlocked; action recorded in audit trail.</td><td class="role">FINANCE_MANAGER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- PHASE 7 -->
+    <section id="p7">
+      <div class="shead"><div class="snum">7</div><h1 class="stitle">Phase 7 &mdash; Payroll (Ghana / GRA)</h1></div>
+      <table>
+        <thead><tr><th>Ref</th><th>Scenario &amp; Steps</th><th>Expected Result</th><th>Role</th><th>Status</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td class="ref">7.1</td><td>Give EMP-001 a loan (e.g. 1,200, instalment 400) for deduction testing.</td><td>Loan ACTIVE with balance.</td><td class="role">FINANCE_MANAGER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">7.2</td><td>Create a payroll run for a period; review the preview.</td><td>PAYE per GRA bands; SSNIT 5.5% employee on basic; Tier 2; loan instalment deducted; net pay correct.</td><td class="role">ACCOUNTANT</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">7.3</td><td>Submit &rarr; Approve &rarr; Pay (different people for each step).</td><td>Four-eyes enforced; on Pay, GL journal posts (salary expense / payables / net pay).</td><td class="role">ACCOUNTANT / FIN MGR</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">7.4</td><td>Download the payment file (CSV) <strong>before</strong> locking.</td><td>CSV with employee bank details &amp; net pay.</td><td class="role">FINANCE_MANAGER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">7.5</td><td>Lock the run; then try to download the payment file again.</td><td>Run &rarr; LOCKED; payment file download is blocked after locking.</td><td class="role">FINANCE_MANAGER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">7.6</td><td>Add a one-off bonus override and re-test bonus tax (5% on first 15% of basic).</td><td>Bonus tax computed per GRA; excess flows into PAYE.</td><td class="role">ACCOUNTANT</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- PHASE 8 -->
+    <section id="p8">
+      <div class="shead"><div class="snum">8</div><h1 class="stitle">Phase 8 &mdash; Budgets &amp; Cost Centres</h1></div>
+      <table>
+        <thead><tr><th>Ref</th><th>Scenario &amp; Steps</th><th>Expected Result</th><th>Role</th><th>Status</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td class="ref">8.1</td><td>Create "FY2026 Operating Budget" with a description; add lines (Rent 6030 = 4,000/period).</td><td>Budget &amp; lines saved.</td><td class="role">FINANCE_MANAGER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">8.2</td><td>Submit the budget for approval; ORG_ADMIN approves.</td><td>isApproved = true; takes effect for variance.</td><td class="role">ORG_ADMIN</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">8.3</td><td>Raise a commitment (purchase order) against an account.</td><td>Commitment OPEN; reduces available budget.</td><td class="role">ACCOUNTANT</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">8.4</td><td>Open the Variance Report; toggle <code>byPeriod</code>.</td><td>Actuals scoped to FY2026; per-period rows when byPeriod on; over-threshold lines flagged.</td><td class="role">FINANCE_MANAGER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">8.5</td><td>Copy the budget to FY2027 with a 5% uplift.</td><td>New budget with all lines &times;1.05.</td><td class="role">FINANCE_MANAGER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">8.6</td><td>Mark a cost centre as a reportable segment; open the Segment Report.</td><td>Revenue/expense/result by segment (IFRS 8).</td><td class="role">FINANCE_MANAGER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- PHASE 9 -->
+    <section id="p9">
+      <div class="shead"><div class="snum">9</div><h1 class="stitle">Phase 9 &mdash; Tax &amp; FX Revaluation</h1></div>
+      <table>
+        <thead><tr><th>Ref</th><th>Scenario &amp; Steps</th><th>Expected Result</th><th>Role</th><th>Status</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td class="ref">9.1</td><td>Try to delete a tax code that is used on a posted line.</td><td>Blocked with a clear message; deactivate instead.</td><td class="role">ACCOUNTANT</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">9.2</td><td>Generate a VAT return for a period.</td><td>Output/Input/Net boxes correct; WITHHOLDING excluded; overlap with a filed return blocked.</td><td class="role">FINANCE_MANAGER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">9.3</td><td>Move a VAT return DRAFT &rarr; SUBMITTED &rarr; FILED; try to delete a non-draft.</td><td>Only DRAFT can be deleted.</td><td class="role">FINANCE_MANAGER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">9.4</td><td>Run FX Revaluation: pick a Period, FX Gain/Loss account (4900) &amp; period-end date (uses closing 13.20).</td><td>An ADJUSTMENT journal posts the revaluation difference on USD balances (IAS 21).</td><td class="role">FINANCE_MANAGER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">9.5</td><td>Reverse the FX revaluation (choose period &amp; date).</td><td>Reversing journal posts; revaluation marked REVERSED.</td><td class="role">FINANCE_MANAGER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- PHASE 10 -->
+    <section id="p10">
+      <div class="shead"><div class="snum">10</div><h1 class="stitle">Phase 10 &mdash; Approval Workflows</h1></div>
+      <table>
+        <thead><tr><th>Ref</th><th>Scenario &amp; Steps</th><th>Expected Result</th><th>Role</th><th>Status</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td class="ref">10.1</td><td>Submit a journal into a 2-level workflow; approve level 1, then level 2.</td><td>Advances level-by-level; only completes when the final level is satisfied.</td><td class="role">APPROVER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">10.2</td><td>Reject a request without a comment, then with a comment.</td><td>Comment is <strong>required</strong> to reject; entity returns to DRAFT.</td><td class="role">APPROVER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">10.3</td><td>Test an ALL_REQUIRED level with two approvers (both must approve) and a MAJORITY level.</td><td>Level satisfied only when the rule is met.</td><td class="role">APPROVER &times;2</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">10.4</td><td>Delegate a specific pending request to another user; that user approves.</td><td>Delegatee can act on that request; the workflow's approver list is not permanently changed.</td><td class="role">APPROVER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">10.5</td><td>Create a standing Delegation (date range) then revoke it.</td><td>Delegate can approve within the window; revoke stops it.</td><td class="role">APPROVER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">10.6</td><td>As the original requester, <strong>Withdraw</strong> a pending request.</td><td>Request &rarr; WITHDRAWN; a journal returns to DRAFT for editing/resubmission.</td><td class="role">ACCOUNTANT</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">10.7</td><td>Check the notification bell / inbox after each decision.</td><td>Requester &amp; approvers receive the right notifications; unread count updates.</td><td class="role">ALL</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- PHASE 11 -->
+    <section id="p11">
+      <div class="shead"><div class="snum">11</div><h1 class="stitle">Phase 11 &mdash; Period Close &amp; Financial Reports</h1></div>
+      <table>
+        <thead><tr><th>Ref</th><th>Scenario &amp; Steps</th><th>Expected Result</th><th>Role</th><th>Status</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td class="ref">11.1</td><td>Run the <strong>Trial Balance</strong> for the period.</td><td>Total debits = total credits; <code>isBalanced</code> true.</td><td class="role">ACCOUNTANT</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">11.2</td><td>From the TB, set filters, drill into an account, then click the breadcrumb back to the TB.</td><td>Filter state is restored &mdash; no need to re-select before the next drill-down.</td><td class="role">ACCOUNTANT</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">11.3</td><td>Generate the <strong>Balance Sheet</strong> (as-of date + comparative).</td><td>Current/Non-current split correct; <code>isBalanced</code> true (Assets = Liab + Equity).</td><td class="role">REPORT_VIEWER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">11.4</td><td>Generate the <strong>Income Statement</strong> (with YTD &amp; % of revenue).</td><td>GP, EBITDA, EBIT, PBT, net profit compute; margins shown.</td><td class="role">REPORT_VIEWER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">11.5</td><td>Generate the <strong>Cash Flow Statement</strong>.</td><td>Operating/Investing/Financing total; closing cash reconciles to the Balance Sheet (<code>reconciled</code> true).</td><td class="role">REPORT_VIEWER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">11.6</td><td>Generate the <strong>Statement of Changes in Equity</strong>.</td><td>All equity accounts appear (incl. unchanged Share Capital); closing equity reconciles to the Balance Sheet.</td><td class="role">REPORT_VIEWER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">11.7</td><td>Try to close a period that still has an unposted journal.</td><td>Blocked until all entries are posted.</td><td class="role">ORG_ADMIN</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">11.8</td><td>Close a period, then reopen it (with a reason), then lock it.</td><td>Status transitions work; locked period rejects new postings.</td><td class="role">ORG_ADMIN</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">11.9</td><td>Run Year-End Close for FY2026 (after all periods closed).</td><td>All periods LOCKED; recorded in audit trail.</td><td class="role">ORG_ADMIN</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- PHASE 12 -->
+    <section id="p12">
+      <div class="shead"><div class="snum">12</div><h1 class="stitle">Phase 12 &mdash; Governance (Audit, Users, Dashboard)</h1></div>
+      <table>
+        <thead><tr><th>Ref</th><th>Scenario &amp; Steps</th><th>Expected Result</th><th>Role</th><th>Status</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td class="ref">12.1</td><td>Open the Audit Trail; filter by module, user, action, date.</td><td>Every action from earlier phases is logged (login, journal, payroll, assets, inventory, approvals, periods, bank, etc.).</td><td class="role">AUDITOR</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">12.2</td><td>Open a log entry; check before/after state &amp; IP.</td><td>Detail shows previous/new values for updates.</td><td class="role">AUDITOR</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">12.3</td><td>Export the audit trail to CSV.</td><td>CSV includes Previous Value / New Value columns.</td><td class="role">AUDITOR</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">12.4</td><td>A REPORT_VIEWER user tries to open the Audit Trail.</td><td>Access denied (AUDITOR or ORG_ADMIN only).</td><td class="role">REPORT_VIEWER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">12.5</td><td>User Management: change a user's role; deactivate then reactivate a user; reset a password.</td><td>Role change immediate; deactivated user can't log in; reset shows a new generated password once.</td><td class="role">ORG_ADMIN</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">12.6</td><td>Trigger 5 failed logins on a test account, then unlock it.</td><td>Account locks after 5 attempts; admin Unlock restores access.</td><td class="role">ORG_ADMIN</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+          <tr><td class="ref">12.7</td><td>Open the Dashboard.</td><td>All 8 KPI cards populate; monthly Revenue/Expense bar chart; Budget Alerts; Pending Approvals shows <em>your</em> count; recent journals list.</td><td class="role">FINANCE_MANAGER</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td><td></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- RECON -->
+    <section id="rec">
+      <div class="shead"><div class="snum">&#10003;</div><h1 class="stitle">Reconciliation &amp; Integrity Checks</h1></div>
+      <p>Run these cross-checks at the end. They confirm the modules tie together — the strongest evidence the system is sound.</p>
+      <table>
+        <thead><tr><th>Ref</th><th>Check</th><th>Expected</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td class="ref">R1</td><td>Trial Balance</td><td>Total debits = total credits.</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td></tr>
+          <tr><td class="ref">R2</td><td>Balance Sheet</td><td>Total Assets = Total Liabilities + Equity.</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td></tr>
+          <tr><td class="ref">R3</td><td>Inventory valuation = GL</td><td>Valuation report total = Inventory Control (1210) balance.</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td></tr>
+          <tr><td class="ref">R4</td><td>AR / AP sub-ledgers = GL</td><td>AR ageing total = 1110; AP ageing total = 2010.</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td></tr>
+          <tr><td class="ref">R5</td><td>Fixed asset register = GL</td><td>Sum of carrying values = (cost accts &minus; accum deprn accts).</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td></tr>
+          <tr><td class="ref">R6</td><td>Cash Flow reconciliation</td><td>CFS closing cash = Balance Sheet cash &amp; bank.</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td></tr>
+          <tr><td class="ref">R7</td><td>Changes in Equity reconciliation</td><td>SOCE closing equity = Balance Sheet equity.</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td></tr>
+          <tr><td class="ref">R8</td><td>Bank reconciliation</td><td>Reconciled statement balance = GL bank balance.</td><td class="status"><input type="checkbox">P <input type="checkbox">F</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- DEFECTS -->
+    <section id="def">
+      <div class="shead"><div class="snum">&#9888;</div><h1 class="stitle">Defect Log</h1></div>
+      <p>Log every failure here. Severity: <span class="pill red">Critical</span> (blocks/loses data or wrong GL) &middot; <span class="pill gold">High</span> (major feature broken) &middot; <span class="pill teal">Medium</span> &middot; <span class="pill green">Low</span> (cosmetic).</p>
+      <table>
+        <thead><tr><th>ID</th><th>Test Ref</th><th>Module</th><th>Description (what happened vs expected)</th><th>Severity</th><th>Reported By</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td class="ref">D-01</td><td></td><td></td><td></td><td></td><td></td><td>Open</td></tr>
+          <tr><td class="ref">D-02</td><td></td><td></td><td></td><td></td><td></td><td>Open</td></tr>
+          <tr><td class="ref">D-03</td><td></td><td></td><td></td><td></td><td></td><td>Open</td></tr>
+          <tr><td class="ref">D-04</td><td></td><td></td><td></td><td></td><td></td><td>Open</td></tr>
+          <tr><td class="ref">D-05</td><td></td><td></td><td></td><td></td><td></td><td>Open</td></tr>
+          <tr><td class="ref">D-06</td><td></td><td></td><td></td><td></td><td></td><td>Open</td></tr>
+          <tr><td class="ref">D-07</td><td></td><td></td><td></td><td></td><td></td><td>Open</td></tr>
+          <tr><td class="ref">D-08</td><td></td><td></td><td></td><td></td><td></td><td>Open</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- TRACKER -->
+    <section id="track">
+      <div class="shead"><div class="snum">&#9201;</div><h1 class="stitle">Daily Progress Tracker</h1></div>
+      <table>
+        <thead><tr><th>Date</th><th>Phases attempted</th><th>Pass</th><th>Fail</th><th>Blocked</th><th>New defects</th><th>Lead's notes</th></tr></thead>
+        <tbody>
+          <tr><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+          <tr><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+          <tr><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+          <tr><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+          <tr><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- SIGNOFF -->
+    <section id="sign">
+      <div class="shead"><div class="snum">&#9998;</div><h1 class="stitle">Sign-off &amp; Acceptance</h1></div>
+      <p>UAT is accepted when all exit criteria are met and the table below is signed.</p>
+      <table>
+        <thead><tr><th>Role</th><th>Name</th><th>Decision (Accept / Reject)</th><th>Date</th><th>Signature</th></tr></thead>
+        <tbody>
+          <tr><td>Test Lead</td><td></td><td></td><td></td><td></td></tr>
+          <tr><td>Finance Manager</td><td></td><td></td><td></td><td></td></tr>
+          <tr><td>Org Admin / Sponsor</td><td></td><td></td><td></td><td></td></tr>
+        </tbody>
+      </table>
+      <div class="callout tip"><span class="i">&#10003;</span><div>Summary at close &mdash; Total cases: <strong>____</strong> &middot; Passed: <strong>____</strong> &middot; Failed: <strong>____</strong> &middot; Open Critical/High defects: <strong>____</strong></div></div>
+    </section>
+
+    <!-- APPENDIX -->
+    <section id="appx">
+      <div class="shead"><div class="snum">A</div><h1 class="stitle">Appendix &mdash; Notes &amp; Pre-flight</h1></div>
+      <h2>A.1 Migration pre-flight (Org Admin, before Day 1)</h2>
+      <p>Confirm these were applied in the Neon SQL editor. The enhancement migrations are required for: inventory PPV, NRV write-down, payroll lock, asset revaluation surplus &amp; impairment reversal, budget description.</p>
+      <ul>
+        <li><code>fixed_assets_enhancements_migration.sql</code> &mdash; revaluation surplus, retained-earnings account, impairment-reversals table</li>
+        <li><code>inventory_enhancements_migration.sql</code> &mdash; purchase price variance account</li>
+        <li><code>budgets_enhancements_migration.sql</code> &mdash; budget description</li>
+        <li><code>payroll_enhancements_migration.sql</code> &mdash; payroll <code>locked_by</code> / <code>locked_at</code></li>
+        <li>(plus the base migrations: fixed assets, payroll, approvals, tax, AP, audit, user management)</li>
+      </ul>
+      <p>Quick check query (run in Neon) &mdash; all four should return a row:</p>
+      <pre style="background:#0e3243;color:#d7e1e7;border-radius:8px;padding:14px;font-size:12.5px;overflow-x:auto"><code style="background:none;border:none;color:inherit">SELECT 'inv_ppv'      AS check, count(*) FROM information_schema.columns WHERE table_name='inventory_items' AND column_name='purchase_price_variance_account_id'
+UNION ALL SELECT 'payroll_lock',  count(*) FROM information_schema.columns WHERE table_name='payroll_runs'    AND column_name='locked_at'
+UNION ALL SELECT 'asset_surplus', count(*) FROM information_schema.columns WHERE table_name='fixed_assets'     AND column_name='revaluation_surplus_remaining'
+UNION ALL SELECT 'impair_rev_tbl',count(*) FROM information_schema.tables  WHERE table_name='asset_impairment_reversals';</code></pre>
+
+      <h2>A.2 Testing tips</h2>
+      <ul>
+        <li><strong>Segregation of duties:</strong> use different logins for create vs approve vs pay. The system enforces it and will block same-person actions.</li>
+        <li><strong>GL verification:</strong> after each posting, open the General Ledger or Trial Balance and confirm the exact accounts and amounts.</li>
+        <li><strong>One change at a time:</strong> if a result looks wrong, note the test Ref and exact values in the Defect Log so it can be reproduced.</li>
+        <li><strong>Dates matter:</strong> post transactions inside an OPEN period; FX revaluation uses the period-closing rate on/before the chosen date.</li>
+        <li><strong>Don't lock too early:</strong> download payroll payment files and finish reconciliations before locking runs/periods.</li>
+      </ul>
+
+      <h2>A.3 What "good" looks like</h2>
+      <p>By the end, the team should be able to demonstrate: a full transaction cycle from invoice to cash, a payroll run posted and locked, depreciation and asset events posted, a reconciled bank statement, a balanced trial balance, four financial statements that reconcile to each other, and an audit trail that captured every action — all under enforced approval controls.</p>
+    </section>
+
+  </div>
+</div>
+</body>
+</html>
