@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import { Building2 } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
-import { createOrganisation } from '@/services/organisations.service';
+import { createOrganisation, type CoaTemplate } from '@/services/organisations.service';
 import { api } from '@/services/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,9 +19,10 @@ export function SetupOrgPage() {
   const [name, setName] = useState('');
   const [baseCurrency, setBaseCurrency] = useState('USD');
   const [country, setCountry] = useState('');
+  const [template, setTemplate] = useState<CoaTemplate>('retail');
 
   const mutation = useMutation({
-    mutationFn: () => createOrganisation({ name, baseCurrency, country: country || undefined }),
+    mutationFn: () => createOrganisation({ name, baseCurrency, country: country || undefined, template }),
     onSuccess: async (org) => {
       // Refresh user profile to pick up new org membership
       const profile = await api.get('/auth/me').then((r) => r.data.data);
@@ -67,6 +68,19 @@ export function SetupOrgPage() {
                 value={country}
                 onChange={(e) => setCountry(e.target.value)}
               />
+            </div>
+
+            <div>
+              <label className="text-sm font-medium mb-1.5 block">Industry Chart of Accounts *</label>
+              <Select value={template} onChange={(e) => setTemplate(e.target.value as CoaTemplate)}>
+                <option value="retail">Retail / Trading (buys &amp; sells goods)</option>
+                <option value="services">Services / Consulting</option>
+                <option value="technology">Technology / SaaS</option>
+                <option value="agriculture">Agriculture / Farming</option>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-1">
+                A complete chart of accounts for this industry — including expenses, COGS, tax and payroll accounts — is created automatically. You can customise it afterward.
+              </p>
             </div>
 
             {mutation.isError && (

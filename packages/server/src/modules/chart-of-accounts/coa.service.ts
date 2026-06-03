@@ -244,23 +244,17 @@ export async function getAccountHierarchy(organisationId: string): Promise<Accou
 
 // ─── Template Import ─────────────────────────────────────────────────────────
 
-export async function importTemplate(
+// Seeds a chart-of-accounts template into an organisation using the given
+// Prisma client (the live client, or a transaction client during org creation).
+// Accounts are created parents-before-children so parentId links resolve.
+export async function seedTemplateAccounts(
+  client: Prisma.TransactionClient,
   organisationId: string,
-  input: ImportTemplateInput,
-): Promise<{ imported: number }> {
-  const existing = await prisma.account.count({
-    where: { organisationId, isDeleted: false },
-  });
-  if (existing > 0) {
-    throw new ConflictError(
-      'Organisation already has accounts. Template import is only allowed on a fresh chart of accounts.',
-    );
-  }
-
-  const template: CoaTemplate = getTemplate(input.templateName);
+  templateName: string,
+): Promise<number> {
+  const template: CoaTemplate = getTemplate(templateName);
   const codeToId = new Map<string, string>();
 
-  // Accounts are ordered parents-before-children in the template
   for (const entry of template.accounts) {
     const parentId = entry.parentCode ? (codeToId.get(entry.parentCode) ?? null) : null;
 
@@ -270,7 +264,7 @@ export async function importTemplate(
       );
     }
 
-    const account = await prisma.account.create({
+    const account = await client.account.create({
       data: {
         organisationId,
         code: entry.code,
@@ -291,7 +285,24 @@ export async function importTemplate(
     codeToId.set(entry.code, account.id);
   }
 
-  return { imported: template.accounts.length };
+  return template.accounts.length;
+}
+
+export async function importTemplate(
+  organisationId: string,
+  input: ImportTemplateInput,
+): Promise<{ imported: number }> {
+  const existing = await prisma.account.count({
+    where: { organisationId, isDeleted: false },
+  });
+  if (existing > 0) {
+    throw new ConflictError(
+      'Organisation already has accounts. Template import is only allowed on a fresh chart of accounts.',
+    );
+  }
+
+  const imported = await seedTemplateAccounts(prisma, organisationId, input.templateName);
+  return { imported };
 }
 
 // ─── Balance Query ────────────────────────────────────────────────────────────

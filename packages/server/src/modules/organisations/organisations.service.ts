@@ -9,6 +9,7 @@ import {
 } from '../../utils/errors';
 import { buildPagination } from '../../utils/response';
 import { getPaginationOffset } from '../../utils/pagination';
+import { seedTemplateAccounts } from '../chart-of-accounts/coa.service';
 import type {
   CreateOrganisationInput,
   UpdateOrganisationInput,
@@ -17,8 +18,11 @@ import type {
 } from './organisations.schemas';
 
 export async function createOrganisation(input: CreateOrganisationInput, creatorId: string) {
+  // `template` is not an Organisation column — pull it out before creating the org.
+  const { template, ...orgData } = input;
+
   return prisma.$transaction(async (tx) => {
-    const org = await tx.organisation.create({ data: input });
+    const org = await tx.organisation.create({ data: orgData });
 
     // Creator becomes ORG_ADMIN of their organisation
     await tx.organisationUser.create({
@@ -30,8 +34,14 @@ export async function createOrganisation(input: CreateOrganisationInput, creator
       },
     });
 
+    // Seed a complete chart of accounts so the org is usable immediately
+    // (every module needs posting accounts). Atomic with org creation.
+    if (template) {
+      await seedTemplateAccounts(tx, org.id, template);
+    }
+
     return org;
-  });
+  }, { timeout: 60000, maxWait: 10000 });
 }
 
 export async function getOrganisation(organisationId: string, requestingUserId: string, isSuperAdmin: boolean) {

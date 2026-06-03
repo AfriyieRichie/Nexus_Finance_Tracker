@@ -10,6 +10,8 @@ export const createOrganisationSchema = z.object({
   baseCurrency: z.string().length(3).toUpperCase().default('USD'),
   fiscalYearStart: z.number().int().min(1).max(12).default(1),
   industry: z.string().max(100).optional(),
+  // Chart-of-accounts template seeded into the new organisation on creation.
+  template: z.enum(['retail', 'services', 'technology', 'agriculture']).optional(),
   phone: z.string().max(50).optional(),
   email: z.string().email().optional(),
   website: z.string().url().optional(),

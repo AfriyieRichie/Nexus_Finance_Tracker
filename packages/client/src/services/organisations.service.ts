@@ -1,10 +1,13 @@
 import { api } from './api';
 
+export type CoaTemplate = 'retail' | 'services' | 'technology' | 'agriculture';
+
 export async function createOrganisation(data: {
   name: string;
   baseCurrency: string;
   country?: string;
   taxId?: string;
+  template?: CoaTemplate;
 }) {
   const res = await api.post('/organisations', data);
   return res.data.data;
