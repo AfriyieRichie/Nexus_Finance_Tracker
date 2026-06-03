@@ -350,6 +350,19 @@ const EMP_TABS: { key: EmpTab; label: string }[] = [
   { key: 'loans',        label: 'Loans' },
 ];
 
+// Human-readable labels for server validation errors (keyed by schema field).
+const EMP_FIELD_LABELS: Record<string, string> = {
+  employeeNumber: 'Employee Number', firstName: 'First Name', lastName: 'Last Name',
+  email: 'Email', phone: 'Phone', nationalId: 'National ID', tinNumber: 'TIN',
+  ssnitNumber: 'SSNIT Number', employmentType: 'Employment Type', payFrequency: 'Pay Frequency',
+  startDate: 'Start Date', endDate: 'End Date', jobTitle: 'Job Title',
+  departmentId: 'Department', costCentreId: 'Cost Centre', basicSalary: 'Basic Salary',
+  bankName: 'Bank Name', bankAccountNumber: 'Bank Account Number', bankBranch: 'Bank Branch',
+  tier3EmployeeRate: 'Tier 3 Employee Rate', tier3EmployerRate: 'Tier 3 Employer Rate',
+  salaryExpenseAccountId: 'Salary Expense Account', overtimeType: 'Overtime Type',
+  overtimeFixedAmount: 'Overtime Fixed Amount', overtimeMultiplier: 'Overtime Multiplier',
+};
+
 const LOAN_STATUS_COLORS: Record<string, string> = {
   ACTIVE:    'bg-blue-100 text-blue-700',
   COMPLETED: 'bg-green-100 text-green-700',
@@ -535,9 +548,41 @@ function EmployeeDialog({ organisationId, emp, employees, onClose }: {
       }
     },
     onError: (err: unknown) => {
-      setSaveError((err as { response?: { data?: { error?: { message?: string }; message?: string } } })?.response?.data?.error?.message ?? (err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? (err as Error)?.message ?? 'Failed to save employee');
+      const data = (err as { response?: { data?: { error?: { message?: string; details?: Record<string, string[]> }; message?: string } } })?.response?.data;
+      const details = data?.error?.details;
+      if (details && Object.keys(details).length > 0) {
+        // Turn { basicSalary: ["Number must be greater than 0"] } into a readable,
+        // field-named message instead of the generic "Invalid request data".
+        const msg = Object.entries(details)
+          .map(([field, msgs]) => `${EMP_FIELD_LABELS[field] ?? field}: ${(msgs ?? []).join(', ')}`)
+          .join(' · ');
+        setSaveError(msg);
+        return;
+      }
+      setSaveError(data?.error?.message ?? data?.message ?? (err as Error)?.message ?? 'Failed to save employee');
     },
   });
+
+  // Catch missing required fields before hitting the API, and send the user to
+  // the tab that holds the offending field (basicSalary lives on Compensation,
+  // which is easy to skip). Returns true if it's safe to save.
+  const guardRequiredFields = (): boolean => {
+    const checks: { ok: boolean; msg: string; tab: EmpTab }[] = [
+      { ok: !!form.employeeNumber.trim(), msg: 'Employee Number is required.', tab: 'personal' },
+      { ok: !!form.firstName.trim(),      msg: 'First Name is required.',      tab: 'personal' },
+      { ok: !!form.lastName.trim(),       msg: 'Last Name is required.',       tab: 'personal' },
+      { ok: !!form.startDate,             msg: 'Start Date is required.',       tab: 'employment' },
+      { ok: form.basicSalary !== '' && Number(form.basicSalary) > 0,
+        msg: 'Basic Salary is required and must be greater than 0.',           tab: 'compensation' },
+    ];
+    const missing = checks.filter((c) => !c.ok);
+    if (missing.length > 0) {
+      setActiveTab(missing[0].tab);
+      setSaveError(missing[0].msg);
+      return false;
+    }
+    return true;
+  };
 
   const assignComp = useMutation({
     mutationFn: () => payrollSvc.assignComponent(organisationId, effectiveEmpId!, {
@@ -975,7 +1020,7 @@ function EmployeeDialog({ organisationId, emp, employees, onClose }: {
         <div className="flex gap-2">
           <Button variant="outline" onClick={onClose}>{savedEmpId && !emp ? 'Done' : 'Cancel'}</Button>
           {!isPayElements && !isLoans && (
-            <Button onClick={() => { setSaveError(null); save.mutate(); }} disabled={save.isPending}>
+            <Button onClick={() => { setSaveError(null); if (guardRequiredFields()) save.mutate(); }} disabled={save.isPending}>
               {save.isPending ? 'Saving…' : emp ? 'Save' : savedEmpId ? 'Update' : 'Save & Continue →'}
             </Button>
           )}
