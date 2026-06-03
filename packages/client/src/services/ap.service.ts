@@ -6,8 +6,50 @@ export interface Supplier {
   name: string;
   email: string | null;
   phone: string | null;
+  address: Record<string, unknown> | null;
+  taxId: string | null;
   paymentTerms: number;
+  bankDetails: Record<string, unknown> | null;
+  whtRate: string | null;
+  whtClassification: string | null;
   isActive: boolean;
+}
+
+export interface SupplierInput {
+  code: string;
+  name: string;
+  email?: string;
+  phone?: string;
+  address?: Record<string, unknown>;
+  taxId?: string;
+  paymentTerms?: number;
+  bankDetails?: Record<string, unknown>;
+  whtRate?: number;
+  whtClassification?: string;
+}
+
+export interface SupplierStatementLine {
+  date: string;
+  type: 'INVOICE' | 'PAYMENT' | 'CREDIT_NOTE';
+  reference: string;
+  description: string;
+  debit: number;
+  credit: number;
+  balance: number;
+}
+
+export interface SupplierStatement {
+  supplier: { id: string; name: string; code: string; email: string | null; phone: string | null; address: Record<string, unknown> | null };
+  organisation: { name: string; currency: string; address: Record<string, unknown> | null; email: string | null };
+  period: { from: string; to: string };
+  currency: string;
+  openingBalance: number;
+  transactions: SupplierStatementLine[];
+  closingBalance: number;
+  totalInvoiced: number;
+  totalPayments: number;
+  totalCredits: number;
+  generatedAt: string;
 }
 
 export interface SupplierInvoice {
@@ -30,11 +72,24 @@ export async function listSuppliers(organisationId: string, params?: { search?: 
   return { suppliers: res.data.data as Supplier[], total: res.data.pagination?.total ?? 0 };
 }
 
-export async function createSupplier(organisationId: string, data: {
-  code: string; name: string; email?: string; phone?: string; paymentTerms?: number;
-}) {
+export async function createSupplier(organisationId: string, data: SupplierInput) {
   const res = await api.post(`/organisations/${organisationId}/ap/suppliers`, data);
   return res.data.data as Supplier;
+}
+
+export async function updateSupplier(organisationId: string, supplierId: string, data: Partial<SupplierInput>) {
+  const res = await api.put(`/organisations/${organisationId}/ap/suppliers/${supplierId}`, data);
+  return res.data.data as Supplier;
+}
+
+export async function getSupplierStatement(organisationId: string, supplierId: string, from: string, to: string) {
+  const res = await api.get(`/organisations/${organisationId}/ap/suppliers/${supplierId}/statement`, { params: { from, to } });
+  return res.data.data as SupplierStatement;
+}
+
+export async function emailSupplierStatement(organisationId: string, supplierId: string, body: { from: string; to: string; toEmail?: string }) {
+  const res = await api.post(`/organisations/${organisationId}/ap/suppliers/${supplierId}/statement/email`, body);
+  return res.data.data as { sentTo: string; period: { from: string; to: string } };
 }
 
 export async function listSupplierInvoices(organisationId: string, params?: { status?: string; page?: number; pageSize?: number }) {

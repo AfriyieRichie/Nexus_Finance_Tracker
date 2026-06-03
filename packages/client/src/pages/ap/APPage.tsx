@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ShoppingCart, Plus, FileText, TrendingDown, Trash2 } from 'lucide-react';
+import { ShoppingCart, Plus, FileText, TrendingDown, Trash2, Pencil, BookOpen, Printer, Mail } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
-import { listSuppliers, createSupplier, listSupplierInvoices, createSupplierInvoice, postSupplierInvoice, getApAgeing } from '@/services/ap.service';
+import { listSuppliers, createSupplier, updateSupplier, getSupplierStatement, emailSupplierStatement, listSupplierInvoices, createSupplierInvoice, postSupplierInvoice, getApAgeing } from '@/services/ap.service';
+import type { Supplier, SupplierInput, SupplierStatement } from '@/services/ap.service';
 import { listAccounts } from '@/services/accounts.service';
 import { listPeriods } from '@/services/periods.service';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -24,33 +25,64 @@ const STATUS_VARIANT: Record<string, 'success' | 'warning' | 'info' | 'destructi
   VOID: 'secondary',
 };
 
-function NewSupplierDialog({ organisationId }: { organisationId: string }) {
+function SupplierDialog({ organisationId, supplier, trigger }: { organisationId: string; supplier?: Supplier; trigger: React.ReactNode }) {
   const qc = useQueryClient();
+  const isEdit = !!supplier;
   const [open, setOpen] = useState(false);
-  const [code, setCode] = useState('');
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [paymentTerms, setPaymentTerms] = useState('30');
+  const addr = (supplier?.address ?? {}) as { street?: string; city?: string; country?: string };
+  const bank = (supplier?.bankDetails ?? {}) as { bankName?: string; accountNumber?: string; accountName?: string; branch?: string };
+
+  const [code, setCode] = useState(supplier?.code ?? '');
+  const [name, setName] = useState(supplier?.name ?? '');
+  const [email, setEmail] = useState(supplier?.email ?? '');
+  const [phone, setPhone] = useState(supplier?.phone ?? '');
+  const [taxId, setTaxId] = useState(supplier?.taxId ?? '');
+  const [paymentTerms, setPaymentTerms] = useState(String(supplier?.paymentTerms ?? 30));
+  const [street, setStreet] = useState(addr.street ?? '');
+  const [city, setCity] = useState(addr.city ?? '');
+  const [country, setCountry] = useState(addr.country ?? '');
+  const [bankName, setBankName] = useState(bank.bankName ?? '');
+  const [accountNumber, setAccountNumber] = useState(bank.accountNumber ?? '');
+  const [accountName, setAccountName] = useState(bank.accountName ?? '');
+  const [branch, setBranch] = useState(bank.branch ?? '');
+  const [whtRate, setWhtRate] = useState(supplier?.whtRate ? String(Number(supplier.whtRate)) : '');
+  const [whtClassification, setWhtClassification] = useState(supplier?.whtClassification ?? '');
+
+  function buildPayload(): SupplierInput {
+    const address = (street || city || country) ? { street, city, country } : undefined;
+    const bankDetails = (bankName || accountNumber || accountName || branch)
+      ? { bankName, accountNumber, accountName, branch } : undefined;
+    return {
+      code, name,
+      email: email || undefined,
+      phone: phone || undefined,
+      taxId: taxId || undefined,
+      paymentTerms: Number(paymentTerms),
+      address, bankDetails,
+      whtRate: whtRate !== '' ? Number(whtRate) : undefined,
+      whtClassification: whtClassification || undefined,
+    };
+  }
 
   const mutation = useMutation({
-    mutationFn: () => createSupplier(organisationId, { code, name, email: email || undefined, paymentTerms: Number(paymentTerms) }),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['ap-suppliers'] });
-      setOpen(false); setCode(''); setName(''); setEmail('');
-    },
+    mutationFn: () => isEdit
+      ? updateSupplier(organisationId, supplier!.id, buildPayload())
+      : createSupplier(organisationId, buildPayload()),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['ap-suppliers'] }); setOpen(false); },
   });
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm"><Plus size={14} /> New Supplier</Button>
-      </DialogTrigger>
-      <DialogContent title="New Supplier" description="Add a new supplier to your accounts payable.">
-        <div className="space-y-3">
+      <DialogTrigger asChild>{trigger}</DialogTrigger>
+      <DialogContent
+        title={isEdit ? 'Edit Supplier' : 'New Supplier'}
+        description={isEdit ? 'Update supplier details.' : 'Add a new supplier to your accounts payable.'}
+      >
+        <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-medium mb-1 block">Code *</label>
-              <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="SUPP001" className="h-8 text-xs" />
+              <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="SUPP001" className="h-8 text-xs" disabled={isEdit} />
             </div>
             <div>
               <label className="text-xs font-medium mb-1 block">Payment Terms (days)</label>
@@ -61,21 +93,179 @@ function NewSupplierDialog({ organisationId }: { organisationId: string }) {
             <label className="text-xs font-medium mb-1 block">Name *</label>
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Supplier name" className="h-8 text-xs" />
           </div>
-          <div>
-            <label className="text-xs font-medium mb-1 block">Email</label>
-            <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@example.com" className="h-8 text-xs" />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-medium mb-1 block">Email</label>
+              <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@example.com" className="h-8 text-xs" />
+            </div>
+            <div>
+              <label className="text-xs font-medium mb-1 block">Phone</label>
+              <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="0200000000" className="h-8 text-xs" />
+            </div>
           </div>
+          <div>
+            <label className="text-xs font-medium mb-1 block">Tax ID / VAT Number</label>
+            <Input value={taxId} onChange={(e) => setTaxId(e.target.value)} placeholder="P00..." className="h-8 text-xs" />
+          </div>
+
+          <div>
+            <label className="text-xs font-medium mb-1 block">Address</label>
+            <Input value={street} onChange={(e) => setStreet(e.target.value)} placeholder="Street" className="h-8 text-xs" />
+            <div className="grid grid-cols-2 gap-3 mt-2">
+              <Input value={city} onChange={(e) => setCity(e.target.value)} placeholder="City" className="h-8 text-xs" />
+              <Input value={country} onChange={(e) => setCountry(e.target.value)} placeholder="Country" className="h-8 text-xs" />
+            </div>
+          </div>
+
+          <div className="border-t pt-3">
+            <p className="text-xs font-semibold mb-2">Bank Details (for payments)</p>
+            <div className="grid grid-cols-2 gap-3">
+              <Input value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="Bank name" className="h-8 text-xs" />
+              <Input value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="Branch" className="h-8 text-xs" />
+              <Input value={accountName} onChange={(e) => setAccountName(e.target.value)} placeholder="Account name" className="h-8 text-xs" />
+              <Input value={accountNumber} onChange={(e) => setAccountNumber(e.target.value)} placeholder="Account number" className="h-8 text-xs" />
+            </div>
+          </div>
+
+          <div className="border-t pt-3">
+            <p className="text-xs font-semibold mb-2">Withholding Tax (Ghana)</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium mb-1 block">WHT Rate (%)</label>
+                <Input type="number" step="0.5" value={whtRate} onChange={(e) => setWhtRate(e.target.value)} placeholder="e.g. 7.5" className="h-8 text-xs" />
+              </div>
+              <div>
+                <label className="text-xs font-medium mb-1 block">WHT Classification</label>
+                <Input value={whtClassification} onChange={(e) => setWhtClassification(e.target.value)} placeholder="e.g. Goods / Services" className="h-8 text-xs" />
+              </div>
+            </div>
+          </div>
+
           {mutation.isError && (
             <p className="text-xs text-destructive">
-              {(mutation.error as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message ?? 'Failed'}
+              {(mutation.error as { response?: { data?: { error?: { message?: string }; message?: string } } })?.response?.data?.error?.message ?? 'Failed'}
             </p>
           )}
           <div className="flex justify-end gap-2 pt-1">
             <DialogClose asChild><Button variant="outline" size="sm">Cancel</Button></DialogClose>
             <Button size="sm" disabled={!code || !name || mutation.isPending} onClick={() => mutation.mutate()}>
-              {mutation.isPending ? 'Creating…' : 'Create'}
+              {mutation.isPending ? 'Saving…' : isEdit ? 'Save Changes' : 'Create'}
             </Button>
           </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Supplier Statement Dialog ───────────────────────────────────────────────
+
+function printSupplierStatement(s: SupplierStatement) {
+  const fmtAmt = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtDate = (d: string) => new Date(d + 'T00:00:00Z').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  const win = window.open('', '_blank');
+  if (!win) return;
+  const rows = s.transactions.map((t) => `
+    <tr><td>${fmtDate(t.date)}</td><td style="color:#6b7280">${t.reference}</td><td>${t.description}</td>
+    <td style="text-align:right">${t.debit > 0 ? fmtAmt(t.debit) : ''}</td>
+    <td style="text-align:right;color:#16a34a">${t.credit > 0 ? fmtAmt(t.credit) : ''}</td>
+    <td style="text-align:right;font-weight:600">${fmtAmt(t.balance)}</td></tr>`).join('');
+  win.document.write(`<!DOCTYPE html><html><head><title>Supplier Statement – ${s.supplier.name}</title>
+    <style>body{font-family:Arial,sans-serif;color:#111;max-width:760px;margin:0 auto;padding:24px}
+    table{width:100%;border-collapse:collapse}th,td{padding:6px 10px;font-size:12px;border-bottom:1px solid #eee}
+    thead tr{background:#1d4ed8;color:#fff}</style></head><body>
+    <div style="border-bottom:3px solid #1d4ed8;padding-bottom:12px;margin-bottom:16px">
+      <h2 style="margin:0;font-size:20px;color:#1d4ed8">${s.organisation.name}</h2>
+      <p style="margin:4px 0 0;font-size:12px;color:#6b7280">Supplier Account Statement</p></div>
+    <table style="margin-bottom:14px;border:none"><tr style="background:none">
+      <td style="border:none"><strong>${s.supplier.name}</strong><br><span style="color:#6b7280">${s.supplier.code}</span></td>
+      <td style="border:none;text-align:right">Period: ${fmtDate(s.period.from)} – ${fmtDate(s.period.to)}<br>Currency: ${s.currency}</td></tr></table>
+    <table><thead><tr><th>Date</th><th>Reference</th><th>Description</th><th style="text-align:right">Invoiced</th><th style="text-align:right">Paid/Credit</th><th style="text-align:right">Balance</th></tr></thead>
+    <tbody><tr style="background:#f1f5f9"><td colspan="5"><strong>Opening Balance</strong></td><td style="text-align:right"><strong>${fmtAmt(s.openingBalance)}</strong></td></tr>
+    ${rows}
+    <tr style="background:#1e3a5f;color:#fff"><td colspan="5"><strong>Closing Balance (owed to supplier)</strong></td><td style="text-align:right"><strong>${s.currency} ${fmtAmt(s.closingBalance)}</strong></td></tr>
+    </tbody></table></body></html>`);
+  win.document.close();
+  win.focus();
+  setTimeout(() => win.print(), 250);
+}
+
+function SupplierStatementDialog({ organisationId, supplier, trigger }: { organisationId: string; supplier: Supplier; trigger: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const today = new Date().toISOString().split('T')[0];
+  const yearStart = `${new Date().getFullYear()}-01-01`;
+  const [from, setFrom] = useState(yearStart);
+  const [to, setTo] = useState(today);
+  const [toEmail, setToEmail] = useState('');
+  const [statement, setStatement] = useState<SupplierStatement | null>(null);
+  const [emailMsg, setEmailMsg] = useState('');
+
+  const gen = useMutation({
+    mutationFn: () => getSupplierStatement(organisationId, supplier.id, from, to),
+    onSuccess: (s) => { setStatement(s); setEmailMsg(''); },
+  });
+  const mail = useMutation({
+    mutationFn: () => emailSupplierStatement(organisationId, supplier.id, { from, to, toEmail: toEmail || undefined }),
+    onSuccess: (r) => setEmailMsg(`Statement emailed to ${r.sentTo}`),
+  });
+
+  const fmtAmt = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (v) { setStatement(null); setEmailMsg(''); } }}>
+      <DialogTrigger asChild>{trigger}</DialogTrigger>
+      <DialogContent title={`Statement – ${supplier.name}`} description="Supplier account activity and balance for a period.">
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-medium mb-1 block">From</label>
+              <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-8 text-xs" />
+            </div>
+            <div>
+              <label className="text-xs font-medium mb-1 block">To</label>
+              <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-8 text-xs" />
+            </div>
+          </div>
+          <Button size="sm" disabled={gen.isPending} onClick={() => gen.mutate()}>
+            {gen.isPending ? 'Generating…' : 'Generate Statement'}
+          </Button>
+
+          {statement && (
+            <div className="border rounded-md overflow-hidden">
+              <div className="max-h-72 overflow-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted sticky top-0">
+                    <tr>
+                      <th className="text-left px-2 py-1">Date</th><th className="text-left px-2 py-1">Ref</th>
+                      <th className="text-left px-2 py-1">Description</th>
+                      <th className="text-right px-2 py-1">Invoiced</th><th className="text-right px-2 py-1">Paid/Cr</th><th className="text-right px-2 py-1">Balance</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr className="bg-muted/40"><td colSpan={5} className="px-2 py-1 font-medium">Opening Balance</td><td className="px-2 py-1 text-right font-medium">{fmtAmt(statement.openingBalance)}</td></tr>
+                    {statement.transactions.map((t, i) => (
+                      <tr key={i} className="border-t">
+                        <td className="px-2 py-1">{t.date}</td><td className="px-2 py-1 text-muted-foreground">{t.reference}</td>
+                        <td className="px-2 py-1">{t.description}</td>
+                        <td className="px-2 py-1 text-right">{t.debit > 0 ? fmtAmt(t.debit) : ''}</td>
+                        <td className="px-2 py-1 text-right text-green-600">{t.credit > 0 ? fmtAmt(t.credit) : ''}</td>
+                        <td className="px-2 py-1 text-right font-medium">{fmtAmt(t.balance)}</td>
+                      </tr>
+                    ))}
+                    <tr className="bg-slate-800 text-white"><td colSpan={5} className="px-2 py-1 font-semibold">Closing Balance</td><td className="px-2 py-1 text-right font-semibold">{statement.currency} {fmtAmt(statement.closingBalance)}</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 p-2 border-t bg-muted/30">
+                <Button size="sm" variant="outline" onClick={() => printSupplierStatement(statement)}><Printer size={14} className="mr-1" />Print / PDF</Button>
+                <Input value={toEmail} onChange={(e) => setToEmail(e.target.value)} placeholder={supplier.email ?? 'recipient@email.com'} className="h-8 text-xs flex-1 min-w-[160px]" />
+                <Button size="sm" variant="outline" disabled={mail.isPending} onClick={() => mail.mutate()}><Mail size={14} className="mr-1" />{mail.isPending ? 'Sending…' : 'Email'}</Button>
+              </div>
+              {emailMsg && <p className="text-xs text-green-600 px-2 pb-2">{emailMsg}</p>}
+              {mail.isError && <p className="text-xs text-destructive px-2 pb-2">{(mail.error as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message ?? 'Failed to email'}</p>}
+            </div>
+          )}
+          {gen.isError && <p className="text-xs text-destructive">{(gen.error as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message ?? 'Failed to generate'}</p>}
         </div>
       </DialogContent>
     </Dialog>
@@ -428,7 +618,12 @@ export function APPage() {
         </div>
         <div className="flex gap-2">
           {tab === 'invoices' && activeOrganisationId && <NewSupplierInvoiceDialog organisationId={activeOrganisationId} />}
-          {tab === 'suppliers' && activeOrganisationId && <NewSupplierDialog organisationId={activeOrganisationId} />}
+          {tab === 'suppliers' && activeOrganisationId && (
+            <SupplierDialog
+              organisationId={activeOrganisationId}
+              trigger={<Button size="sm"><Plus size={14} /> New Supplier</Button>}
+            />
+          )}
         </div>
       </div>
 
@@ -522,6 +717,7 @@ export function APPage() {
                     <TableHead>Email</TableHead>
                     <TableHead>Payment Terms</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -532,6 +728,20 @@ export function APPage() {
                       <TableCell className="text-xs text-muted-foreground">{s.email ?? '—'}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">{s.paymentTerms} days</TableCell>
                       <TableCell><Badge variant={s.isActive ? 'success' : 'secondary'}>{s.isActive ? 'Active' : 'Inactive'}</Badge></TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <SupplierStatementDialog
+                            organisationId={activeOrganisationId!}
+                            supplier={s}
+                            trigger={<button className="p-1.5 rounded hover:bg-muted text-muted-foreground" title="Statement"><BookOpen size={14} /></button>}
+                          />
+                          <SupplierDialog
+                            organisationId={activeOrganisationId!}
+                            supplier={s}
+                            trigger={<button className="p-1.5 rounded hover:bg-muted text-muted-foreground" title="Edit"><Pencil size={14} /></button>}
+                          />
+                        </div>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

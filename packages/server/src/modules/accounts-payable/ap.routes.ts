@@ -13,6 +13,8 @@ router.post('/suppliers',                   requireRole(UserRole.ACCOUNTS_PAYABL
 router.get('/suppliers/:supplierId',        requireRole(UserRole.REPORT_VIEWER),           ctrl.getSupplier);
 router.put('/suppliers/:supplierId',        requireRole(UserRole.ACCOUNTS_PAYABLE_CLERK),  ctrl.updateSupplier);
 router.delete('/suppliers/:supplierId',     requireRole(UserRole.ORG_ADMIN),               ctrl.deleteSupplier);
+router.get('/suppliers/:supplierId/statement',        requireRole(UserRole.REPORT_VIEWER),          ctrl.getSupplierStatement);
+router.post('/suppliers/:supplierId/statement/email', requireRole(UserRole.ACCOUNTS_PAYABLE_CLERK), ctrl.emailSupplierStatement);
 
 // ─── Supplier Invoices ───────────────────────────────────────────────────────
 router.get('/invoices',                              requireRole(UserRole.REPORT_VIEWER),          ctrl.listSupplierInvoices);

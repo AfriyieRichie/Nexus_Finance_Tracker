@@ -7,6 +7,7 @@ import {
   submitForApprovalSchema, approveInvoiceSchema, rejectInvoiceSchema, voidInvoiceSchema,
   recordSupplierPaymentSchema, reversePaymentSchema,
   createSupplierCreditNoteSchema, listSupplierCreditNotesSchema,
+  statementQuerySchema, emailStatementSchema,
 } from './ap.schemas';
 import * as apService from './ap.service';
 
@@ -34,6 +35,19 @@ export const listSuppliers = asyncHandler(async (req: Request, res: Response) =>
 export const getSupplier = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId, supplierId } = req.params;
   return sendSuccess(res, await apService.getSupplier(organisationId, supplierId));
+});
+
+export const getSupplierStatement = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId, supplierId } = req.params;
+  const query = statementQuerySchema.parse(req.query);
+  return sendSuccess(res, await apService.generateSupplierStatement(organisationId, supplierId, query));
+});
+
+export const emailSupplierStatement = asyncHandler(async (req: Request, res: Response) => {
+  const { organisationId, supplierId } = req.params;
+  const input = emailStatementSchema.parse(req.body);
+  const result = await apService.emailSupplierStatement(organisationId, supplierId, input);
+  return sendSuccess(res, result, `Statement emailed to ${result.sentTo}`);
 });
 
 export const deleteSupplier = asyncHandler(async (req: Request, res: Response) => {

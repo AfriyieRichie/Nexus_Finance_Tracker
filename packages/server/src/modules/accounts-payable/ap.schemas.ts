@@ -102,6 +102,17 @@ export const listSupplierCreditNotesSchema = z.object({
   supplierId: z.string().uuid().optional(),
 });
 
+export const statementQuerySchema = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+
+export const emailStatementSchema = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  toEmail: z.string().email().optional(),
+});
+
 export type CreateSupplierInput = z.infer<typeof createSupplierSchema>;
 export type UpdateSupplierInput = z.infer<typeof updateSupplierSchema>;
 export type ListSuppliersQuery = z.infer<typeof listSuppliersSchema>;
@@ -115,3 +126,5 @@ export type RecordSupplierPaymentInput = z.infer<typeof recordSupplierPaymentSch
 export type ReversePaymentInput = z.infer<typeof reversePaymentSchema>;
 export type CreateSupplierCreditNoteInput = z.infer<typeof createSupplierCreditNoteSchema>;
 export type ListSupplierCreditNotesQuery = z.infer<typeof listSupplierCreditNotesSchema>;
+export type StatementQuery = z.infer<typeof statementQuerySchema>;
+export type EmailStatementInput = z.infer<typeof emailStatementSchema>;

@@ -1,12 +1,14 @@
 import { Prisma, ApprovalEntityType, ApprovalRequestStatus, NotificationType } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../utils/errors';
+import { sendEmail } from '../../config/email';
 import * as journalService from '../journals/journal.service';
 import type {
   CreateSupplierInput, UpdateSupplierInput, ListSuppliersQuery,
   CreateSupplierInvoiceInput, ListSupplierInvoicesQuery,
   RecordSupplierPaymentInput, ReversePaymentInput,
   CreateSupplierCreditNoteInput, ListSupplierCreditNotesQuery,
+  StatementQuery, EmailStatementInput,
 } from './ap.schemas';
 
 // ─── Notification helper ──────────────────────────────────────────────────────
@@ -1035,4 +1037,169 @@ export async function getApAgeing(organisationId: string) {
       .sort((a, b) => Number(b.total) - Number(a.total)),
     invoices: result,
   };
+}
+
+// ─── Supplier Statement ───────────────────────────────────────────────────────
+
+interface SupplierStatementLine {
+  date: string;
+  type: 'INVOICE' | 'PAYMENT' | 'CREDIT_NOTE';
+  reference: string;
+  description: string;
+  debit: number;   // increases what we owe the supplier (an invoice)
+  credit: number;  // reduces what we owe (a payment or credit note)
+  balance: number; // amount currently owed to the supplier
+}
+
+async function buildSupplierStatement(organisationId: string, supplierId: string, from: string, to: string) {
+  const [supplier, org] = await Promise.all([
+    prisma.supplier.findFirst({ where: { id: supplierId, organisationId, isDeleted: false } }),
+    prisma.organisation.findUnique({ where: { id: organisationId }, select: { name: true, baseCurrency: true, address: true, email: true, phone: true } }),
+  ]);
+  if (!supplier) throw new NotFoundError('Supplier not found');
+
+  const fromDate = new Date(from + 'T00:00:00Z');
+  const toDate = new Date(to + 'T23:59:59Z');
+
+  // Dedicated AP tables — no journal scraping needed.
+  const [invoices, payments, creditNotes] = await Promise.all([
+    prisma.supplierInvoice.findMany({
+      where: { organisationId, supplierId, status: { in: ['APPROVED', 'SENT', 'PARTIALLY_PAID', 'PAID', 'OVERDUE'] } },
+      orderBy: { invoiceDate: 'asc' },
+    }),
+    prisma.supplierPayment.findMany({
+      where: { organisationId, supplierId, isReversed: false },
+      orderBy: { paymentDate: 'asc' },
+    }),
+    prisma.supplierCreditNote.findMany({
+      where: { organisationId, supplierId },
+      orderBy: { creditNoteDate: 'asc' },
+    }),
+  ]);
+
+  type RawTx = { date: Date; type: SupplierStatementLine['type']; reference: string; description: string; amount: number; isDebit: boolean };
+
+  const allTxs: RawTx[] = [
+    ...invoices.map((inv) => ({
+      date: inv.invoiceDate,
+      type: 'INVOICE' as const,
+      reference: inv.invoiceNumber,
+      description: `Supplier Invoice – ${inv.invoiceNumber}`,
+      amount: Number(inv.totalAmount),
+      isDebit: true,
+    })),
+    ...payments.map((p) => ({
+      date: p.paymentDate,
+      type: 'PAYMENT' as const,
+      reference: p.reference ?? 'Payment',
+      // The payable is settled by the cash paid plus any tax withheld at source.
+      description: Number(p.whtAmount) > 0 ? `Payment (incl. WHT ${Number(p.whtAmount).toFixed(2)})` : 'Payment',
+      amount: Number(p.amount) + Number(p.whtAmount),
+      isDebit: false,
+    })),
+    ...creditNotes.map((cn) => ({
+      date: cn.creditNoteDate,
+      type: 'CREDIT_NOTE' as const,
+      reference: cn.creditNoteNumber,
+      description: `Credit Note – ${cn.creditNoteNumber}`,
+      amount: Number(cn.amount) + Number(cn.taxAmount),
+      isDebit: false,
+    })),
+  ].sort((a, b) => a.date.getTime() - b.date.getTime());
+
+  const preTxs = allTxs.filter((t) => t.date < fromDate);
+  const periodTxs = allTxs.filter((t) => t.date >= fromDate && t.date <= toDate);
+
+  const openingBalance = preTxs.reduce((bal, t) => bal + (t.isDebit ? t.amount : -t.amount), 0);
+
+  let balance = openingBalance;
+  const transactions: SupplierStatementLine[] = periodTxs.map((t) => {
+    const debit = t.isDebit ? t.amount : 0;
+    const credit = t.isDebit ? 0 : t.amount;
+    balance = balance + debit - credit;
+    return { date: t.date.toISOString().split('T')[0], type: t.type, reference: t.reference, description: t.description, debit, credit, balance };
+  });
+
+  return {
+    supplier: { id: supplier.id, name: supplier.name, code: supplier.code, email: supplier.email, phone: supplier.phone, address: supplier.address },
+    organisation: { name: org?.name ?? '', currency: org?.baseCurrency ?? 'GHS', address: org?.address, email: org?.email },
+    period: { from, to },
+    currency: org?.baseCurrency ?? 'GHS',
+    openingBalance: Number(openingBalance.toFixed(2)),
+    transactions,
+    closingBalance: Number(balance.toFixed(2)),
+    totalInvoiced: Number(transactions.reduce((s, t) => s + t.debit, 0).toFixed(2)),
+    totalPayments: Number(transactions.filter((t) => t.type === 'PAYMENT').reduce((s, t) => s + t.credit, 0).toFixed(2)),
+    totalCredits: Number(transactions.filter((t) => t.type === 'CREDIT_NOTE').reduce((s, t) => s + t.credit, 0).toFixed(2)),
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+export async function generateSupplierStatement(organisationId: string, supplierId: string, query: StatementQuery) {
+  return buildSupplierStatement(organisationId, supplierId, query.from, query.to);
+}
+
+export async function emailSupplierStatement(organisationId: string, supplierId: string, input: EmailStatementInput) {
+  const statement = await buildSupplierStatement(organisationId, supplierId, input.from, input.to);
+
+  const recipientEmail = input.toEmail ?? statement.supplier.email;
+  if (!recipientEmail) throw new ValidationError('Supplier has no email address. Provide a toEmail override.');
+
+  const fmtAmt = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtDate = (s: string) => new Date(s + 'T00:00:00Z').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+
+  const rows = statement.transactions.map((t) => `
+    <tr style="background:${t.type === 'INVOICE' ? '#fff' : '#f8fffe'}">
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px">${fmtDate(t.date)}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;color:#6b7280">${t.reference}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px">${t.description}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;text-align:right">${t.debit > 0 ? fmtAmt(t.debit) : ''}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;text-align:right;color:#16a34a">${t.credit > 0 ? fmtAmt(t.credit) : ''}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;text-align:right;font-weight:600">${fmtAmt(t.balance)}</td>
+    </tr>`).join('');
+
+  const html = `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;color:#111;max-width:700px;margin:0 auto;padding:20px">
+<div style="border-bottom:3px solid #1d4ed8;padding-bottom:16px;margin-bottom:20px">
+  <h2 style="margin:0;font-size:22px;color:#1d4ed8">${statement.organisation.name}</h2>
+  <p style="margin:4px 0 0;font-size:13px;color:#6b7280">Supplier Account Statement</p>
+</div>
+<table style="width:100%;margin-bottom:20px"><tr>
+  <td style="vertical-align:top">
+    <p style="margin:0;font-size:13px;font-weight:600">${statement.supplier.name}</p>
+    <p style="margin:2px 0;font-size:12px;color:#6b7280">${statement.supplier.code}</p>
+    ${statement.supplier.email ? `<p style="margin:2px 0;font-size:12px;color:#6b7280">${statement.supplier.email}</p>` : ''}
+  </td>
+  <td style="text-align:right;vertical-align:top">
+    <p style="margin:0;font-size:12px"><strong>Statement Period:</strong> ${fmtDate(statement.period.from)} – ${fmtDate(statement.period.to)}</p>
+    <p style="margin:4px 0 0;font-size:12px"><strong>Generated:</strong> ${fmtDate(statement.generatedAt.split('T')[0])}</p>
+    <p style="margin:4px 0 0;font-size:12px"><strong>Currency:</strong> ${statement.currency}</p>
+  </td>
+</tr></table>
+<table style="width:100%;border-collapse:collapse;margin-bottom:20px">
+  <thead><tr style="background:#1d4ed8;color:white">
+    <th style="padding:8px 10px;text-align:left;font-size:12px">Date</th>
+    <th style="padding:8px 10px;text-align:left;font-size:12px">Reference</th>
+    <th style="padding:8px 10px;text-align:left;font-size:12px">Description</th>
+    <th style="padding:8px 10px;text-align:right;font-size:12px">Invoiced (${statement.currency})</th>
+    <th style="padding:8px 10px;text-align:right;font-size:12px">Paid/Credit (${statement.currency})</th>
+    <th style="padding:8px 10px;text-align:right;font-size:12px">Balance (${statement.currency})</th>
+  </tr></thead>
+  <tr style="background:#f1f5f9">
+    <td colspan="5" style="padding:6px 10px;font-size:12px;font-weight:600">Opening Balance</td>
+    <td style="padding:6px 10px;text-align:right;font-size:12px;font-weight:600">${fmtAmt(statement.openingBalance)}</td>
+  </tr>
+  ${rows}
+  <tr style="background:#1e3a5f;color:white">
+    <td colspan="5" style="padding:8px 10px;font-size:13px;font-weight:700">Closing Balance (owed to supplier)</td>
+    <td style="padding:8px 10px;text-align:right;font-size:14px;font-weight:700">${statement.currency} ${fmtAmt(statement.closingBalance)}</td>
+  </tr>
+</table>
+<p style="font-size:11px;color:#9ca3af;text-align:center;margin-top:24px">
+  This is an automated statement from ${statement.organisation.name}. Please contact us if you have any queries.
+</p>
+</body></html>`;
+
+  await sendEmail(recipientEmail, `Supplier Statement – ${statement.supplier.name} – ${fmtDate(statement.period.from)} to ${fmtDate(statement.period.to)}`, html);
+
+  return { sentTo: recipientEmail, period: statement.period };
 }
