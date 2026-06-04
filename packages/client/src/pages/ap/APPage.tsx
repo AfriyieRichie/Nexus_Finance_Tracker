@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ShoppingCart, Plus, FileText, TrendingDown, Trash2, Pencil, BookOpen, Printer, Mail } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
-import { listSuppliers, createSupplier, updateSupplier, getSupplierStatement, emailSupplierStatement, listSupplierInvoices, createSupplierInvoice, postSupplierInvoice, getApAgeing } from '@/services/ap.service';
+import { listSuppliers, createSupplier, updateSupplier, getSupplierStatement, emailSupplierStatement, listSupplierInvoices, createSupplierInvoice, postSupplierInvoice, submitInvoiceForApproval, approveSupplierInvoice, rejectSupplierInvoice, getApAgeing } from '@/services/ap.service';
+import { listWorkflows } from '@/services/approvals.service';
 import type { Supplier, SupplierInput, SupplierStatement } from '@/services/ap.service';
 import { listAccounts } from '@/services/accounts.service';
 import { listTaxCodes } from '@/services/tax.service';
@@ -27,6 +28,8 @@ const STATUS_VARIANT: Record<string, 'success' | 'warning' | 'info' | 'destructi
   PAID: 'success',
   PARTIALLY_PAID: 'warning',
   SENT: 'info',
+  APPROVED: 'info',
+  PENDING_APPROVAL: 'warning',
   DRAFT: 'secondary',
   VOID: 'secondary',
 };
@@ -622,6 +625,99 @@ function PostSupplierInvoiceButton({ organisationId, invoiceId, invoiceDate, sta
   );
 }
 
+// ─── Submit-for-approval button ───────────────────────────────────────────────
+
+function SubmitForApprovalButton({ organisationId, invoiceId }: { organisationId: string; invoiceId: string }) {
+  const qc = useQueryClient();
+  const mutation = useMutation({
+    mutationFn: () => submitInvoiceForApproval(organisationId, invoiceId),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['ap-invoices'] }),
+  });
+  return (
+    <div className="flex flex-col items-end gap-0.5">
+      <button
+        onClick={() => mutation.mutate()}
+        disabled={mutation.isPending}
+        className="text-xs text-primary hover:underline disabled:opacity-50"
+      >
+        {mutation.isPending ? 'Submitting…' : 'Submit for approval'}
+      </button>
+      {mutation.isError && (
+        <span className="text-[10px] text-destructive max-w-[200px] text-right leading-tight">{errMsg(mutation.error)}</span>
+      )}
+    </div>
+  );
+}
+
+// ─── Approve / Reject actions (shown while PENDING_APPROVAL) ───────────────────
+
+function ApproveRejectButtons({ organisationId, invoiceId, canApprove }: { organisationId: string; invoiceId: string; canApprove: boolean }) {
+  const qc = useQueryClient();
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState('');
+  const invalidate = () => void qc.invalidateQueries({ queryKey: ['ap-invoices'] });
+
+  const approve = useMutation({
+    mutationFn: () => approveSupplierInvoice(organisationId, invoiceId),
+    onSuccess: invalidate,
+  });
+  const reject = useMutation({
+    mutationFn: () => rejectSupplierInvoice(organisationId, invoiceId, reason),
+    onSuccess: () => { setRejecting(false); setReason(''); invalidate(); },
+  });
+
+  if (!canApprove) {
+    return <span className="text-xs text-muted-foreground select-none" title="A Finance Manager must approve this bill">Awaiting approval</span>;
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-0.5">
+      <div className="flex items-center gap-2">
+        <button onClick={() => approve.mutate()} disabled={approve.isPending} className="text-xs text-emerald-600 hover:underline disabled:opacity-50">
+          {approve.isPending ? 'Approving…' : 'Approve'}
+        </button>
+        <span className="text-muted-foreground">·</span>
+        <button onClick={() => setRejecting((v) => !v)} className="text-xs text-destructive hover:underline">Reject</button>
+      </div>
+      {rejecting && (
+        <div className="flex flex-col items-end gap-1 mt-1">
+          <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason for rejection…" className="h-7 text-xs w-48" />
+          <button
+            onClick={() => reason.trim() && reject.mutate()}
+            disabled={!reason.trim() || reject.isPending}
+            className="text-xs text-destructive hover:underline disabled:opacity-50"
+          >
+            {reject.isPending ? 'Rejecting…' : 'Confirm reject'}
+          </button>
+        </div>
+      )}
+      {(approve.isError || reject.isError) && (
+        <span className="text-[10px] text-destructive max-w-[200px] text-right leading-tight">
+          {errMsg(approve.error ?? reject.error)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ─── Per-row action cell — routes by status & workflow ─────────────────────────
+
+function SupplierInvoiceActionCell({ organisationId, inv, workflowActive, canApprove }: {
+  organisationId: string;
+  inv: { id: string; status: string; invoiceDate: string };
+  workflowActive: boolean;
+  canApprove: boolean;
+}) {
+  if (inv.status === 'DRAFT' && workflowActive) {
+    return <SubmitForApprovalButton organisationId={organisationId} invoiceId={inv.id} />;
+  }
+  if (inv.status === 'PENDING_APPROVAL') {
+    return <ApproveRejectButtons organisationId={organisationId} invoiceId={inv.id} canApprove={canApprove} />;
+  }
+  // DRAFT (no workflow), APPROVED → postable; posted statuses render "Posted".
+  return <PostSupplierInvoiceButton organisationId={organisationId} invoiceId={inv.id} invoiceDate={inv.invoiceDate} status={inv.status} />;
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export function APPage() {
@@ -656,6 +752,18 @@ export function APPage() {
     queryFn: () => getApAgeing(activeOrganisationId!),
     enabled: !!activeOrganisationId && tab === 'ageing',
   });
+
+  // Is a supplier-invoice approval workflow active? Drives Submit-vs-Post on drafts.
+  const { data: workflows } = useQuery({
+    queryKey: ['approval-workflows', activeOrganisationId],
+    queryFn: () => listWorkflows(activeOrganisationId!),
+    enabled: !!activeOrganisationId && tab === 'invoices',
+  });
+  const apWorkflowActive = (workflows ?? []).some((w) => w.entityType === 'SUPPLIER_INVOICE' && w.isActive);
+
+  const user = useAuthStore((s) => s.user);
+  const userRole = user?.organisations.find((o) => o.organisationId === activeOrganisationId)?.role;
+  const canApprove = userRole === 'FINANCE_MANAGER' || userRole === 'ORG_ADMIN' || userRole === 'SUPER_ADMIN';
 
   const filteredSuppliers = (supplierData?.suppliers ?? []).filter(
     (s) => !search || s.name.toLowerCase().includes(search.toLowerCase()) || s.code.toLowerCase().includes(search.toLowerCase()),
@@ -791,7 +899,7 @@ export function APPage() {
                         {activeOrganisationId && (
                           <div className="flex items-center justify-end gap-1">
                             <AttachmentsDialog organisationId={activeOrganisationId} entityType="SUPPLIER_INVOICE" entityId={inv.id} label={inv.invoiceNumber} />
-                            <PostSupplierInvoiceButton organisationId={activeOrganisationId} invoiceId={inv.id} invoiceDate={inv.invoiceDate} status={inv.status} />
+                            <SupplierInvoiceActionCell organisationId={activeOrganisationId} inv={inv} workflowActive={apWorkflowActive} canApprove={canApprove} />
                           </div>
                         )}
                       </TableCell>

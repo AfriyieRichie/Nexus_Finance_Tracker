@@ -6,6 +6,7 @@ import {
   ApprovalRequestStatus,
   NotificationType,
   EntryStatus,
+  InvoiceStatus,
 } from '@prisma/client';
 import { auditLog } from '../audit-trail/audit.service';
 import { prisma } from '../../config/database';
@@ -590,6 +591,14 @@ async function handleRejection(
     });
   }
 
+  // Reset SUPPLIER_INVOICE back to DRAFT so it can be corrected and resubmitted
+  if (request.entityType === ApprovalEntityType.SUPPLIER_INVOICE) {
+    await prisma.supplierInvoice.updateMany({
+      where: { id: request.entityId },
+      data:  { status: InvoiceStatus.DRAFT },
+    });
+  }
+
   await notify(
     [request.requestedBy],
     organisationId,
@@ -655,6 +664,13 @@ async function dispatchApprovalComplete(entityType: ApprovalEntityType, entityId
       await prisma.budget.updateMany({
         where: { id: entityId },
         data:  { isApproved: true, approvedAt: new Date() },
+      });
+      break;
+    case ApprovalEntityType.SUPPLIER_INVOICE:
+      // Bill is cleared to post — postSupplierInvoice requires status APPROVED.
+      await prisma.supplierInvoice.updateMany({
+        where: { id: entityId },
+        data:  { status: InvoiceStatus.APPROVED },
       });
       break;
     default:
@@ -845,6 +861,13 @@ export async function withdrawRequest(
     await prisma.journalEntry.update({
       where: { id: request.entityId },
       data:  { status: EntryStatus.DRAFT },
+    });
+  }
+
+  if (request.entityType === ApprovalEntityType.SUPPLIER_INVOICE) {
+    await prisma.supplierInvoice.updateMany({
+      where: { id: request.entityId },
+      data:  { status: InvoiceStatus.DRAFT },
     });
   }
 

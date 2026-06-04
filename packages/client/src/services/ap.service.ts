@@ -107,6 +107,21 @@ export async function postSupplierInvoice(organisationId: string, invoiceId: str
   return res.data.data;
 }
 
+export async function submitInvoiceForApproval(organisationId: string, invoiceId: string, comments?: string) {
+  const res = await api.post(`/organisations/${organisationId}/ap/invoices/${invoiceId}/submit-approval`, { comments });
+  return res.data.data;
+}
+
+export async function approveSupplierInvoice(organisationId: string, invoiceId: string, comments?: string) {
+  const res = await api.post(`/organisations/${organisationId}/ap/invoices/${invoiceId}/approve`, { comments });
+  return res.data.data;
+}
+
+export async function rejectSupplierInvoice(organisationId: string, invoiceId: string, comments: string) {
+  const res = await api.post(`/organisations/${organisationId}/ap/invoices/${invoiceId}/reject`, { comments });
+  return res.data.data;
+}
+
 export async function recordSupplierPayment(organisationId: string, data: {
   supplierInvoiceId: string; amount: number; paymentDate: string; bankAccountId: string; periodId: string;
 }) {
