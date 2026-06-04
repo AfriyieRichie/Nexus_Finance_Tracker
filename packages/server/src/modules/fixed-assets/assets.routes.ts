@@ -21,6 +21,8 @@ router.get('/depreciation/runs', requireRole(UserRole.REPORT_VIEWER), ctrl.listD
 router.get('/', requireRole(UserRole.REPORT_VIEWER), ctrl.listAssets);
 router.post('/', requireRole(UserRole.FINANCE_MANAGER), ctrl.createAsset);
 router.post('/bulk', requireRole(UserRole.FINANCE_MANAGER), ctrl.bulkCreateAssets);
+router.get('/pending-capitalisation', requireRole(UserRole.REPORT_VIEWER), ctrl.listPendingCapitalisations);
+router.post('/capitalise', requireRole(UserRole.FINANCE_MANAGER), ctrl.capitaliseFromClearing);
 router.get('/:assetId', requireRole(UserRole.REPORT_VIEWER), ctrl.getAsset);
 router.put('/:assetId', requireRole(UserRole.FINANCE_MANAGER), ctrl.updateAsset);
 router.post('/:assetId/dispose', requireRole(UserRole.FINANCE_MANAGER), ctrl.disposeAsset);

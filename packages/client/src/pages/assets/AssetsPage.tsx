@@ -38,6 +38,8 @@ function errMsg(e: unknown) {
 function NewAssetDialog({ organisationId }: { organisationId: string }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<'clearing' | 'manual'>('clearing');
+  const [sourceLineId, setSourceLineId] = useState('');
   const [form, setForm] = useState({
     code: '', name: '', category: '', categoryId: '',
     serialNumber: '', location: '',
@@ -54,6 +56,28 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
     queryFn: () => assetSvc.listCategories(organisationId),
     enabled: !!organisationId,
   });
+
+  // Items billed to the Fixed Asset Clearing account, awaiting capitalisation.
+  const { data: pending } = useQuery({
+    queryKey: ['assets-pending-capitalisation', organisationId],
+    queryFn: () => assetSvc.getPendingCapitalisations(organisationId),
+    enabled: open,
+  });
+  const pendingItems = pending?.items ?? [];
+  const selectedPending = pendingItems.find((p) => p.lineId === sourceLineId);
+
+  const onSelectPending = (lineId: string) => {
+    setSourceLineId(lineId);
+    const item = pendingItems.find((p) => p.lineId === lineId);
+    if (item) {
+      setForm((f) => ({
+        ...f,
+        name: f.name || item.description || '',
+        acquisitionCost: String(item.amount),
+        acquisitionDate: item.invoiceDate ? item.invoiceDate.split('T')[0] : f.acquisitionDate,
+      }));
+    }
+  };
 
   const { data: bankAccountsData } = useQuery({
     queryKey: ['accounts-bank', organisationId],
@@ -86,31 +110,90 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
     }
   };
 
+  const assetDetails = () => ({
+    code: form.code,
+    name: form.name,
+    category: form.category,
+    categoryId: form.categoryId || undefined,
+    serialNumber: form.serialNumber || undefined,
+    location: form.location || undefined,
+    acquisitionDate: form.acquisitionDate,
+    residualValue: Number(form.residualValue),
+    usefulLifeMonths: Number(form.usefulLifeMonths),
+    depreciationMethod: form.depreciationMethod,
+    unitsOfProductionTotal: form.unitsOfProductionTotal ? Number(form.unitsOfProductionTotal) : undefined,
+  });
+
   const mutation = useMutation({
-    mutationFn: () => assetSvc.createAsset(organisationId, {
-      ...form,
-      acquisitionCost: Number(form.acquisitionCost),
-      residualValue: Number(form.residualValue),
-      usefulLifeMonths: Number(form.usefulLifeMonths),
-      categoryId: form.categoryId || undefined,
-      unitsOfProductionTotal: form.unitsOfProductionTotal ? Number(form.unitsOfProductionTotal) : undefined,
-      serialNumber: form.serialNumber || undefined,
-      location: form.location || undefined,
-      acquisitionCreditAccountId: acqMode === 'cash' ? (form.acquisitionCreditAccountId || undefined) : undefined,
-      supplierId: acqMode === 'credit' ? (form.supplierId || undefined) : undefined,
-    }),
+    mutationFn: () =>
+      mode === 'clearing'
+        ? assetSvc.capitaliseFromClearing(organisationId, { sourceLineId, ...assetDetails() })
+        : assetSvc.createAsset(organisationId, {
+            ...assetDetails(),
+            acquisitionCost: Number(form.acquisitionCost),
+            acquisitionCreditAccountId: acqMode === 'cash' ? (form.acquisitionCreditAccountId || undefined) : undefined,
+            supplierId: acqMode === 'credit' ? (form.supplierId || undefined) : undefined,
+          }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['assets'] });
       void qc.invalidateQueries({ queryKey: ['ap-invoices'] });
+      void qc.invalidateQueries({ queryKey: ['assets-pending-capitalisation', organisationId] });
       setOpen(false);
     },
   });
 
+  const canSubmit =
+    mode === 'clearing'
+      ? !!sourceLineId && !!form.code && !!form.name && !mutation.isPending
+      : !!form.code && !!form.name && !!form.acquisitionCost && !mutation.isPending;
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild><Button size="sm"><Plus size={14} /> New Asset</Button></DialogTrigger>
-      <DialogContent title="Add Fixed Asset" description="Register a new asset in the fixed asset register.">
+      <DialogContent title="Add Fixed Asset" description="Capitalise an item billed to the Fixed Asset Clearing account, or enter an opening-balance asset manually.">
         <div className="space-y-3">
+          {/* Mode toggle */}
+          <div className="flex gap-1 rounded-md bg-muted p-1 text-xs">
+            <button
+              type="button"
+              onClick={() => setMode('clearing')}
+              className={`flex-1 rounded px-2 py-1.5 font-medium transition ${mode === 'clearing' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              Capitalise from clearing
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('manual')}
+              className={`flex-1 rounded px-2 py-1.5 font-medium transition ${mode === 'manual' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              Manual / opening balance
+            </button>
+          </div>
+
+          {mode === 'clearing' && (
+            <div className="rounded-md border bg-muted/30 p-2.5">
+              <label className="text-xs font-medium mb-1 block">Item awaiting capitalisation *</label>
+              <Select value={sourceLineId} onChange={(e) => onSelectPending(e.target.value)} className="h-8 text-xs" disabled={pendingItems.length === 0}>
+                <option value="">{pendingItems.length === 0 ? '— Nothing in clearing — raise a bill to the Fixed Asset Clearing account first —' : '— Select clearing item —'}</option>
+                {pendingItems.map((p) => (
+                  <option key={p.lineId} value={p.lineId}>
+                    {p.invoiceNumber} · {p.supplierName} · {p.description || 'Asset'} · {p.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </option>
+                ))}
+              </Select>
+              {selectedPending && (
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  From bill {selectedPending.invoiceNumber} ({selectedPending.supplierName}). Posts: Dr Asset Cost / Cr Fixed Asset Clearing on capitalisation.
+                </p>
+              )}
+              {pendingItems.length === 0 && (
+                <p className="text-[10px] text-amber-600 mt-1">
+                  Raise a supplier bill in Payables with a line coded to the <strong>Fixed Asset Clearing</strong> account. Once posted it will appear here ready to capitalise.
+                </p>
+              )}
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             <div><label className="text-xs font-medium mb-1 block">Code *</label>
               <Input value={form.code} onChange={(e) => set('code', e.target.value)} placeholder="FA001" className="h-8 text-xs" /></div>
@@ -135,40 +218,53 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
             <div><label className="text-xs font-medium mb-1 block">Acquisition Date</label>
               <Input type="date" value={form.acquisitionDate} onChange={(e) => set('acquisitionDate', e.target.value)} className="h-8 text-xs" /></div>
             <div><label className="text-xs font-medium mb-1 block">Cost *</label>
-              <Input type="number" value={form.acquisitionCost} onChange={(e) => set('acquisitionCost', e.target.value)} placeholder="0.00" className="h-8 text-xs" /></div>
+              <Input
+                type="number"
+                value={form.acquisitionCost}
+                onChange={(e) => set('acquisitionCost', e.target.value)}
+                placeholder="0.00"
+                className="h-8 text-xs"
+                readOnly={mode === 'clearing'}
+                disabled={mode === 'clearing'}
+              />
+              {mode === 'clearing' && (
+                <p className="text-[10px] text-muted-foreground mt-0.5">Locked to the cleared bill amount.</p>
+              )}</div>
           </div>
-          <div className="border-t pt-3">
-            <label className="text-xs font-medium mb-1 block">How was it acquired? <span className="text-muted-foreground font-normal">(optional — auto-posts the GL entry)</span></label>
-            <Select value={acqMode} onChange={(e) => setAcqMode(e.target.value as 'cash' | 'credit' | 'none')} className="h-8 text-xs">
-              <option value="none">— Don't post yet —</option>
-              <option value="cash">Paid now (cash / bank)</option>
-              <option value="credit">On credit (supplier)</option>
-            </Select>
+          {mode === 'manual' && (
+            <div className="border-t pt-3">
+              <label className="text-xs font-medium mb-1 block">How was it acquired? <span className="text-muted-foreground font-normal">(optional — auto-posts the GL entry)</span></label>
+              <Select value={acqMode} onChange={(e) => setAcqMode(e.target.value as 'cash' | 'credit' | 'none')} className="h-8 text-xs">
+                <option value="none">— Don't post yet (opening balance) —</option>
+                <option value="cash">Paid now (cash / bank)</option>
+                <option value="credit">On credit (supplier)</option>
+              </Select>
 
-            {acqMode === 'cash' && (
-              <div className="mt-2">
-                <AccountSelect
-                  value={form.acquisitionCreditAccountId}
-                  onChange={(id) => set('acquisitionCreditAccountId', id)}
-                  accounts={cashAccounts}
-                  placeholder="— Select bank / cash account —"
-                />
-                <p className="text-[10px] text-muted-foreground mt-0.5">Posts: Dr Asset Cost Account / Cr this bank account.</p>
-              </div>
-            )}
+              {acqMode === 'cash' && (
+                <div className="mt-2">
+                  <AccountSelect
+                    value={form.acquisitionCreditAccountId}
+                    onChange={(id) => set('acquisitionCreditAccountId', id)}
+                    accounts={cashAccounts}
+                    placeholder="— Select bank / cash account —"
+                  />
+                  <p className="text-[10px] text-muted-foreground mt-0.5">Posts: Dr Asset Cost Account / Cr this bank account.</p>
+                </div>
+              )}
 
-            {acqMode === 'credit' && (
-              <div className="mt-2">
-                <Select value={form.supplierId} onChange={(e) => set('supplierId', e.target.value)} className="h-8 text-xs" disabled={suppliers.length === 0}>
-                  <option value="">{suppliers.length === 0 ? '— No suppliers — add one in Payables —' : '— Select supplier —'}</option>
-                  {suppliers.map((s) => <option key={s.id} value={s.id}>{s.code} · {s.name}</option>)}
-                </Select>
-                <p className="text-[10px] text-muted-foreground mt-0.5">
-                  Raises a supplier invoice via a Fixed Asset Clearing account: Dr Clearing / Cr Accounts Payable, then capitalises (Dr Asset Cost / Cr Clearing) when the bill posts. Pay it from Accounts Payable. Posts now if no approval workflow is active, otherwise saved as a draft bill to approve.
-                </p>
-              </div>
-            )}
-          </div>
+              {acqMode === 'credit' && (
+                <div className="mt-2">
+                  <Select value={form.supplierId} onChange={(e) => set('supplierId', e.target.value)} className="h-8 text-xs" disabled={suppliers.length === 0}>
+                    <option value="">{suppliers.length === 0 ? '— No suppliers — add one in Payables —' : '— Select supplier —'}</option>
+                    {suppliers.map((s) => <option key={s.id} value={s.id}>{s.code} · {s.name}</option>)}
+                  </Select>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    Raises a supplier invoice via a Fixed Asset Clearing account: Dr Clearing / Cr Accounts Payable, then capitalises (Dr Asset Cost / Cr Clearing) when the bill posts. Pay it from Accounts Payable. Posts now if no approval workflow is active, otherwise saved as a draft bill to approve.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
           <div className="grid grid-cols-3 gap-3">
             <div><label className="text-xs font-medium mb-1 block">Residual Value</label>
               <Input type="number" value={form.residualValue} onChange={(e) => set('residualValue', e.target.value)} className="h-8 text-xs" /></div>
@@ -189,8 +285,8 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
           {mutation.isError && <p className="text-xs text-destructive">{errMsg(mutation.error)}</p>}
           <div className="flex justify-end gap-2 pt-1">
             <DialogClose asChild><Button variant="outline" size="sm">Cancel</Button></DialogClose>
-            <Button size="sm" disabled={!form.code || !form.name || !form.acquisitionCost || mutation.isPending} onClick={() => mutation.mutate()}>
-              {mutation.isPending ? 'Saving…' : 'Save Asset'}
+            <Button size="sm" disabled={!canSubmit} onClick={() => mutation.mutate()}>
+              {mutation.isPending ? 'Saving…' : mode === 'clearing' ? 'Capitalise Asset' : 'Save Asset'}
             </Button>
           </div>
         </div>

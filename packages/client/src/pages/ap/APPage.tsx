@@ -319,8 +319,10 @@ function NewSupplierInvoiceDialog({ organisationId }: { organisationId: string }
   const [apAccountId, setApAccountId] = useState('');
   const [lines, setLines] = useState<InvoiceLine[]>([{ ...EMPTY_LINE }]);
 
+  // Expense accounts for normal bills, plus the Fixed Asset Clearing account so a
+  // capital purchase can be coded to clearing and later capitalised in Fixed Assets.
   const expenseAccounts = (accountsData?.accounts ?? []).filter(
-    (a) => a.class === 'EXPENSE' && a.isActive,
+    (a) => (a.class === 'EXPENSE' || /asset clearing/i.test(a.name)) && a.isActive,
   );
   const apAccounts = (accountsData?.accounts ?? []).filter(
     (a) => a.type === 'PAYABLE' && a.isActive,

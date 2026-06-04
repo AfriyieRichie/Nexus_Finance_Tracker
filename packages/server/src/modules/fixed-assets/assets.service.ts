@@ -10,6 +10,7 @@ import type {
   DisposeAssetInput, RevalueAssetInput, ImpairAssetInput,
   CreateCategoryInput, UpdateCategoryInput, BulkCreateAssetsInput,
   SetAssetStatusInput, ReverseImpairmentInput, DepreciationScheduleQuery,
+  CapitaliseFromClearingInput,
 } from './assets.schemas';
 
 // ─── Depreciation Formulas ───────────────────────────────────────────────────
@@ -369,6 +370,117 @@ export async function createAsset(organisationId: string, input: CreateAssetInpu
   }
 
   auditLog({ organisationId, userId, action: 'ASSET_CREATED', module: 'FIXED_ASSETS', entityType: 'FIXED_ASSET', entityId: asset.id, entityRef: `${asset.code} — ${asset.name}`, description: `Asset '${asset.name}' (${asset.code}) created, cost ${asset.acquisitionCost}`, after: { code: asset.code, name: asset.name, acquisitionCost: asset.acquisitionCost } });
+  return asset;
+}
+
+// ─── Capitalisation from the Fixed Asset Clearing account ─────────────────────
+
+async function findFaClearingAccountId(organisationId: string): Promise<string | null> {
+  const a = await prisma.account.findFirst({
+    where: {
+      organisationId, isDeleted: false,
+      OR: [
+        { name: { contains: 'Fixed Asset Clearing', mode: 'insensitive' } },
+        { name: { contains: 'Asset Clearing', mode: 'insensitive' } },
+      ],
+    },
+    select: { id: true },
+  });
+  return a?.id ?? null;
+}
+
+// Items sitting in the clearing account awaiting capitalisation: supplier-invoice
+// lines coded to clearing, on a posted bill, not yet capitalised.
+export async function listPendingCapitalisations(organisationId: string) {
+  const clearingId = await findFaClearingAccountId(organisationId);
+  if (!clearingId) return { clearingAccountId: null as string | null, items: [] };
+
+  const lines = await prisma.supplierInvoiceLine.findMany({
+    where: {
+      accountId: clearingId,
+      capitalisedAssetId: null,
+      supplierInvoice: { organisationId, status: { in: ['SENT', 'PARTIALLY_PAID', 'PAID', 'OVERDUE'] } },
+    },
+    include: {
+      supplierInvoice: {
+        select: { id: true, invoiceNumber: true, invoiceDate: true, status: true, supplier: { select: { name: true, code: true } } },
+      },
+    },
+    orderBy: { supplierInvoice: { invoiceDate: 'desc' } },
+  });
+
+  return {
+    clearingAccountId: clearingId,
+    items: lines.map((l) => ({
+      lineId: l.id,
+      supplierInvoiceId: l.supplierInvoice.id,
+      invoiceNumber: l.supplierInvoice.invoiceNumber,
+      invoiceDate: l.supplierInvoice.invoiceDate,
+      status: l.supplierInvoice.status,
+      supplierName: l.supplierInvoice.supplier.name,
+      supplierCode: l.supplierInvoice.supplier.code,
+      description: l.description,
+      amount: Number(l.lineTotal) - Number(l.taxAmount), // net posted to clearing
+    })),
+  };
+}
+
+export async function capitaliseFromClearing(organisationId: string, input: CapitaliseFromClearingInput, userId: string) {
+  const clearingId = await findFaClearingAccountId(organisationId);
+  if (!clearingId) throw new ValidationError('No Fixed Asset Clearing account found.');
+
+  const line = await prisma.supplierInvoiceLine.findFirst({
+    where: { id: input.sourceLineId, accountId: clearingId, supplierInvoice: { organisationId } },
+    include: { supplierInvoice: { select: { id: true, supplierId: true, status: true } } },
+  });
+  if (!line) throw new NotFoundError('Clearing item not found');
+  if (line.capitalisedAssetId) throw new ValidationError('This item has already been capitalised.');
+  if (!['SENT', 'PARTIALLY_PAID', 'PAID', 'OVERDUE'].includes(line.supplierInvoice.status)) {
+    throw new ValidationError('The supplier invoice must be posted before capitalising.');
+  }
+
+  const cost = Number(line.lineTotal) - Number(line.taxAmount);
+
+  // Create the asset record only (no journal — createAsset auto-posts solely when
+  // a supplier/credit account is supplied, which we omit here).
+  const { sourceLineId: _sourceLineId, ...assetDetails } = input;
+  const asset = await createAsset(organisationId, { ...assetDetails, acquisitionCost: cost }, userId);
+  if (!asset.assetAccountId) {
+    throw new ValidationError('No asset cost account resolved — choose a category that has an Asset Cost Account, or set the GL accounts.');
+  }
+
+  const org = await prisma.organisation.findUnique({ where: { id: organisationId }, select: { baseCurrency: true } });
+  const currency = org?.baseCurrency ?? 'GHS';
+  const acqDate = new Date(input.acquisitionDate + 'T00:00:00Z');
+  const period = await prisma.accountingPeriod.findFirst({
+    where: { organisationId, status: 'OPEN', startDate: { lte: acqDate }, endDate: { gte: acqDate } },
+    select: { id: true },
+  });
+  if (!period) throw new ValidationError('No open accounting period for the acquisition date.');
+
+  // Move the cost out of clearing into the asset cost account.
+  await journalService.createAndPostSystemEntry(
+    organisationId,
+    {
+      type: 'GENERAL',
+      description: `Asset capitalisation — ${asset.name} (${asset.code})`,
+      entryDate: input.acquisitionDate,
+      periodId: period.id,
+      currency, exchangeRate: 1,
+      lines: [
+        { accountId: asset.assetAccountId, description: `Asset cost — ${asset.name}`, debitAmount: cost, creditAmount: 0, currency, exchangeRate: 1 },
+        { accountId: clearingId, description: `FA clearing — ${asset.name}`, debitAmount: 0, creditAmount: cost, currency, exchangeRate: 1 },
+      ],
+    },
+    userId,
+  );
+
+  await prisma.supplierInvoiceLine.update({ where: { id: line.id }, data: { capitalisedAssetId: asset.id } });
+  await prisma.fixedAsset.update({
+    where: { id: asset.id },
+    data: { acquisitionSupplierId: line.supplierInvoice.supplierId, acquisitionSupplierInvoiceId: line.supplierInvoice.id },
+  });
+
   return asset;
 }
 

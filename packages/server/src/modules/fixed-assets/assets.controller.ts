@@ -7,6 +7,7 @@ import {
   disposeAssetSchema, revalueAssetSchema, impairAssetSchema,
   createCategorySchema, updateCategorySchema, bulkCreateAssetsSchema,
   setAssetStatusSchema, reverseImpairmentSchema, depreciationScheduleSchema,
+  capitaliseFromClearingSchema,
 } from './assets.schemas';
 import * as svc from './assets.service';
 
@@ -27,6 +28,15 @@ export const updateCategory = asyncHandler(async (req: Request, res: Response) =
 export const createAsset = asyncHandler(async (req: Request, res: Response) => {
   const input = createAssetSchema.parse(req.body);
   return sendCreated(res, await svc.createAsset(req.params.organisationId, input, req.user?.sub), 'Asset created');
+});
+
+export const listPendingCapitalisations = asyncHandler(async (req: Request, res: Response) => {
+  return sendSuccess(res, await svc.listPendingCapitalisations(req.params.organisationId));
+});
+
+export const capitaliseFromClearing = asyncHandler(async (req: Request, res: Response) => {
+  const input = capitaliseFromClearingSchema.parse(req.body);
+  return sendCreated(res, await svc.capitaliseFromClearing(req.params.organisationId, input, req.user!.sub), 'Asset capitalised');
 });
 
 export const updateAsset = asyncHandler(async (req: Request, res: Response) => {

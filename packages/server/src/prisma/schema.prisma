@@ -937,6 +937,9 @@ model SupplierInvoiceLine {
   taxAmount        Decimal @default(0) @db.Decimal(20, 4)
   lineTotal        Decimal @db.Decimal(20, 4)
   accountId        String?
+  // When this line was coded to the Fixed Asset Clearing account and later
+  // capitalised, links to the asset it became (null = pending capitalisation).
+  capitalisedAssetId String?
 
   supplierInvoice SupplierInvoice @relation(fields: [supplierInvoiceId], references: [id], onDelete: Cascade)
 

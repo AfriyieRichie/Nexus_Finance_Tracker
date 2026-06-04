@@ -105,6 +105,36 @@ export async function createAsset(organisationId: string, data: {
   return res.data.data as FixedAsset;
 }
 
+export interface PendingCapitalisation {
+  lineId: string;
+  supplierInvoiceId: string;
+  invoiceNumber: string;
+  invoiceDate: string;
+  status: string;
+  supplierName: string;
+  supplierCode: string;
+  description: string;
+  amount: number;
+}
+
+export async function getPendingCapitalisations(organisationId: string) {
+  const res = await api.get(`/organisations/${organisationId}/assets/pending-capitalisation`);
+  return res.data.data as { clearingAccountId: string | null; items: PendingCapitalisation[] };
+}
+
+export async function capitaliseFromClearing(organisationId: string, data: {
+  sourceLineId: string;
+  code: string; name: string; category: string; categoryId?: string;
+  serialNumber?: string; location?: string;
+  acquisitionDate: string;
+  residualValue?: number; usefulLifeMonths: number;
+  depreciationMethod?: string; reducingBalanceRate?: number; unitsOfProductionTotal?: number;
+  assetAccountId?: string; deprnAccountId?: string; accDeprnAccountId?: string;
+}) {
+  const res = await api.post(`/organisations/${organisationId}/assets/capitalise`, data);
+  return res.data.data as FixedAsset;
+}
+
 export async function updateAsset(organisationId: string, assetId: string, data: Partial<{
   name: string; description: string; category: string; categoryId: string;
   serialNumber: string; location: string; residualValue: number;

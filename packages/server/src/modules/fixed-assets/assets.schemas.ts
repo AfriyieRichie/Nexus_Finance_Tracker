@@ -37,6 +37,12 @@ export const updateAssetSchema = createAssetSchema
   .partial()
   .omit({ acquisitionDate: true, acquisitionCost: true });
 
+// Capitalise an asset from a clearing-account item. Cost comes from the source
+// supplier-invoice line, so it isn't supplied here.
+export const capitaliseFromClearingSchema = createAssetSchema
+  .omit({ acquisitionCost: true, acquisitionCreditAccountId: true, supplierId: true })
+  .extend({ sourceLineId: z.string().uuid() });
+
 export const listAssetsSchema = z.object({
   category: z.string().optional(),
   status: z.enum(['ACTIVE', 'DISPOSED', 'FULLY_DEPRECIATED']).optional(),
@@ -128,6 +134,7 @@ export const depreciationScheduleSchema = z.object({
 
 export type CreateAssetInput = z.infer<typeof createAssetSchema>;
 export type UpdateAssetInput = z.infer<typeof updateAssetSchema>;
+export type CapitaliseFromClearingInput = z.infer<typeof capitaliseFromClearingSchema>;
 export type ListAssetsQuery = z.infer<typeof listAssetsSchema>;
 export type RunDepreciationInput = z.infer<typeof runDepreciationSchema>;
 export type ReverseDepreciationInput = z.infer<typeof reverseDepreciationSchema>;
