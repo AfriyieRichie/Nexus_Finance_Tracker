@@ -76,11 +76,12 @@ function SupplierDialog({ organisationId, supplier, trigger }: { organisationId:
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent
+        className="max-w-2xl"
         title={isEdit ? 'Edit Supplier' : 'New Supplier'}
         description={isEdit ? 'Update supplier details.' : 'Add a new supplier to your accounts payable.'}
       >
         <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-medium mb-1 block">Code *</label>
               <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="SUPP001" className="h-8 text-xs" disabled={isEdit} />
@@ -94,7 +95,7 @@ function SupplierDialog({ organisationId, supplier, trigger }: { organisationId:
             <label className="text-xs font-medium mb-1 block">Name *</label>
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Supplier name" className="h-8 text-xs" />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-medium mb-1 block">Email</label>
               <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@example.com" className="h-8 text-xs" />
@@ -112,7 +113,7 @@ function SupplierDialog({ organisationId, supplier, trigger }: { organisationId:
           <div>
             <label className="text-xs font-medium mb-1 block">Address</label>
             <Input value={street} onChange={(e) => setStreet(e.target.value)} placeholder="Street" className="h-8 text-xs" />
-            <div className="grid grid-cols-2 gap-3 mt-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
               <Input value={city} onChange={(e) => setCity(e.target.value)} placeholder="City" className="h-8 text-xs" />
               <Input value={country} onChange={(e) => setCountry(e.target.value)} placeholder="Country" className="h-8 text-xs" />
             </div>
@@ -120,7 +121,7 @@ function SupplierDialog({ organisationId, supplier, trigger }: { organisationId:
 
           <div className="border-t pt-3">
             <p className="text-xs font-semibold mb-2">Bank Details (for payments)</p>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Input value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="Bank name" className="h-8 text-xs" />
               <Input value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="Branch" className="h-8 text-xs" />
               <Input value={accountName} onChange={(e) => setAccountName(e.target.value)} placeholder="Account name" className="h-8 text-xs" />
@@ -130,7 +131,7 @@ function SupplierDialog({ organisationId, supplier, trigger }: { organisationId:
 
           <div className="border-t pt-3">
             <p className="text-xs font-semibold mb-2">Withholding Tax (Ghana)</p>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-xs font-medium mb-1 block">WHT Rate (%)</label>
                 <Input type="number" step="0.5" value={whtRate} onChange={(e) => setWhtRate(e.target.value)} placeholder="e.g. 7.5" className="h-8 text-xs" />
@@ -215,9 +216,9 @@ function SupplierStatementDialog({ organisationId, supplier, trigger }: { organi
   return (
     <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (v) { setStatement(null); setEmailMsg(''); } }}>
       <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent title={`Statement – ${supplier.name}`} description="Supplier account activity and balance for a period.">
+      <DialogContent className="max-w-2xl" title={`Statement – ${supplier.name}`} description="Supplier account activity and balance for a period.">
         <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-medium mb-1 block">From</label>
               <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-8 text-xs" />
