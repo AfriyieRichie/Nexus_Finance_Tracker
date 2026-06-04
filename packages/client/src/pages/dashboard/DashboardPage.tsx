@@ -74,58 +74,58 @@ export function DashboardPage() {
     {
       label: 'Total Assets',
       value: fmt(kpis?.totalAssets ?? 0, currency),
-      icon: <DollarSign size={16} className="text-blue-500" />,
-      bg: 'bg-blue-50 dark:bg-blue-950/30',
+      icon: <DollarSign size={16} className="text-blue-300" />,
+      bg: 'bg-blue-400/15',
       sub: null,
     },
     {
       label: 'Total Liabilities',
       value: fmt(kpis?.totalLiabilities ?? 0, currency),
-      icon: <Banknote size={16} className="text-rose-500" />,
-      bg: 'bg-rose-50 dark:bg-rose-950/30',
+      icon: <Banknote size={16} className="text-rose-300" />,
+      bg: 'bg-rose-400/15',
       sub: null,
     },
     {
       label: 'Net Equity',
       value: fmt(kpis?.netEquity ?? 0, currency),
-      icon: <Scale size={16} className={netEquityNum >= 0 ? 'text-emerald-500' : 'text-red-500'} />,
-      bg: netEquityNum >= 0 ? 'bg-emerald-50 dark:bg-emerald-950/30' : 'bg-red-50 dark:bg-red-950/30',
+      icon: <Scale size={16} className={netEquityNum >= 0 ? 'text-emerald-300' : 'text-red-300'} />,
+      bg: netEquityNum >= 0 ? 'bg-emerald-400/15' : 'bg-red-400/15',
       sub: null,
     },
     {
       label: 'Cash Balance',
       value: fmt(kpis?.cashBalance ?? 0, currency),
-      icon: <Landmark size={16} className="text-cyan-500" />,
-      bg: 'bg-cyan-50 dark:bg-cyan-950/30',
+      icon: <Landmark size={16} className="text-cyan-300" />,
+      bg: 'bg-cyan-400/15',
       sub: null,
     },
     {
       label: 'Net Income — Month',
       value: fmt(kpis?.netIncomeMonth ?? 0, currency),
-      icon: <TrendingUp size={16} className={netIncomeMonthNum >= 0 ? 'text-green-500' : 'text-red-500'} />,
-      bg: netIncomeMonthNum >= 0 ? 'bg-green-50 dark:bg-green-950/30' : 'bg-red-50 dark:bg-red-950/30',
+      icon: <TrendingUp size={16} className={netIncomeMonthNum >= 0 ? 'text-green-300' : 'text-red-300'} />,
+      bg: netIncomeMonthNum >= 0 ? 'bg-green-400/15' : 'bg-red-400/15',
       sub: 'Current month',
     },
     {
       label: 'Net Income — YTD',
       value: fmt(kpis?.netIncomeYTD ?? 0, currency),
-      icon: <TrendingDown size={16} className={netIncomeYTDNum >= 0 ? 'text-indigo-500' : 'text-red-500'} />,
-      bg: netIncomeYTDNum >= 0 ? 'bg-indigo-50 dark:bg-indigo-950/30' : 'bg-red-50 dark:bg-red-950/30',
+      icon: <TrendingDown size={16} className={netIncomeYTDNum >= 0 ? 'text-indigo-300' : 'text-red-300'} />,
+      bg: netIncomeYTDNum >= 0 ? 'bg-indigo-400/15' : 'bg-red-400/15',
       sub: `FY${data?.fiscalYear ?? ''}`,
     },
     {
       label: 'AR Outstanding',
       value: fmt(kpis?.arOutstanding ?? 0, currency),
-      icon: <Users size={16} className="text-amber-500" />,
-      bg: 'bg-amber-50 dark:bg-amber-950/30',
+      icon: <Users size={16} className="text-amber-300" />,
+      bg: 'bg-amber-400/15',
       link: '/ar?tab=ageing',
       sub: 'Click to view ageing',
     },
     {
       label: 'AP Outstanding',
       value: fmt(kpis?.apOutstanding ?? 0, currency),
-      icon: <ShoppingCart size={16} className="text-orange-500" />,
-      bg: 'bg-orange-50 dark:bg-orange-950/30',
+      icon: <ShoppingCart size={16} className="text-orange-300" />,
+      bg: 'bg-orange-400/15',
       link: '/ap?tab=ageing',
       sub: 'Click to view ageing',
     },
@@ -143,31 +143,35 @@ export function DashboardPage() {
         </p>
       </div>
 
-      {/* KPI Cards — 4 columns, 2 rows */}
+      {/* KPI Cards — 4 columns, 2 rows. Brand "premium" teal tiles. */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
         {kpiCards.map((kpi) => {
+          const clickable = 'link' in kpi && kpi.link;
           const card = (
-            <Card key={kpi.label} className={cn('kpi' in kpi && 'hover:border-primary/40 transition-colors cursor-pointer')}>
-              <CardHeader className="pb-1">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">{kpi.label}</CardTitle>
-                  <div className={cn('p-1.5 rounded-md', kpi.bg)}>{kpi.icon}</div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {isLoading ? (
-                  <Skeleton className="h-7 w-32" />
-                ) : (
-                  <p className="text-2xl font-bold tracking-tight font-mono">{kpi.value}</p>
-                )}
-                {'sub' in kpi && kpi.sub && (
-                  <p className="text-xs text-muted-foreground mt-0.5">{kpi.sub}</p>
-                )}
-              </CardContent>
-            </Card>
+            <div
+              className={cn(
+                'rounded-xl p-4 border border-white/10 transition-all duration-200',
+                'hover:-translate-y-0.5 hover:border-[#d3aa49]/45 hover:shadow-xl',
+                clickable && 'cursor-pointer',
+              )}
+              style={{ background: 'linear-gradient(135deg, #123f51 0%, #0e3243 100%)', boxShadow: '0 1px 3px rgba(0,0,0,0.25)' }}
+            >
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-white/65">{kpi.label}</p>
+                <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center shrink-0', kpi.bg)}>{kpi.icon}</div>
+              </div>
+              {isLoading ? (
+                <Skeleton className="h-8 w-28 mt-3 bg-white/10" />
+              ) : (
+                <p className="text-2xl font-bold tracking-tight font-mono mt-2 text-white">{kpi.value}</p>
+              )}
+              {'sub' in kpi && kpi.sub && (
+                <p className="text-xs mt-1 text-white/40">{kpi.sub}</p>
+              )}
+            </div>
           );
-          return 'link' in kpi && kpi.link
-            ? <Link to={kpi.link} key={kpi.label}>{card}</Link>
+          return clickable
+            ? <Link to={kpi.link} key={kpi.label} className="no-underline">{card}</Link>
             : <div key={kpi.label}>{card}</div>;
         })}
       </div>
