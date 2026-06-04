@@ -209,6 +209,7 @@ async function getOrCreateFaClearingAccount(organisationId: string): Promise<str
     data: {
       organisationId, code, name: 'Fixed Asset Clearing',
       class: 'ASSET', type: 'OTHER', isControlAccount: false, isActive: true,
+      description: 'Suspense account for assets bought on credit: a supplier bill posts Dr here / Cr AP, then capitalisation posts Dr Asset Cost / Cr here. Should net to zero.',
     },
     select: { id: true },
   });
