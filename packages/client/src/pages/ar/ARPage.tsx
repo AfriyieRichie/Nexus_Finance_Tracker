@@ -12,6 +12,7 @@ import {
 } from '@/services/ar.service';
 import type { Customer, Invoice, CustomerStatement } from '@/services/ar.service';
 import { listAccounts } from '@/services/accounts.service';
+import { listTaxCodes } from '@/services/tax.service';
 import { listPeriods } from '@/services/periods.service';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -191,9 +192,12 @@ interface InvoiceLineForm {
   description: string;
   quantity: string;
   unitPrice: string;
+  taxCode: string;
   taxAmount: string;
   accountId: string;
 }
+
+const EMPTY_INVOICE_LINE: InvoiceLineForm = { description: '', quantity: '1', unitPrice: '', taxCode: '', taxAmount: '0', accountId: '' };
 
 function NewInvoiceDialog({ organisationId }: { organisationId: string }) {
   const qc = useQueryClient();
@@ -211,15 +215,19 @@ function NewInvoiceDialog({ organisationId }: { organisationId: string }) {
     enabled: open,
   });
 
+  const { data: taxCodes = [] } = useQuery({
+    queryKey: ['tax-codes', organisationId],
+    queryFn: () => listTaxCodes(organisationId, true),
+    enabled: open,
+  });
+
   const [customerId, setCustomerId] = useState('');
   const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().split('T')[0]);
   const [dueDate, setDueDate] = useState('');
   const [currency, setCurrency] = useState('USD');
   const [notes, setNotes] = useState('');
   const [arAccountId, setArAccountId] = useState('');
-  const [lines, setLines] = useState<InvoiceLineForm[]>([
-    { description: '', quantity: '1', unitPrice: '', taxAmount: '0', accountId: '' },
-  ]);
+  const [lines, setLines] = useState<InvoiceLineForm[]>([{ ...EMPTY_INVOICE_LINE }]);
 
   const revenueAccounts = (accountsData?.accounts ?? []).filter((a) => a.class === 'REVENUE' && a.isActive);
   const arAccounts = (accountsData?.accounts ?? []).filter((a) => a.type === 'RECEIVABLE' && a.isActive);
@@ -250,15 +258,23 @@ function NewInvoiceDialog({ organisationId }: { organisationId: string }) {
     }
   };
 
-  const addLine = () => setLines((l) => [...l, { description: '', quantity: '1', unitPrice: '', taxAmount: '0', accountId: '' }]);
+  // Selecting a VAT code (or changing qty/price) auto-computes output VAT = net × rate.
+  const recalcTax = (line: InvoiceLineForm): InvoiceLineForm => {
+    if (!line.taxCode) return { ...line, taxAmount: '0' };
+    const rate = Number(taxCodes.find((t) => t.code === line.taxCode)?.rate ?? 0);
+    const net = Number(line.quantity || 0) * Number(line.unitPrice || 0);
+    return { ...line, taxAmount: (net * rate / 100).toFixed(2) };
+  };
+
+  const addLine = () => setLines((l) => [...l, { ...EMPTY_INVOICE_LINE }]);
   const removeLine = (i: number) => setLines((l) => l.filter((_, idx) => idx !== i));
   const updateLine = (i: number, key: keyof InvoiceLineForm, value: string) =>
-    setLines((l) => l.map((line, idx) => (idx === i ? { ...line, [key]: value } : line)));
+    setLines((l) => l.map((line, idx) => (idx === i ? recalcTax({ ...line, [key]: value }) : line)));
 
   const reset = () => {
     setCustomerId(''); setInvoiceDate(new Date().toISOString().split('T')[0]);
     setDueDate(''); setCurrency('USD'); setNotes(''); setArAccountId('');
-    setLines([{ description: '', quantity: '1', unitPrice: '', taxAmount: '0', accountId: '' }]);
+    setLines([{ ...EMPTY_INVOICE_LINE }]);
   };
 
   const mutation = useMutation({
@@ -275,6 +291,7 @@ function NewInvoiceDialog({ organisationId }: { organisationId: string }) {
         description: l.description,
         quantity: Number(l.quantity),
         unitPrice: Number(l.unitPrice),
+        taxCode: l.taxCode || undefined,
         taxAmount: Number(l.taxAmount),
         accountId: l.accountId || undefined,
       })),
@@ -367,7 +384,7 @@ function NewInvoiceDialog({ organisationId }: { organisationId: string }) {
                     <th className="text-left px-2 py-1.5 font-medium">Description <span className="text-destructive">*</span></th>
                     <th className="text-right px-2 py-1.5 font-medium w-14">Qty</th>
                     <th className="text-right px-2 py-1.5 font-medium w-24">Unit Price</th>
-                    <th className="text-right px-2 py-1.5 font-medium w-20">Tax</th>
+                    <th className="text-left px-2 py-1.5 font-medium w-36">VAT</th>
                     <th className="text-right px-2 py-1.5 font-medium w-24">Total</th>
                     <th className="text-left px-2 py-1.5 font-medium">Revenue Acct</th>
                     <th className="w-8" />
@@ -389,8 +406,19 @@ function NewInvoiceDialog({ organisationId }: { organisationId: string }) {
                           placeholder="0.00" className="h-7 text-xs text-right border-0 shadow-none focus-visible:ring-0" />
                       </td>
                       <td className="px-1 py-1">
-                        <Input type="number" value={line.taxAmount} onChange={(e) => updateLine(i, 'taxAmount', e.target.value)}
-                          className="h-7 text-xs text-right border-0 shadow-none focus-visible:ring-0" />
+                        <Select
+                          value={line.taxCode}
+                          onChange={(e) => updateLine(i, 'taxCode', e.target.value)}
+                          className="h-7 text-xs border-0 shadow-none focus:ring-0 px-1"
+                        >
+                          <option value="">No VAT</option>
+                          {taxCodes.map((tc) => (
+                            <option key={tc.id} value={tc.code}>{tc.code} · {Number(tc.rate)}%</option>
+                          ))}
+                        </Select>
+                        {Number(line.taxAmount) > 0 && (
+                          <p className="text-[10px] text-muted-foreground text-right pr-1">+{Number(line.taxAmount).toFixed(2)}</p>
+                        )}
                       </td>
                       <td className="px-2 py-1 text-right font-medium text-muted-foreground">
                         {(Number(line.quantity) * Number(line.unitPrice) + Number(line.taxAmount)).toFixed(2)}

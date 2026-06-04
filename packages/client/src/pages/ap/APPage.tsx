@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/auth.store';
 import { listSuppliers, createSupplier, updateSupplier, getSupplierStatement, emailSupplierStatement, listSupplierInvoices, createSupplierInvoice, postSupplierInvoice, getApAgeing } from '@/services/ap.service';
 import type { Supplier, SupplierInput, SupplierStatement } from '@/services/ap.service';
 import { listAccounts } from '@/services/accounts.service';
+import { listTaxCodes } from '@/services/tax.service';
 import { listPeriods } from '@/services/periods.service';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -278,9 +279,12 @@ interface InvoiceLine {
   description: string;
   quantity: string;
   unitPrice: string;
+  taxCode: string;
   taxAmount: string;
   accountId: string;
 }
+
+const EMPTY_LINE: InvoiceLine = { description: '', quantity: '1', unitPrice: '', taxCode: '', taxAmount: '0', accountId: '' };
 
 function NewSupplierInvoiceDialog({ organisationId }: { organisationId: string }) {
   const qc = useQueryClient();
@@ -298,6 +302,12 @@ function NewSupplierInvoiceDialog({ organisationId }: { organisationId: string }
     enabled: open,
   });
 
+  const { data: taxCodes = [] } = useQuery({
+    queryKey: ['tax-codes', organisationId],
+    queryFn: () => listTaxCodes(organisationId, true),
+    enabled: open,
+  });
+
   const [supplierId, setSupplierId] = useState('');
   const [supplierRef, setSupplierRef] = useState('');
   const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().split('T')[0]);
@@ -305,9 +315,7 @@ function NewSupplierInvoiceDialog({ organisationId }: { organisationId: string }
   const [currency, setCurrency] = useState('USD');
   const [notes, setNotes] = useState('');
   const [apAccountId, setApAccountId] = useState('');
-  const [lines, setLines] = useState<InvoiceLine[]>([
-    { description: '', quantity: '1', unitPrice: '', taxAmount: '0', accountId: '' },
-  ]);
+  const [lines, setLines] = useState<InvoiceLine[]>([{ ...EMPTY_LINE }]);
 
   const expenseAccounts = (accountsData?.accounts ?? []).filter(
     (a) => a.class === 'EXPENSE' && a.isActive,
@@ -316,10 +324,18 @@ function NewSupplierInvoiceDialog({ organisationId }: { organisationId: string }
     (a) => a.type === 'PAYABLE' && a.isActive,
   );
 
-  const addLine = () => setLines((l) => [...l, { description: '', quantity: '1', unitPrice: '', taxAmount: '0', accountId: '' }]);
+  // Selecting a VAT code (or changing qty/price) auto-computes input VAT = net × rate.
+  const recalcTax = (line: InvoiceLine): InvoiceLine => {
+    if (!line.taxCode) return { ...line, taxAmount: '0' };
+    const rate = Number(taxCodes.find((t) => t.code === line.taxCode)?.rate ?? 0);
+    const net = Number(line.quantity || 0) * Number(line.unitPrice || 0);
+    return { ...line, taxAmount: (net * rate / 100).toFixed(2) };
+  };
+
+  const addLine = () => setLines((l) => [...l, { ...EMPTY_LINE }]);
   const removeLine = (i: number) => setLines((l) => l.filter((_, idx) => idx !== i));
   const updateLine = (i: number, key: keyof InvoiceLine, value: string) =>
-    setLines((l) => l.map((line, idx) => idx === i ? { ...line, [key]: value } : line));
+    setLines((l) => l.map((line, idx) => idx === i ? recalcTax({ ...line, [key]: value }) : line));
 
   const subtotal = lines.reduce((s, l) => s + Number(l.quantity || 0) * Number(l.unitPrice || 0), 0);
   const tax = lines.reduce((s, l) => s + Number(l.taxAmount || 0), 0);
@@ -328,7 +344,7 @@ function NewSupplierInvoiceDialog({ organisationId }: { organisationId: string }
   const reset = () => {
     setSupplierId(''); setSupplierRef(''); setInvoiceDate(new Date().toISOString().split('T')[0]);
     setDueDate(''); setCurrency('USD'); setNotes(''); setApAccountId('');
-    setLines([{ description: '', quantity: '1', unitPrice: '', taxAmount: '0', accountId: '' }]);
+    setLines([{ ...EMPTY_LINE }]);
   };
 
   const mutation = useMutation({
@@ -346,6 +362,7 @@ function NewSupplierInvoiceDialog({ organisationId }: { organisationId: string }
         description: l.description,
         quantity: Number(l.quantity),
         unitPrice: Number(l.unitPrice),
+        taxCode: l.taxCode || undefined,
         taxAmount: Number(l.taxAmount),
         accountId: l.accountId || undefined,
       })),
@@ -423,7 +440,7 @@ function NewSupplierInvoiceDialog({ organisationId }: { organisationId: string }
                     <th className="text-left px-2 py-1.5 font-medium w-40">Description</th>
                     <th className="text-right px-2 py-1.5 font-medium w-16">Qty</th>
                     <th className="text-right px-2 py-1.5 font-medium w-24">Unit Price</th>
-                    <th className="text-right px-2 py-1.5 font-medium w-20">Tax</th>
+                    <th className="text-left px-2 py-1.5 font-medium w-36">VAT</th>
                     <th className="text-right px-2 py-1.5 font-medium w-24">Line Total</th>
                     <th className="text-left px-2 py-1.5 font-medium">Expense Account</th>
                     <th className="w-8"></th>
@@ -458,12 +475,19 @@ function NewSupplierInvoiceDialog({ organisationId }: { organisationId: string }
                         />
                       </td>
                       <td className="px-1 py-1">
-                        <Input
-                          type="number"
-                          value={line.taxAmount}
-                          onChange={(e) => updateLine(i, 'taxAmount', e.target.value)}
-                          className="h-7 text-xs text-right border-0 shadow-none focus-visible:ring-0"
-                        />
+                        <Select
+                          value={line.taxCode}
+                          onChange={(e) => updateLine(i, 'taxCode', e.target.value)}
+                          className="h-7 text-xs border-0 shadow-none focus:ring-0 px-1"
+                        >
+                          <option value="">No VAT</option>
+                          {taxCodes.map((tc) => (
+                            <option key={tc.id} value={tc.code}>{tc.code} · {Number(tc.rate)}%</option>
+                          ))}
+                        </Select>
+                        {Number(line.taxAmount) > 0 && (
+                          <p className="text-[10px] text-muted-foreground text-right pr-1">+{Number(line.taxAmount).toFixed(2)}</p>
+                        )}
                       </td>
                       <td className="px-2 py-1 text-right font-medium text-muted-foreground">
                         {(Number(line.quantity) * Number(line.unitPrice) + Number(line.taxAmount)).toFixed(2)}
