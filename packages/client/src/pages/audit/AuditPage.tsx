@@ -53,8 +53,26 @@ function moduleColour(mod: string | null): string {
     case 'AR':               return 'bg-teal-50 text-teal-700 border-teal-200';
     case 'AP':               return 'bg-orange-50 text-orange-700 border-orange-200';
     case 'ASSET':            return 'bg-pink-50 text-pink-700 border-pink-200';
+    case 'INVENTORY':        return 'bg-lime-50 text-lime-700 border-lime-200';
+    case 'BUDGET':           return 'bg-indigo-50 text-indigo-700 border-indigo-200';
+    case 'TAX':              return 'bg-rose-50 text-rose-700 border-rose-200';
+    case 'BANK':             return 'bg-sky-50 text-sky-700 border-sky-200';
+    case 'PERIODS':          return 'bg-slate-50 text-slate-700 border-slate-200';
+    case 'USERS':            return 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200';
+    case 'ORGANISATION':     return 'bg-stone-50 text-stone-700 border-stone-200';
     default:                 return 'bg-muted text-muted-foreground';
   }
+}
+
+// Friendly label for the module code badge.
+const MODULE_LABELS: Record<string, string> = {
+  AUTH: 'Authentication', JOURNAL: 'Journals', CHART_OF_ACCOUNTS: 'Chart of Accounts',
+  APPROVAL: 'Approvals', PAYROLL: 'Payroll', AR: 'Accounts Receivable', AP: 'Accounts Payable',
+  ASSET: 'Fixed Assets', INVENTORY: 'Inventory', BUDGET: 'Budgets', TAX: 'Tax',
+  BANK: 'Bank', PERIODS: 'Periods', USERS: 'Users', ORGANISATION: 'Organisation', REPORTS: 'Reports',
+};
+function moduleLabel(mod: string): string {
+  return MODULE_LABELS[mod] ?? mod.replace(/_/g, ' ');
 }
 
 // ─── Before/after diff viewer ─────────────────────────────────────────────────
@@ -121,7 +139,7 @@ function LogRow({ log }: { log: AuditLog }) {
         <TableCell className="w-[120px]">
           {log.module && (
             <span className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium ${moduleColour(log.module)}`}>
-              {log.module.replace(/_/g, ' ')}
+              {moduleLabel(log.module)}
             </span>
           )}
         </TableCell>
