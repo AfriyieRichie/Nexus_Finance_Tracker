@@ -14,6 +14,7 @@ import type { Customer, Invoice, CustomerStatement } from '@/services/ar.service
 import { listAccounts } from '@/services/accounts.service';
 import { listTaxCodes } from '@/services/tax.service';
 import { AttachmentsDialog } from '@/components/ui/attachments';
+import { uploadAttachment } from '@/services/attachments.service';
 import { listPeriods } from '@/services/periods.service';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -586,6 +587,7 @@ function RecordPaymentDialog({ organisationId, invoice, trigger }: { organisatio
   const [bankAccountId, setBankAccountId] = useState('');
   const [periodId, setPeriodId] = useState('');
   const [reference, setReference] = useState('');
+  const [receipt, setReceipt] = useState<File | null>(null);
 
   const { data: accountsData } = useQuery({
     queryKey: ['accounts', organisationId, 'bank-cash'],
@@ -605,14 +607,21 @@ function RecordPaymentDialog({ organisationId, invoice, trigger }: { organisatio
   const openPeriods = (periodsData ?? []).filter((p) => p.status === 'OPEN');
 
   const mutation = useMutation({
-    mutationFn: () => recordPayment(organisationId, {
-      invoiceId: invoice.id,
-      amount: Number(amount),
-      paymentDate,
-      bankAccountId,
-      periodId,
-      reference: reference || undefined,
-    }),
+    mutationFn: async () => {
+      const result = await recordPayment(organisationId, {
+        invoiceId: invoice.id,
+        amount: Number(amount),
+        paymentDate,
+        bankAccountId,
+        periodId,
+        reference: reference || undefined,
+      }) as { journalEntryId?: string };
+      // Attach the receipt to the payment's journal entry (viewable on the journal).
+      if (receipt && result.journalEntryId) {
+        try { await uploadAttachment(organisationId, 'JOURNAL_ENTRY', result.journalEntryId, receipt); } catch { /* don't fail the payment if the upload fails */ }
+      }
+      return result;
+    },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['ar-invoices'] });
       void qc.invalidateQueries({ queryKey: ['ar-ageing'] });
@@ -628,6 +637,7 @@ function RecordPaymentDialog({ organisationId, invoice, trigger }: { organisatio
       setBankAccountId('');
       setPeriodId('');
       setReference('');
+      setReceipt(null);
     }
   };
 
@@ -675,6 +685,12 @@ function RecordPaymentDialog({ organisationId, invoice, trigger }: { organisatio
               placeholder="Cheque / transfer reference" className="h-8 text-xs" />
           </div>
 
+          <div>
+            <label className="text-xs font-medium mb-1 block">Receipt / proof of payment <span className="text-muted-foreground font-normal">(optional)</span></label>
+            <Input type="file" accept="application/pdf,image/*" onChange={(e) => setReceipt(e.target.files?.[0] ?? null)} className="h-8 text-xs" />
+            {receipt && <p className="text-[10px] text-muted-foreground mt-0.5">{receipt.name} — attaches to this payment's journal entry.</p>}
+          </div>
+
           {mutation.isError && <p className="text-xs text-destructive">{errMsg(mutation.error)}</p>}
           {mutation.isSuccess && <p className="text-xs text-green-600">Payment recorded successfully.</p>}
 
@@ -704,6 +720,7 @@ function CreditNoteDialog({ organisationId, invoice, trigger }: { organisationId
   const [periodId, setPeriodId] = useState('');
   const [reason, setReason] = useState('');
   const [revenueAccountId, setRevenueAccountId] = useState('');
+  const [doc, setDoc] = useState<File | null>(null);
 
   const { data: accountsData } = useQuery({
     queryKey: ['accounts', organisationId, 'posting'],
@@ -721,14 +738,20 @@ function CreditNoteDialog({ organisationId, invoice, trigger }: { organisationId
   const openPeriods = (periodsData ?? []).filter((p) => p.status === 'OPEN');
 
   const mutation = useMutation({
-    mutationFn: () => createCreditNote(organisationId, {
-      invoiceId: invoice.id,
-      creditDate,
-      periodId,
-      amount: Number(amount),
-      reason: reason || undefined,
-      revenueAccountId: revenueAccountId || undefined,
-    }),
+    mutationFn: async () => {
+      const result = await createCreditNote(organisationId, {
+        invoiceId: invoice.id,
+        creditDate,
+        periodId,
+        amount: Number(amount),
+        reason: reason || undefined,
+        revenueAccountId: revenueAccountId || undefined,
+      }) as { journalEntryId?: string };
+      if (doc && result.journalEntryId) {
+        try { await uploadAttachment(organisationId, 'JOURNAL_ENTRY', result.journalEntryId, doc); } catch { /* don't fail the credit note if the upload fails */ }
+      }
+      return result;
+    },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['ar-invoices'] });
       void qc.invalidateQueries({ queryKey: ['ar-ageing'] });
@@ -744,6 +767,7 @@ function CreditNoteDialog({ organisationId, invoice, trigger }: { organisationId
       setPeriodId('');
       setReason('');
       setRevenueAccountId('');
+      setDoc(null);
     }
   };
 
@@ -789,6 +813,12 @@ function CreditNoteDialog({ organisationId, invoice, trigger }: { organisationId
             <label className="text-xs font-medium mb-1 block">Reason</label>
             <Input value={reason} onChange={(e) => setReason(e.target.value)}
               placeholder="e.g. Goods returned, overcharge correction…" className="h-8 text-xs" />
+          </div>
+
+          <div>
+            <label className="text-xs font-medium mb-1 block">Supporting document <span className="text-muted-foreground font-normal">(optional)</span></label>
+            <Input type="file" accept="application/pdf,image/*" onChange={(e) => setDoc(e.target.files?.[0] ?? null)} className="h-8 text-xs" />
+            {doc && <p className="text-[10px] text-muted-foreground mt-0.5">{doc.name} — attaches to this credit note's journal entry.</p>}
           </div>
 
           {mutation.isError && <p className="text-xs text-destructive">{errMsg(mutation.error)}</p>}
