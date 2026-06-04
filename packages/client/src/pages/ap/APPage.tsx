@@ -15,6 +15,7 @@ import { Select } from '@/components/ui/select';
 import { AccountSelect } from '@/components/ui/account-select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogTrigger, DialogClose } from '@/components/ui/dialog';
+import { AttachmentsDialog } from '@/components/ui/attachments';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
@@ -758,7 +759,10 @@ export function APPage() {
                       <TableCell><Badge variant={STATUS_VARIANT[inv.status] ?? 'secondary'}>{inv.status.replace(/_/g, ' ')}</Badge></TableCell>
                       <TableCell>
                         {activeOrganisationId && (
-                          <PostSupplierInvoiceButton organisationId={activeOrganisationId} invoiceId={inv.id} status={inv.status} />
+                          <div className="flex items-center justify-end gap-1">
+                            <AttachmentsDialog organisationId={activeOrganisationId} entityType="SUPPLIER_INVOICE" entityId={inv.id} label={inv.invoiceNumber} />
+                            <PostSupplierInvoiceButton organisationId={activeOrganisationId} invoiceId={inv.id} status={inv.status} />
+                          </div>
                         )}
                       </TableCell>
                     </TableRow>

@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { AccountSelect } from '@/components/ui/account-select';
+import { Attachments } from '@/components/ui/attachments';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogTrigger, DialogClose } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -482,6 +483,8 @@ function AssetDetailPanel({ organisationId, assetId, onClose }: { organisationId
                 {statusMutation.isError && <p className="text-destructive">{errMsg(statusMutation.error)}</p>}
               </div>
             )}
+
+            <Attachments organisationId={organisationId} entityType="FIXED_ASSET" entityId={assetId} title="Supporting documents (invoice, receipt)" />
           </>
         )}
 

@@ -28,6 +28,7 @@ import { inventoryRouter } from './modules/inventory/inventory.routes';
 import { auditRouter } from './modules/audit-trail/audit.routes';
 import { usersRouter } from './modules/users/users.routes';
 import { dashboardRouter } from './modules/dashboard/dashboard.routes';
+import { attachmentsRouter } from './modules/attachments/attachments.routes';
 
 const app = express();
 
@@ -98,6 +99,7 @@ app.use('/api/v1/organisations/:organisationId/payroll', payrollRouter);
 app.use('/api/v1/organisations/:organisationId/audit', auditRouter);
 app.use('/api/v1/organisations/:organisationId/users', usersRouter);
 app.use('/api/v1/organisations/:organisationId/dashboard', dashboardRouter);
+app.use('/api/v1/organisations/:organisationId/attachments', attachmentsRouter);
 
 // ─── 404 & Error Handling ─────────────────────────────────────────────────
 app.use(notFoundMiddleware);

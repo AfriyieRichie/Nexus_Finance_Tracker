@@ -1957,16 +1957,19 @@ model EmployeeLoan {
 // Polymorphic attachment — entityType discriminates the target (e.g. "JOURNAL_ENTRY", "INVOICE")
 // No FK constraint because one entityId cannot reference multiple tables simultaneously.
 model Attachment {
-  id          String   @id @default(uuid())
-  entityType  String
-  entityId    String
-  fileName    String
-  fileSize    Int
-  mimeType    String
-  storagePath String
-  uploadedBy  String
-  uploadedAt  DateTime @default(now())
+  id             String   @id @default(uuid())
+  organisationId String?
+  entityType     String
+  entityId       String
+  fileName       String
+  fileSize       Int
+  mimeType       String
+  storagePath    String   // storage backend marker ("db") or external key/URL
+  data           Bytes?   // file bytes when stored in the database
+  uploadedBy     String
+  uploadedAt     DateTime @default(now())
 
   @@index([entityType, entityId])
+  @@index([organisationId])
   @@map("attachments")
 }
