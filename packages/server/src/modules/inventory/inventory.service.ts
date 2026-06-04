@@ -958,21 +958,25 @@ export async function createStocktakeSession(
 
   const sessionDate = new Date(input.sessionDate + 'T00:00:00Z');
 
-  // Snapshot StockBalance for items in scope
-  const balanceWhere: Prisma.StockBalanceWhereInput = {
-    organisationId,
-    ...(input.locationId && { locationId: input.locationId }),
-  };
-
-  const balances = await prisma.stockBalance.findMany({
-    where: balanceWhere,
-    include: {
-      item: { select: { id: true, isDeleted: true } },
-    },
+  // Snapshot EVERY active inventory item so the count sheet lists everything to
+  // count — not only items that already have a stock-balance row. System qty
+  // comes from the chosen location's balance when a location is selected,
+  // otherwise the item's overall quantity on hand (0 if never stocked).
+  const items = await prisma.inventoryItem.findMany({
+    where: { organisationId, isDeleted: false, isActive: true },
+    select: { id: true, unitCost: true, quantityOnHand: true },
+    orderBy: { code: 'asc' },
   });
 
-  // Filter out deleted items
-  const activeBalances = balances.filter((b) => !b.item.isDeleted);
+  const balanceByItem = new Map<string, { qty: Prisma.Decimal; cost: Prisma.Decimal }>();
+  if (input.locationId) {
+    const balances = await prisma.stockBalance.findMany({
+      where: { organisationId, locationId: input.locationId },
+    });
+    for (const b of balances) {
+      balanceByItem.set(b.itemId, { qty: new Prisma.Decimal(b.quantityOnHand), cost: new Prisma.Decimal(b.averageCost) });
+    }
+  }
 
   const session = await prisma.stocktakeSession.create({
     data: {
@@ -984,15 +988,22 @@ export async function createStocktakeSession(
       notes: input.notes ?? null,
       createdBy: userId,
       counts: {
-        create: activeBalances.map((b) => ({
-          itemId: b.itemId,
-          locationId: b.locationId ?? null,
-          systemQuantity: new Prisma.Decimal(b.quantityOnHand),
-          countedQuantity: null,
-          varianceQuantity: null,
-          unitCost: new Prisma.Decimal(b.averageCost),
-          varianceValue: null,
-        })),
+        create: items.map((item) => {
+          const bal = balanceByItem.get(item.id);
+          const systemQty = input.locationId
+            ? (bal?.qty ?? new Prisma.Decimal(0))
+            : new Prisma.Decimal(item.quantityOnHand);
+          const unitCost = bal?.cost ?? new Prisma.Decimal(item.unitCost);
+          return {
+            itemId: item.id,
+            locationId: input.locationId ?? null,
+            systemQuantity: systemQty,
+            countedQuantity: null,
+            varianceQuantity: null,
+            unitCost,
+            varianceValue: null,
+          };
+        }),
       },
     },
     include: {
