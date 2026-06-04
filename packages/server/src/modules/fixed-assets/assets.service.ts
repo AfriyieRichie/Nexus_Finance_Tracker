@@ -1,7 +1,8 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, ApprovalEntityType } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { ConflictError, NotFoundError, ValidationError } from '../../utils/errors';
 import * as journalService from '../journals/journal.service';
+import * as apService from '../accounts-payable/ap.service';
 import { auditLog } from '../audit-trail/audit.service';
 import type {
   CreateAssetInput, UpdateAssetInput, ListAssetsQuery,
@@ -185,6 +186,35 @@ export async function updateCategory(organisationId: string, categoryId: string,
   });
 }
 
+// Resolve (or create) the Fixed Asset Clearing/suspense account that decouples
+// asset purchasing (AP) from capitalisation. Found by name; created if missing.
+async function getOrCreateFaClearingAccount(organisationId: string): Promise<string> {
+  const existing = await prisma.account.findFirst({
+    where: {
+      organisationId, isDeleted: false,
+      OR: [
+        { name: { contains: 'Fixed Asset Clearing', mode: 'insensitive' } },
+        { name: { contains: 'Asset Clearing', mode: 'insensitive' } },
+      ],
+    },
+    select: { id: true },
+  });
+  if (existing) return existing.id;
+
+  let code = '129000';
+  while (await prisma.account.findFirst({ where: { organisationId, code }, select: { id: true } })) {
+    code = String(Number(code) + 1);
+  }
+  const created = await prisma.account.create({
+    data: {
+      organisationId, code, name: 'Fixed Asset Clearing',
+      class: 'ASSET', type: 'OTHER', isControlAccount: false, isActive: true,
+    },
+    select: { id: true },
+  });
+  return created.id;
+}
+
 // ─── CRUD ────────────────────────────────────────────────────────────────────
 
 export async function createAsset(organisationId: string, input: CreateAssetInput, userId?: string) {
@@ -241,8 +271,67 @@ export async function createAsset(organisationId: string, input: CreateAssetInpu
     include: { assetCategory: true },
   });
 
-  // Auto-post acquisition journal if payment account provided
-  if (input.acquisitionCreditAccountId && assetAccountId && userId) {
+  // Acquired ON CREDIT from a supplier: raise a supplier invoice coded to the
+  // FIXED ASSET CLEARING account, so the payable flows through AP (ageing,
+  // statement, the normal payment) and the asset is decoupled from purchasing.
+  //   Bill posting  : Dr Fixed Asset Clearing / Cr Accounts Payable
+  //   Capitalisation: Dr Asset Cost / Cr Fixed Asset Clearing  (on bill post)
+  if (input.supplierId && assetAccountId && userId) {
+    const supplier = await prisma.supplier.findFirst({
+      where: { id: input.supplierId, organisationId, isDeleted: false, isActive: true },
+    });
+    if (!supplier) throw new NotFoundError('Supplier not found or inactive');
+
+    const org = await prisma.organisation.findUnique({
+      where: { id: organisationId }, select: { baseCurrency: true },
+    });
+    const currency = org?.baseCurrency ?? 'GHS';
+    const acquisitionDate = new Date(input.acquisitionDate + 'T00:00:00Z');
+    const due = new Date(acquisitionDate);
+    due.setDate(due.getDate() + (supplier.paymentTerms ?? 30));
+
+    const clearingAccountId = await getOrCreateFaClearingAccount(organisationId);
+
+    const bill = await apService.createSupplierInvoice(organisationId, userId, {
+      supplierId: input.supplierId,
+      invoiceDate: input.acquisitionDate,
+      dueDate: due.toISOString().split('T')[0],
+      currency,
+      exchangeRate: 1,
+      notes: `Fixed asset acquisition — ${input.name} (${input.code})`,
+      lines: [{
+        lineNumber: 1,
+        description: `Fixed asset — ${input.name} (${input.code})`,
+        quantity: 1,
+        unitPrice: Number(cost),
+        taxAmount: 0,
+        accountId: clearingAccountId,
+      }],
+      skipDuplicateCheck: true,
+    });
+
+    // Link the asset to the bill BEFORE posting, so the capitalisation hook in
+    // postSupplierInvoice can find it.
+    await prisma.fixedAsset.update({
+      where: { id: asset.id },
+      data: { acquisitionSupplierId: input.supplierId, acquisitionSupplierInvoiceId: bill.id },
+    });
+
+    // Capitalise immediately when no approval workflow is active; otherwise leave
+    // the bill as a DRAFT to be approved + posted via AP (which then capitalises).
+    const workflow = await prisma.approvalWorkflow.findFirst({
+      where: { organisationId, entityType: ApprovalEntityType.SUPPLIER_INVOICE, isActive: true },
+      include: { levels: true },
+    });
+    const period = await prisma.accountingPeriod.findFirst({
+      where: { organisationId, status: 'OPEN', startDate: { lte: acquisitionDate }, endDate: { gte: acquisitionDate } },
+      select: { id: true },
+    });
+    if ((!workflow || workflow.levels.length === 0) && period) {
+      await apService.postSupplierInvoice(organisationId, bill.id, period.id, userId);
+    }
+  } else if (input.acquisitionCreditAccountId && assetAccountId && userId) {
+    // Cash/bank purchase: direct Dr Asset Cost / Cr [bank] journal.
     const org = await prisma.organisation.findUnique({
       where: { id: organisationId }, select: { baseCurrency: true },
     });

@@ -28,6 +28,9 @@ export const createAssetSchema = z.object({
   accDeprnAccountId: z.string().uuid().optional(),
   // If provided, auto-post acquisition journal: Dr assetCostAccount / Cr this account
   acquisitionCreditAccountId: z.string().uuid().optional(),
+  // Acquired on credit: raises a supplier invoice (Dr assetCostAccount / Cr AP for
+  // this supplier) instead of the direct credit-account journal above.
+  supplierId: z.string().uuid().optional(),
 });
 
 export const updateAssetSchema = createAssetSchema

@@ -1032,6 +1032,9 @@ model FixedAsset {
   assetAccountId            String?
   deprnAccountId            String?
   accDeprnAccountId         String?
+  // When acquired on credit from a supplier, links to the AP payable raised for it.
+  acquisitionSupplierId        String?
+  acquisitionSupplierInvoiceId String?
   lastDeprnDate             DateTime?          @db.Date
   isDeleted                 Boolean            @default(false)
   createdAt                 DateTime           @default(now())

@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/auth.store';
 import * as assetSvc from '@/services/assets.service';
 import { listPeriods } from '@/services/periods.service';
 import { listAccounts, Account } from '@/services/accounts.service';
+import { listSuppliers } from '@/services/ap.service';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -42,9 +43,10 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
     acquisitionDate: new Date().toISOString().split('T')[0],
     acquisitionCost: '', residualValue: '0',
     usefulLifeMonths: '60', depreciationMethod: 'STRAIGHT_LINE',
-    unitsOfProductionTotal: '', acquisitionCreditAccountId: '',
+    unitsOfProductionTotal: '', acquisitionCreditAccountId: '', supplierId: '',
   });
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const [acqMode, setAcqMode] = useState<'cash' | 'credit' | 'none'>('none');
 
   const { data: categories = [] } = useQuery({
     queryKey: ['asset-categories', organisationId],
@@ -57,9 +59,16 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
     queryFn: () => listAccounts(organisationId, { pageSize: 200 } as Parameters<typeof listAccounts>[1]),
     enabled: open,
   });
-  const bankAccounts = (bankAccountsData?.accounts ?? []).filter(
-    (a: Account) => (a.type === 'BANK' || a.type === 'CASH' || a.type === 'PAYABLE') && a.isActive && !a.isControlAccount,
+  const cashAccounts = (bankAccountsData?.accounts ?? []).filter(
+    (a: Account) => (a.type === 'BANK' || a.type === 'CASH') && a.isActive && !a.isControlAccount,
   );
+
+  const { data: suppliersData } = useQuery({
+    queryKey: ['ap-suppliers', organisationId],
+    queryFn: () => listSuppliers(organisationId),
+    enabled: open,
+  });
+  const suppliers = suppliersData?.suppliers ?? [];
 
   const onCategoryChange = (catId: string) => {
     const cat = categories.find((c) => c.id === catId);
@@ -86,9 +95,14 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
       unitsOfProductionTotal: form.unitsOfProductionTotal ? Number(form.unitsOfProductionTotal) : undefined,
       serialNumber: form.serialNumber || undefined,
       location: form.location || undefined,
-      acquisitionCreditAccountId: form.acquisitionCreditAccountId || undefined,
+      acquisitionCreditAccountId: acqMode === 'cash' ? (form.acquisitionCreditAccountId || undefined) : undefined,
+      supplierId: acqMode === 'credit' ? (form.supplierId || undefined) : undefined,
     }),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['assets'] }); setOpen(false); },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['assets'] });
+      void qc.invalidateQueries({ queryKey: ['ap-invoices'] });
+      setOpen(false);
+    },
   });
 
   return (
@@ -122,15 +136,37 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
             <div><label className="text-xs font-medium mb-1 block">Cost *</label>
               <Input type="number" value={form.acquisitionCost} onChange={(e) => set('acquisitionCost', e.target.value)} placeholder="0.00" className="h-8 text-xs" /></div>
           </div>
-          <div>
-            <label className="text-xs font-medium mb-1 block">Paid From / Source of Funds <span className="text-muted-foreground font-normal">(optional — auto-posts acquisition journal)</span></label>
-            <AccountSelect
-              value={form.acquisitionCreditAccountId}
-              onChange={(id) => set('acquisitionCreditAccountId', id)}
-              accounts={bankAccounts}
-              placeholder="— Select to auto-post GL entry —"
-            />
-            <p className="text-[10px] text-muted-foreground mt-0.5">If selected, posts: Dr Asset Cost Account / Cr this account for the acquisition amount.</p>
+          <div className="border-t pt-3">
+            <label className="text-xs font-medium mb-1 block">How was it acquired? <span className="text-muted-foreground font-normal">(optional — auto-posts the GL entry)</span></label>
+            <Select value={acqMode} onChange={(e) => setAcqMode(e.target.value as 'cash' | 'credit' | 'none')} className="h-8 text-xs">
+              <option value="none">— Don't post yet —</option>
+              <option value="cash">Paid now (cash / bank)</option>
+              <option value="credit">On credit (supplier)</option>
+            </Select>
+
+            {acqMode === 'cash' && (
+              <div className="mt-2">
+                <AccountSelect
+                  value={form.acquisitionCreditAccountId}
+                  onChange={(id) => set('acquisitionCreditAccountId', id)}
+                  accounts={cashAccounts}
+                  placeholder="— Select bank / cash account —"
+                />
+                <p className="text-[10px] text-muted-foreground mt-0.5">Posts: Dr Asset Cost Account / Cr this bank account.</p>
+              </div>
+            )}
+
+            {acqMode === 'credit' && (
+              <div className="mt-2">
+                <Select value={form.supplierId} onChange={(e) => set('supplierId', e.target.value)} className="h-8 text-xs" disabled={suppliers.length === 0}>
+                  <option value="">{suppliers.length === 0 ? '— No suppliers — add one in Payables —' : '— Select supplier —'}</option>
+                  {suppliers.map((s) => <option key={s.id} value={s.id}>{s.code} · {s.name}</option>)}
+                </Select>
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  Raises a supplier invoice via a Fixed Asset Clearing account: Dr Clearing / Cr Accounts Payable, then capitalises (Dr Asset Cost / Cr Clearing) when the bill posts. Pay it from Accounts Payable. Posts now if no approval workflow is active, otherwise saved as a draft bill to approve.
+                </p>
+              </div>
+            )}
           </div>
           <div className="grid grid-cols-3 gap-3">
             <div><label className="text-xs font-medium mb-1 block">Residual Value</label>

@@ -572,6 +572,36 @@ export async function postSupplierInvoice(
     data: { status: 'SENT', journalEntryId: journalEntry.id },
   });
 
+  // Capitalise any fixed asset acquired through this bill: move its cost out of the
+  // Fixed Asset Clearing account into the asset cost account (Dr Asset Cost / Cr
+  // Clearing). The bill above already booked Dr Clearing / Cr AP, so clearing nets
+  // to zero. Runs once — postSupplierInvoice is the single DRAFT→POSTED transition.
+  const linkedAssets = await prisma.fixedAsset.findMany({
+    where: { organisationId, acquisitionSupplierInvoiceId: supplierInvoiceId, isDeleted: false },
+  });
+  if (linkedAssets.length > 0) {
+    const clearingAccountId = invoice.lines.find((l) => l.accountId)?.accountId ?? null;
+    for (const fa of linkedAssets) {
+      if (!fa.assetAccountId || !clearingAccountId) continue;
+      await journalService.createAndPostSystemEntry(
+        organisationId,
+        {
+          type: 'GENERAL',
+          description: `Asset capitalisation — ${fa.name} (${fa.code})`,
+          entryDate,
+          periodId,
+          currency: invoice.currency,
+          exchangeRate: Number(invoice.exchangeRate),
+          lines: [
+            { accountId: fa.assetAccountId, description: `Asset cost — ${fa.name}`, debitAmount: Number(fa.acquisitionCost), creditAmount: 0, currency: invoice.currency, exchangeRate: Number(invoice.exchangeRate) },
+            { accountId: clearingAccountId, description: `FA clearing — ${fa.name}`, debitAmount: 0, creditAmount: Number(fa.acquisitionCost), currency: invoice.currency, exchangeRate: Number(invoice.exchangeRate) },
+          ],
+        },
+        userId,
+      );
+    }
+  }
+
   return { supplierInvoiceId, journalEntryId: journalEntry.id };
 }
 
