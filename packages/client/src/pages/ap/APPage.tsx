@@ -19,6 +19,10 @@ import { AttachmentsDialog } from '@/components/ui/attachments';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
+function errMsg(e: unknown) {
+  return (e as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message ?? 'An error occurred';
+}
+
 const STATUS_VARIANT: Record<string, 'success' | 'warning' | 'info' | 'destructive' | 'secondary'> = {
   PAID: 'success',
   PARTIALLY_PAID: 'warning',
@@ -561,16 +565,19 @@ function PostSupplierInvoiceButton({ organisationId, invoiceId, status }: { orga
   const { data: periodsData } = useQuery({
     queryKey: ['periods', organisationId],
     queryFn: () => listPeriods(organisationId),
-    enabled: status === 'DRAFT',
+    enabled: status === 'DRAFT' || status === 'APPROVED',
   });
   const openPeriods = (periodsData ?? []).filter((p) => p.status === 'OPEN');
 
   const mutation = useMutation({
     mutationFn: (periodId: string) => postSupplierInvoice(organisationId, invoiceId, periodId),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['ap-invoices'] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['ap-invoices'] });
+      void qc.invalidateQueries({ queryKey: ['assets-pending-capitalisation'] });
+    },
   });
 
-  if (status !== 'DRAFT') {
+  if (status !== 'DRAFT' && status !== 'APPROVED') {
     return (
       <span
         title="Invoice already posted"
@@ -581,16 +588,29 @@ function PostSupplierInvoiceButton({ organisationId, invoiceId, status }: { orga
     );
   }
 
-  if (openPeriods.length === 0) return null;
+  if (openPeriods.length === 0) {
+    return (
+      <span title="No open accounting period — open one in Settings → Periods" className="text-xs text-amber-600 cursor-default select-none">
+        No open period
+      </span>
+    );
+  }
 
   return (
-    <button
-      onClick={() => mutation.mutate(openPeriods[0].id)}
-      disabled={mutation.isPending}
-      className="text-xs text-primary hover:underline disabled:opacity-50"
-    >
-      {mutation.isPending ? 'Posting…' : 'Post'}
-    </button>
+    <div className="flex flex-col items-end gap-0.5">
+      <button
+        onClick={() => mutation.mutate(openPeriods[0].id)}
+        disabled={mutation.isPending}
+        className="text-xs text-primary hover:underline disabled:opacity-50"
+      >
+        {mutation.isPending ? 'Posting…' : 'Post'}
+      </button>
+      {mutation.isError && (
+        <span className="text-[10px] text-destructive max-w-[200px] text-right leading-tight">
+          {errMsg(mutation.error)}
+        </span>
+      )}
+    </div>
   );
 }
 
