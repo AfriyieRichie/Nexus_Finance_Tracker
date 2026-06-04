@@ -1506,7 +1506,7 @@ export function ARPage() {
                         <TableCell>
                           {activeOrganisationId && (
                             <div className="flex items-center justify-end gap-1">
-                              <AttachmentsDialog organisationId={activeOrganisationId} entityType="CUSTOMER_INVOICE" entityId={inv.id} label={inv.invoiceNumber} />
+                              <AttachmentsDialog organisationId={activeOrganisationId} entityType="SALES_INVOICE" entityId={inv.id} label={inv.invoiceNumber} />
                               <InvoiceActions organisationId={activeOrganisationId} invoice={inv} />
                             </div>
                           )}

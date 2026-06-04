@@ -4,6 +4,7 @@ import { Landmark, Plus, RefreshCw, Upload, Lock, LockOpen, CheckCircle, FileTex
 import { useAuthStore } from '@/stores/auth.store';
 import { api } from '@/services/api';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Attachments } from '@/components/ui/attachments';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -845,6 +846,8 @@ function StatementDetailView({ organisationId, bankAccountId, statement, onBack 
           )}
         </div>
       </div>
+
+      <Attachments organisationId={organisationId} entityType="BANK_STATEMENT" entityId={statement.id} title="Supporting documents" />
 
       {summaryLoading ? (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-20" />)}</div>

@@ -10,6 +10,7 @@ import type { ApprovalRequest } from '@/services/approvals.service';
 import { getJournal } from '@/services/journals.service';
 import { listOrgUsers } from '@/services/users.service';
 import { Card, CardContent } from '@/components/ui/card';
+import { Attachments } from '@/components/ui/attachments';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -363,6 +364,9 @@ function RequestDetailDialog({ organisationId, requestId, onClose }: { organisat
               </div>
             )}
           </div>
+
+          {/* Supporting documents attached to the transaction — review before deciding */}
+          <Attachments organisationId={organisationId} entityType={request.entityType} entityId={request.entityId} title="Supporting documents" readOnly />
 
           {/* Journal detail */}
           {isJournal && (journalLoading ? (

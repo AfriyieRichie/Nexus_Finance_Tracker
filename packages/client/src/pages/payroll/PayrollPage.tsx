@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogTrigger, DialogClose } from '@/components/ui/dialog';
+import { Attachments } from '@/components/ui/attachments';
 import { Skeleton } from '@/components/ui/skeleton';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -1481,6 +1482,8 @@ function RunDetail({ organisationId, run }: { organisationId: string; run: Payro
           </CardContent></Card>
         </div>
       )}
+
+      <Attachments organisationId={organisationId} entityType="PAYROLL" entityId={run.id} title="Supporting documents" />
     </div>
   );
 }

@@ -16,11 +16,13 @@ export function Attachments({
   entityType,
   entityId,
   title = 'Supporting documents',
+  readOnly = false,
 }: {
   organisationId: string;
   entityType: string;
   entityId: string;
   title?: string;
+  readOnly?: boolean;
 }) {
   const qc = useQueryClient();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -46,17 +48,21 @@ export function Attachments({
     <div className="border-t pt-3">
       <div className="flex items-center justify-between mb-2">
         <p className="text-xs font-semibold flex items-center gap-1.5"><Paperclip size={13} /> {title}</p>
-        <input
-          ref={inputRef}
-          type="file"
-          className="hidden"
-          accept="application/pdf,image/*,.doc,.docx,.xls,.xlsx,.csv"
-          onChange={(e) => { const f = e.target.files?.[0]; if (f) upload.mutate(f); }}
-        />
-        <Button size="sm" variant="outline" disabled={upload.isPending} onClick={() => inputRef.current?.click()}>
-          {upload.isPending ? <Loader2 size={13} className="mr-1 animate-spin" /> : <Upload size={13} className="mr-1" />}
-          {upload.isPending ? 'Uploading…' : 'Upload'}
-        </Button>
+        {!readOnly && (
+          <>
+            <input
+              ref={inputRef}
+              type="file"
+              className="hidden"
+              accept="application/pdf,image/*,.doc,.docx,.xls,.xlsx,.csv"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) upload.mutate(f); }}
+            />
+            <Button size="sm" variant="outline" disabled={upload.isPending} onClick={() => inputRef.current?.click()}>
+              {upload.isPending ? <Loader2 size={13} className="mr-1 animate-spin" /> : <Upload size={13} className="mr-1" />}
+              {upload.isPending ? 'Uploading…' : 'Upload'}
+            </Button>
+          </>
+        )}
       </div>
 
       {upload.isError && (
@@ -68,7 +74,7 @@ export function Attachments({
       {isLoading ? (
         <p className="text-[10px] text-muted-foreground">Loading…</p>
       ) : files.length === 0 ? (
-        <p className="text-[10px] text-muted-foreground">No documents attached yet. Upload the invoice, receipt, or delivery note.</p>
+        <p className="text-[10px] text-muted-foreground">{readOnly ? 'No documents attached to this transaction.' : 'No documents attached yet. Upload the invoice, receipt, or delivery note.'}</p>
       ) : (
         <ul className="space-y-1">
           {files.map((f) => (
@@ -83,15 +89,17 @@ export function Attachments({
                 {f.fileName}
               </button>
               <span className="text-[10px] text-muted-foreground shrink-0">{humanSize(f.fileSize)}</span>
-              <button
-                type="button"
-                onClick={() => remove.mutate(f.id)}
-                disabled={remove.isPending}
-                className="text-muted-foreground hover:text-destructive shrink-0"
-                title="Delete"
-              >
-                <Trash2 size={12} />
-              </button>
+              {!readOnly && (
+                <button
+                  type="button"
+                  onClick={() => remove.mutate(f.id)}
+                  disabled={remove.isPending}
+                  className="text-muted-foreground hover:text-destructive shrink-0"
+                  title="Delete"
+                >
+                  <Trash2 size={12} />
+                </button>
+              )}
             </li>
           ))}
         </ul>

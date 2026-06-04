@@ -9,6 +9,7 @@ import { useAuthStore } from '@/stores/auth.store';
 import * as budgets from '@/services/budgets.service';
 import { listAccounts } from '@/services/accounts.service';
 import { Card, CardContent } from '@/components/ui/card';
+import { Attachments } from '@/components/ui/attachments';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -320,6 +321,8 @@ function BudgetLineEditor({ organisationId, budget, onBack }: { organisationId: 
           )}
         </div>
       </div>
+
+      <Attachments organisationId={organisationId} entityType="BUDGET" entityId={budget.id} title="Supporting documents" />
 
       {budget.isApproved && (
         <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-3 py-2">
