@@ -226,6 +226,7 @@ export async function createSupplierInvoice(organisationId: string, userId: stri
       taxAmount: new Prisma.Decimal(taxAmount),
       totalAmount: new Prisma.Decimal(totalAmount),
       notes: input.notes,
+      apAccountId: input.apAccountId,
       createdBy: userId,
       lines: {
         create: input.lines.map((l) => ({
@@ -444,10 +445,25 @@ export async function postSupplierInvoice(
     }
   }
 
-  const apAccount = await prisma.account.findFirst({
-    where: { organisationId, type: 'PAYABLE', isActive: true, isDeleted: false },
-  });
-  if (!apAccount) throw new ValidationError('No AP control account found. Create an account with type PAYABLE.');
+  // Resolve the AP account to credit. Prefer the one chosen on the invoice; then a
+  // postable (non-control) PAYABLE account; never silently fall back to a control
+  // account, which the journal engine rejects for direct postings.
+  const apAccount =
+    (invoice.apAccountId
+      ? await prisma.account.findFirst({
+          where: { id: invoice.apAccountId, organisationId, type: 'PAYABLE', isActive: true, isDeleted: false, isControlAccount: false },
+        })
+      : null) ??
+    await prisma.account.findFirst({
+      where: { organisationId, type: 'PAYABLE', isActive: true, isDeleted: false, isControlAccount: false },
+      orderBy: { code: 'asc' },
+    });
+  if (!apAccount) {
+    throw new ValidationError(
+      'No postable Accounts Payable account found. Create a PAYABLE account that is not a control account ' +
+      '(control/summary accounts cannot be posted to directly), or pick one on the bill’s AP Control Account field.',
+    );
+  }
 
   const entryDate = invoice.invoiceDate.toISOString().split('T')[0];
   const invoiceTotalTax = Number(invoice.taxAmount);

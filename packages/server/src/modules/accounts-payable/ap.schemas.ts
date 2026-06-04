@@ -40,6 +40,7 @@ export const createSupplierInvoiceSchema = z.object({
   currency: z.string().length(3),
   exchangeRate: z.number().positive().default(1),
   notes: z.string().optional(),
+  apAccountId: z.string().uuid().optional(),
   lines: z.array(supplierInvoiceLineSchema).min(1),
   skipDuplicateCheck: z.boolean().default(false),
 });

@@ -909,6 +909,7 @@ model SupplierInvoice {
   amountPaid     Decimal       @default(0) @db.Decimal(20, 4)
   status         InvoiceStatus @default(DRAFT)
   notes          String?
+  apAccountId    String?
   journalEntryId String?
   createdBy      String
   createdAt      DateTime      @default(now())

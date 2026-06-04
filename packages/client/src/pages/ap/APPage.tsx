@@ -331,8 +331,10 @@ function NewSupplierInvoiceDialog({ organisationId }: { organisationId: string }
   const expenseAccounts = (accountsData?.accounts ?? []).filter(
     (a) => (a.class === 'EXPENSE' || /asset clearing/i.test(a.name)) && a.isActive,
   );
+  // Only postable (non-control) AP accounts — control/summary accounts can't be
+  // posted to directly, so they must not be selectable as the bill's AP account.
   const apAccounts = (accountsData?.accounts ?? []).filter(
-    (a) => a.type === 'PAYABLE' && a.isActive,
+    (a) => a.type === 'PAYABLE' && a.isActive && !a.isControlAccount,
   );
 
   // Selecting a VAT code (or changing qty/price) auto-computes input VAT = net × rate.
@@ -367,7 +369,7 @@ function NewSupplierInvoiceDialog({ organisationId }: { organisationId: string }
       currency,
       exchangeRate: 1,
       notes: notes || undefined,
-      apAccountId: apAccountId || apAccounts[0]?.id || '',
+      apAccountId: apAccountId || apAccounts[0]?.id || undefined,
       lines: lines.map((l, i) => ({
         lineNumber: i + 1,
         description: l.description,
