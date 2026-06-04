@@ -92,7 +92,7 @@ export async function emailSupplierStatement(organisationId: string, supplierId:
   return res.data.data as { sentTo: string; period: { from: string; to: string } };
 }
 
-export async function listSupplierInvoices(organisationId: string, params?: { status?: string; page?: number; pageSize?: number }) {
+export async function listSupplierInvoices(organisationId: string, params?: { status?: string; supplierId?: string; from?: string; to?: string; page?: number; pageSize?: number }) {
   const res = await api.get(`/organisations/${organisationId}/ap/invoices`, { params: { pageSize: 50, ...params } });
   return { invoices: res.data.data as SupplierInvoice[], total: res.data.pagination?.total ?? 0, pagination: res.data.pagination };
 }

@@ -572,17 +572,27 @@ export function APPage() {
   const activeOrganisationId = useAuthStore((s) => s.activeOrganisationId);
   const [tab, setTab] = useState<'invoices' | 'suppliers' | 'ageing'>('invoices');
   const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [supplierFilter, setSupplierFilter] = useState('');
+  const [fromFilter, setFromFilter] = useState('');
+  const [toFilter, setToFilter] = useState('');
 
   const { data: invoiceData, isLoading: invoicesLoading } = useQuery({
-    queryKey: ['ap-invoices', activeOrganisationId],
-    queryFn: () => listSupplierInvoices(activeOrganisationId!, { pageSize: 50 }),
+    queryKey: ['ap-invoices', activeOrganisationId, { statusFilter, supplierFilter, fromFilter, toFilter }],
+    queryFn: () => listSupplierInvoices(activeOrganisationId!, {
+      status: statusFilter || undefined,
+      supplierId: supplierFilter || undefined,
+      from: fromFilter || undefined,
+      to: toFilter || undefined,
+      pageSize: 100,
+    }),
     enabled: !!activeOrganisationId && tab === 'invoices',
   });
 
   const { data: supplierData, isLoading: suppliersLoading } = useQuery({
     queryKey: ['ap-suppliers', activeOrganisationId],
     queryFn: () => listSuppliers(activeOrganisationId!),
-    enabled: !!activeOrganisationId && tab === 'suppliers',
+    enabled: !!activeOrganisationId && (tab === 'suppliers' || tab === 'invoices'),
   });
 
   const { data: ageing, isLoading: ageingLoading } = useQuery({
@@ -642,13 +652,47 @@ export function APPage() {
         ))}
       </div>
 
-      {tab !== 'ageing' && (
+      {tab === 'suppliers' && (
         <Input
-          placeholder={tab === 'suppliers' ? 'Search suppliers…' : 'Search invoices…'}
+          placeholder="Search suppliers…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="max-w-sm h-8 text-xs"
         />
+      )}
+
+      {/* Invoice filters */}
+      {tab === 'invoices' && (
+        <div className="flex flex-wrap gap-2 items-center">
+          <Input
+            placeholder="Search invoices…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="max-w-xs h-8 text-xs"
+          />
+          <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="h-8 text-xs w-40">
+            <option value="">All statuses</option>
+            {['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'SENT', 'PARTIALLY_PAID', 'PAID', 'OVERDUE', 'VOID'].map((s) => (
+              <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
+            ))}
+          </Select>
+          <Select value={supplierFilter} onChange={(e) => setSupplierFilter(e.target.value)} className="h-8 text-xs w-44">
+            <option value="">All suppliers</option>
+            {(supplierData?.suppliers ?? []).map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </Select>
+          <Input type="date" value={fromFilter} onChange={(e) => setFromFilter(e.target.value)} className="h-8 text-xs w-36" placeholder="From" />
+          <Input type="date" value={toFilter} onChange={(e) => setToFilter(e.target.value)} className="h-8 text-xs w-36" placeholder="To" />
+          {(statusFilter || supplierFilter || fromFilter || toFilter) && (
+            <button
+              onClick={() => { setStatusFilter(''); setSupplierFilter(''); setFromFilter(''); setToFilter(''); }}
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
       )}
 
       {tab === 'invoices' && (
