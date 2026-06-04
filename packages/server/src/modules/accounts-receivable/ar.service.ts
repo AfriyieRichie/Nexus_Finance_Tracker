@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { ConflictError, NotFoundError, ValidationError, ForbiddenError } from '../../utils/errors';
 import * as journalService from '../journals/journal.service';
-import { createAuditLog } from '../audit-trail/audit.service';
+import { createAuditLog, auditLog } from '../audit-trail/audit.service';
 import { sendEmail } from '../../config/email';
 import type {
   CreateCustomerInput, UpdateCustomerInput, ListCustomersQuery,
@@ -49,7 +49,7 @@ export async function updateCustomer(organisationId: string, customerId: string,
   });
   if (!customer) throw new NotFoundError('Customer not found');
 
-  return prisma.customer.update({
+  const updated = await prisma.customer.update({
     where: { id: customerId },
     data: {
       name: input.name,
@@ -61,6 +61,19 @@ export async function updateCustomer(organisationId: string, customerId: string,
       paymentTerms: input.paymentTerms,
     },
   });
+
+  const snap = (c: typeof updated) => ({
+    name: c.name, email: c.email, phone: c.phone, taxId: c.taxId,
+    creditLimit: c.creditLimit != null ? Number(c.creditLimit) : null, paymentTerms: c.paymentTerms,
+  });
+  auditLog({
+    organisationId, action: 'Updated', module: 'AR', entityType: 'Customer',
+    entityId: updated.id, entityRef: updated.code,
+    description: `Updated customer ${updated.code} – ${updated.name}`,
+    before: snap(customer), after: snap(updated),
+  });
+
+  return updated;
 }
 
 export async function listCustomers(organisationId: string, query: ListCustomersQuery) {
@@ -139,7 +152,7 @@ export async function createInvoice(organisationId: string, userId: string, inpu
   const totalAmount = subtotal + taxAmount;
   const invoiceNumber = await nextInvoiceNumber(organisationId);
 
-  return prisma.invoice.create({
+  const created = await prisma.invoice.create({
     data: {
       organisationId,
       customerId: input.customerId,
@@ -169,6 +182,15 @@ export async function createInvoice(organisationId: string, userId: string, inpu
     },
     include: { customer: true, lines: true },
   });
+
+  auditLog({
+    organisationId, userId, action: 'Created', module: 'AR', entityType: 'Invoice',
+    entityId: created.id, entityRef: created.invoiceNumber,
+    description: `Created invoice ${created.invoiceNumber} for ${customer.name} – ${created.currency} ${Number(created.totalAmount).toFixed(2)} (${created.status})`,
+    after: { invoiceNumber: created.invoiceNumber, customer: customer.name, totalAmount: Number(created.totalAmount), status: created.status },
+  });
+
+  return created;
 }
 
 export async function postInvoice(organisationId: string, invoiceId: string, periodId: string, userId: string) {
@@ -377,6 +399,13 @@ export async function recordPayment(organisationId: string, userId: string, inpu
   await prisma.invoice.update({
     where: { id: input.invoiceId },
     data: { amountPaid: newAmountPaid, status: newStatus },
+  });
+
+  auditLog({
+    organisationId, userId, action: 'Recorded payment', module: 'AR', entityType: 'Payment',
+    entityId: journalEntry.id, entityRef: invoice.invoiceNumber,
+    description: `Recorded payment of ${invoice.currency} ${amount.toFixed(2)} against invoice ${invoice.invoiceNumber} (${invoice.customer.name})`,
+    after: { invoiceNumber: invoice.invoiceNumber, amount: Number(amount), newStatus, amountPaid: Number(newAmountPaid) },
   });
 
   return { status: newStatus, amountPaid: newAmountPaid.toFixed(2), journalEntryId: journalEntry.id };

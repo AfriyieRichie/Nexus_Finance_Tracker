@@ -2,6 +2,7 @@ import { Prisma, ApprovalEntityType, ApprovalRequestStatus, NotificationType } f
 import { prisma } from '../../config/database';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../utils/errors';
 import { sendEmail } from '../../config/email';
+import { auditLog } from '../audit-trail/audit.service';
 import * as journalService from '../journals/journal.service';
 import type {
   CreateSupplierInput, UpdateSupplierInput, ListSuppliersQuery,
@@ -84,7 +85,7 @@ export async function createSupplier(organisationId: string, input: CreateSuppli
 export async function updateSupplier(organisationId: string, supplierId: string, input: UpdateSupplierInput) {
   const supplier = await prisma.supplier.findFirst({ where: { id: supplierId, organisationId, isDeleted: false } });
   if (!supplier) throw new NotFoundError('Supplier not found');
-  return prisma.supplier.update({
+  const updated = await prisma.supplier.update({
     where: { id: supplierId },
     data: {
       name: input.name,
@@ -98,6 +99,19 @@ export async function updateSupplier(organisationId: string, supplierId: string,
       whtClassification: input.whtClassification,
     },
   });
+
+  const snap = (s: typeof updated) => ({
+    name: s.name, email: s.email, phone: s.phone, taxId: s.taxId, paymentTerms: s.paymentTerms,
+    whtRate: s.whtRate != null ? Number(s.whtRate) : null, whtClassification: s.whtClassification,
+  });
+  auditLog({
+    organisationId, action: 'Updated', module: 'AP', entityType: 'Supplier',
+    entityId: updated.id, entityRef: updated.code,
+    description: `Updated supplier ${updated.code} – ${updated.name}`,
+    before: snap(supplier), after: snap(updated),
+  });
+
+  return updated;
 }
 
 export async function listSuppliers(organisationId: string, query: ListSuppliersQuery) {
@@ -683,6 +697,14 @@ export async function recordSupplierPayment(
   await prisma.supplierInvoice.update({
     where: { id: input.supplierInvoiceId },
     data: { amountPaid: newAmountPaid, status: newStatus },
+  });
+
+  auditLog({
+    organisationId, userId, action: 'Recorded payment', module: 'AP', entityType: 'Payment',
+    entityId: payment.id, entityRef: invoice.invoiceNumber,
+    description: `Paid ${invoice.currency} ${Number(amount).toFixed(2)} to ${invoice.supplier.name} for invoice ${invoice.invoiceNumber}`
+      + (Number(whtAmount) > 0 ? ` (WHT ${Number(whtAmount).toFixed(2)} withheld)` : ''),
+    after: { invoiceNumber: invoice.invoiceNumber, supplier: invoice.supplier.name, amount: Number(amount), whtAmount: Number(whtAmount), newStatus, amountPaid: Number(newAmountPaid) },
   });
 
   return {

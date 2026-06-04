@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { NotFoundError } from '../../utils/errors';
+import { markAudited, getAuditMeta } from '../../utils/auditContext';
 
 // ─── Typed log helper (fire-and-forget safe) ──────────────────────────────────
 
@@ -20,11 +21,17 @@ export interface AuditInput {
 }
 
 export function auditLog(input: AuditInput): void {
+  // Tell the HTTP audit middleware this request already has a rich entry, so it
+  // skips writing a generic duplicate. Fall back to the request IP / user-agent
+  // captured by the middleware when the caller didn't supply them.
+  markAudited();
+  const meta = getAuditMeta();
+
   prisma.auditLog
     .create({
       data: {
         organisationId: input.organisationId ?? null,
-        userId:         input.userId ?? null,
+        userId:         input.userId ?? meta.getUserId?.() ?? null,
         action:         input.action,
         module:         input.module ?? null,
         entityType:     input.entityType,
@@ -33,8 +40,8 @@ export function auditLog(input: AuditInput): void {
         description:    input.description ?? null,
         previousValue:  (input.before ?? Prisma.JsonNull) as Prisma.InputJsonValue,
         newValue:       (input.after  ?? Prisma.JsonNull) as Prisma.InputJsonValue,
-        ipAddress:      input.ipAddress ?? null,
-        userAgent:      input.userAgent ?? null,
+        ipAddress:      input.ipAddress ?? meta.ipAddress ?? null,
+        userAgent:      input.userAgent ?? meta.userAgent ?? null,
       },
     })
     .catch(() => { /* best-effort — never fail the caller */ });

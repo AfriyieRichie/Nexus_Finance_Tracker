@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../config/database';
 import { logger } from '../utils/logger';
+import { runWithAuditContext, wasAudited } from '../utils/auditContext';
 
 type MutatingMethod = 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
@@ -123,38 +124,44 @@ export function auditLogger(req: Request, res: Response, next: NextFunction): vo
 
   const originalJson = res.json.bind(res);
 
-  res.json = function (body: unknown) {
-    if (res.statusCode >= 200 && res.statusCode < 300) {
-      const user = req.user;
-      const organisationId =
-        req.params.organisationId ?? (req.body as Record<string, unknown>)?.organisationId as string | undefined;
+  // Run the rest of the request inside an audit context: service-level auditLog()
+  // calls mark it (so we skip the generic duplicate) and reuse the request IP.
+  runWithAuditContext({ ipAddress: req.ip ?? null, userAgent: req.headers['user-agent'] ?? null, getUserId: () => req.user?.sub }, () => {
+    res.json = function (body: unknown) {
+      // Only write the generic fallback entry if a service-level auditLog() didn't
+      // already record a richer one for this request (avoids double-logging).
+      if (res.statusCode >= 200 && res.statusCode < 300 && !wasAudited()) {
+        const user = req.user;
+        const organisationId =
+          req.params.organisationId ?? (req.body as Record<string, unknown>)?.organisationId as string | undefined;
 
-      const { moduleCode, entityType, verb, selfDescribing } = parseRoute(req.method, req.path);
-      const entityRef = extractEntityRef(body);
-      const description = (selfDescribing ? verb : `${verb} ${entityType}`) + (entityRef ? ` (${entityRef})` : '');
+        const { moduleCode, entityType, verb, selfDescribing } = parseRoute(req.method, req.path);
+        const entityRef = extractEntityRef(body);
+        const description = (selfDescribing ? verb : `${verb} ${entityType}`) + (entityRef ? ` (${entityRef})` : '');
 
-      prisma.auditLog
-        .create({
-          data: {
-            userId:         user?.sub ?? null,
-            organisationId: organisationId ?? null,
-            action:         verb,
-            module:         moduleCode,
-            entityType:     entityType,
-            entityId:       extractEntityId(req, body),
-            entityRef:      entityRef,
-            description,
-            newValue:       sanitiseForAudit(body) as Prisma.InputJsonValue,
-            ipAddress:      req.ip ?? null,
-            userAgent:      req.headers['user-agent'] ?? null,
-          },
-        })
-        .catch((err: unknown) => logger.error('Audit log write failed', { err }));
-    }
-    return originalJson(body);
-  };
+        prisma.auditLog
+          .create({
+            data: {
+              userId:         user?.sub ?? null,
+              organisationId: organisationId ?? null,
+              action:         verb,
+              module:         moduleCode,
+              entityType:     entityType,
+              entityId:       extractEntityId(req, body),
+              entityRef:      entityRef,
+              description,
+              newValue:       sanitiseForAudit(body) as Prisma.InputJsonValue,
+              ipAddress:      req.ip ?? null,
+              userAgent:      req.headers['user-agent'] ?? null,
+            },
+          })
+          .catch((err: unknown) => logger.error('Audit log write failed', { err }));
+      }
+      return originalJson(body);
+    };
 
-  next();
+    next();
+  });
 }
 
 function sanitiseForAudit(body: unknown): unknown {
