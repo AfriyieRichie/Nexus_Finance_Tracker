@@ -15,6 +15,7 @@ import { listPeriods } from '@/services/periods.service';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Attachments } from '@/components/ui/attachments';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
@@ -483,6 +484,14 @@ export function JournalDetailPage() {
           </div>
         </CardContent>
       </Card>
+
+      {activeOrganisationId && id && (
+        <Card>
+          <CardContent className="pt-4">
+            <Attachments organisationId={activeOrganisationId} entityType="JOURNAL_ENTRY" entityId={id} title="Supporting documents" />
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

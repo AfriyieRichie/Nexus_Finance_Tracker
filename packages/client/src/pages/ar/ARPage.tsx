@@ -13,6 +13,7 @@ import {
 import type { Customer, Invoice, CustomerStatement } from '@/services/ar.service';
 import { listAccounts } from '@/services/accounts.service';
 import { listTaxCodes } from '@/services/tax.service';
+import { AttachmentsDialog } from '@/components/ui/attachments';
 import { listPeriods } from '@/services/periods.service';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -1504,7 +1505,10 @@ export function ARPage() {
                         </TableCell>
                         <TableCell>
                           {activeOrganisationId && (
-                            <InvoiceActions organisationId={activeOrganisationId} invoice={inv} />
+                            <div className="flex items-center justify-end gap-1">
+                              <AttachmentsDialog organisationId={activeOrganisationId} entityType="CUSTOMER_INVOICE" entityId={inv.id} label={inv.invoiceNumber} />
+                              <InvoiceActions organisationId={activeOrganisationId} invoice={inv} />
+                            </div>
                           )}
                         </TableCell>
                       </TableRow>
