@@ -560,7 +560,7 @@ function NewSupplierInvoiceDialog({ organisationId }: { organisationId: string }
 
 // ─── Post Supplier Invoice Button ─────────────────────────────────────────────
 
-function PostSupplierInvoiceButton({ organisationId, invoiceId, status }: { organisationId: string; invoiceId: string; status: string }) {
+function PostSupplierInvoiceButton({ organisationId, invoiceId, invoiceDate, status }: { organisationId: string; invoiceId: string; invoiceDate: string; status: string }) {
   const qc = useQueryClient();
   const { data: periodsData } = useQuery({
     queryKey: ['periods', organisationId],
@@ -568,6 +568,13 @@ function PostSupplierInvoiceButton({ organisationId, invoiceId, status }: { orga
     enabled: status === 'DRAFT' || status === 'APPROVED',
   });
   const openPeriods = (periodsData ?? []).filter((p) => p.status === 'OPEN');
+
+  // Post into the open period whose date range contains the invoice date; fall back
+  // to the latest open period so a bill never silently lands in the wrong month.
+  const invDate = new Date(invoiceDate);
+  const targetPeriod =
+    openPeriods.find((p) => new Date(p.startDate) <= invDate && invDate <= new Date(p.endDate)) ??
+    [...openPeriods].sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime())[0];
 
   const mutation = useMutation({
     mutationFn: (periodId: string) => postSupplierInvoice(organisationId, invoiceId, periodId),
@@ -588,7 +595,7 @@ function PostSupplierInvoiceButton({ organisationId, invoiceId, status }: { orga
     );
   }
 
-  if (openPeriods.length === 0) {
+  if (!targetPeriod) {
     return (
       <span title="No open accounting period — open one in Settings → Periods" className="text-xs text-amber-600 cursor-default select-none">
         No open period
@@ -599,8 +606,9 @@ function PostSupplierInvoiceButton({ organisationId, invoiceId, status }: { orga
   return (
     <div className="flex flex-col items-end gap-0.5">
       <button
-        onClick={() => mutation.mutate(openPeriods[0].id)}
+        onClick={() => mutation.mutate(targetPeriod.id)}
         disabled={mutation.isPending}
+        title={`Post to ${targetPeriod.name}`}
         className="text-xs text-primary hover:underline disabled:opacity-50"
       >
         {mutation.isPending ? 'Posting…' : 'Post'}
@@ -783,7 +791,7 @@ export function APPage() {
                         {activeOrganisationId && (
                           <div className="flex items-center justify-end gap-1">
                             <AttachmentsDialog organisationId={activeOrganisationId} entityType="SUPPLIER_INVOICE" entityId={inv.id} label={inv.invoiceNumber} />
-                            <PostSupplierInvoiceButton organisationId={activeOrganisationId} invoiceId={inv.id} status={inv.status} />
+                            <PostSupplierInvoiceButton organisationId={activeOrganisationId} invoiceId={inv.id} invoiceDate={inv.invoiceDate} status={inv.status} />
                           </div>
                         )}
                       </TableCell>
