@@ -556,7 +556,6 @@ model JournalEntry {
   approvalWorkflow ApprovalWorkflow? @relation(fields: [approvalWorkflowId], references: [id])
   lines            JournalLine[]
   ledgerEntries    LedgerEntry[]
-  approvalRequests ApprovalRequest[]
   reversalOf       JournalEntry?     @relation("JournalReversal")
   reversedBy       JournalEntry?     @relation("JournalReversal", fields: [reversedByEntryId], references: [id])
 
@@ -701,7 +700,8 @@ model ApprovalRequest {
   workflow  ApprovalWorkflow   @relation(fields: [workflowId], references: [id])
   requester User               @relation("ApprovalRequestedBy", fields: [requestedBy], references: [id])
   decisions ApprovalDecision[]
-  journal   JournalEntry?      @relation(fields: [entityId], references: [id])
+  // entityId is polymorphic (journal, supplier, customer, invoice, budget…); it must
+  // NOT be a foreign key to any single table, so there is no relation here.
 
   @@index([entityType, entityId])
   @@index([workflowId, status])
