@@ -258,6 +258,7 @@ export async function createAsset(organisationId: string, input: CreateAssetInpu
       categoryId: input.categoryId,
       serialNumber: input.serialNumber,
       location: input.location,
+      custodian: input.custodian,
       acquisitionDate: new Date(input.acquisitionDate),
       acquisitionCost: cost,
       residualValue: new Prisma.Decimal(input.residualValue),
@@ -568,6 +569,7 @@ export async function updateAsset(organisationId: string, assetId: string, input
       categoryId: input.categoryId,
       serialNumber: input.serialNumber,
       location: input.location,
+      custodian: input.custodian,
       residualValue: input.residualValue != null ? new Prisma.Decimal(input.residualValue) : undefined,
       usefulLifeMonths: input.usefulLifeMonths,
       depreciationMethod: method as 'STRAIGHT_LINE' | 'REDUCING_BALANCE' | 'UNITS_OF_PRODUCTION' | 'SUM_OF_YEARS_DIGITS' | undefined,
@@ -580,14 +582,15 @@ export async function updateAsset(organisationId: string, assetId: string, input
   });
 }
 
-export async function listAssets(organisationId: string, query: ListAssetsQuery) {
-  const where: Prisma.FixedAssetWhereInput = {
+function buildAssetWhere(organisationId: string, query: ListAssetsQuery): Prisma.FixedAssetWhereInput {
+  return {
     organisationId,
     isDeleted: false,
     ...(query.category && { category: query.category }),
     ...(query.categoryId && { categoryId: query.categoryId }),
     ...(query.status && { status: query.status }),
     ...(query.location && { location: { contains: query.location, mode: 'insensitive' } }),
+    ...(query.custodian && { custodian: { contains: query.custodian, mode: 'insensitive' } }),
     ...((query.from || query.to) && {
       acquisitionDate: {
         ...(query.from && { gte: new Date(query.from + 'T00:00:00Z') }),
@@ -602,6 +605,10 @@ export async function listAssets(organisationId: string, query: ListAssetsQuery)
       ],
     }),
   };
+}
+
+export async function listAssets(organisationId: string, query: ListAssetsQuery) {
+  const where = buildAssetWhere(organisationId, query);
 
   const [total, assets] = await Promise.all([
     prisma.fixedAsset.count({ where }),
@@ -615,6 +622,53 @@ export async function listAssets(organisationId: string, query: ListAssetsQuery)
   ]);
 
   return { assets, total, page: query.page, pageSize: query.pageSize };
+}
+
+// Classic FA register layout: assets grouped by category with per-class subtotals
+// (cost, accumulated depreciation, NBV) and grand totals, across ALL matching
+// assets (no pagination — a register is a complete report).
+export async function getAssetRegister(organisationId: string, query: ListAssetsQuery) {
+  const where = buildAssetWhere(organisationId, query);
+  const assets = await prisma.fixedAsset.findMany({
+    where,
+    include: { assetCategory: { select: { code: true, name: true } } },
+    orderBy: [{ category: 'asc' }, { code: 'asc' }],
+  });
+
+  type Row = typeof assets[number];
+  const groupsMap = new Map<string, { categoryId: string | null; categoryCode: string; categoryName: string; assets: Row[] }>();
+  for (const a of assets) {
+    const key = a.categoryId ?? a.category ?? 'UNCATEGORISED';
+    const g = groupsMap.get(key) ?? {
+      categoryId: a.categoryId ?? null,
+      categoryCode: a.assetCategory?.code ?? '',
+      categoryName: a.assetCategory?.name ?? a.category ?? 'Uncategorised',
+      assets: [],
+    };
+    g.assets.push(a);
+    groupsMap.set(key, g);
+  }
+
+  const sum = (rows: Row[], f: (r: Row) => number) => rows.reduce((s, r) => s + f(r), 0);
+  const subtotal = (rows: Row[]) => ({
+    count: rows.length,
+    cost: sum(rows, (r) => Number(r.acquisitionCost)),
+    accumulatedDeprn: sum(rows, (r) => Number(r.accumulatedDeprn)),
+    impairmentLoss: sum(rows, (r) => Number(r.impairmentLoss)),
+    carryingValue: sum(rows, (r) => Number(r.carryingValue)),
+  });
+
+  const groups = [...groupsMap.values()]
+    .sort((a, b) => (a.categoryCode || a.categoryName).localeCompare(b.categoryCode || b.categoryName))
+    .map((g) => ({
+      categoryId: g.categoryId,
+      categoryCode: g.categoryCode,
+      categoryName: g.categoryName,
+      assets: g.assets,
+      subtotal: subtotal(g.assets),
+    }));
+
+  return { groups, totals: subtotal(assets) };
 }
 
 export async function getAsset(organisationId: string, assetId: string) {

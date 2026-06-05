@@ -42,6 +42,7 @@ export interface FixedAsset {
   categoryId?: string;
   serialNumber?: string;
   location?: string;
+  custodian?: string;
   acquisitionDate: string;
   acquisitionCost: string;
   residualValue: string;
@@ -87,16 +88,39 @@ export async function updateCategory(organisationId: string, categoryId: string,
   return res.data.data as AssetCategory;
 }
 
-export async function listAssets(organisationId: string, params?: {
-  search?: string; status?: string; categoryId?: string; location?: string; from?: string; to?: string; page?: number;
-}) {
+export interface AssetListParams {
+  search?: string; status?: string; categoryId?: string; location?: string; custodian?: string; from?: string; to?: string; page?: number;
+}
+
+export async function listAssets(organisationId: string, params?: AssetListParams) {
   const res = await api.get(`/organisations/${organisationId}/assets`, { params: { pageSize: 100, ...params } });
   return { assets: res.data.data as FixedAsset[], total: res.data.pagination?.total ?? 0 };
 }
 
+export interface AssetRegisterSubtotal {
+  count: number;
+  cost: number;
+  accumulatedDeprn: number;
+  impairmentLoss: number;
+  carryingValue: number;
+}
+
+export interface AssetRegisterGroup {
+  categoryId: string | null;
+  categoryCode: string;
+  categoryName: string;
+  assets: FixedAsset[];
+  subtotal: AssetRegisterSubtotal;
+}
+
+export async function getAssetRegister(organisationId: string, params?: AssetListParams) {
+  const res = await api.get(`/organisations/${organisationId}/assets/register`, { params });
+  return res.data.data as { groups: AssetRegisterGroup[]; totals: AssetRegisterSubtotal };
+}
+
 export async function createAsset(organisationId: string, data: {
   code: string; name: string; category: string; categoryId?: string;
-  serialNumber?: string; location?: string;
+  serialNumber?: string; location?: string; custodian?: string;
   acquisitionDate: string; acquisitionCost: number;
   residualValue?: number; usefulLifeMonths: number;
   depreciationMethod?: string; unitsOfProductionTotal?: number;
@@ -138,7 +162,7 @@ export async function capitaliseFromClearing(organisationId: string, data: {
   quantity: number;
   serialNumbers?: string[];
   name: string;
-  serialNumber?: string; location?: string;
+  serialNumber?: string; location?: string; custodian?: string;
   acquisitionDate: string;
   residualValue?: number; usefulLifeMonths: number;
   depreciationMethod?: string; reducingBalanceRate?: number; unitsOfProductionTotal?: number;
@@ -150,7 +174,7 @@ export async function capitaliseFromClearing(organisationId: string, data: {
 
 export async function updateAsset(organisationId: string, assetId: string, data: Partial<{
   name: string; description: string; category: string; categoryId: string;
-  serialNumber: string; location: string; residualValue: number;
+  serialNumber: string; location: string; custodian: string; residualValue: number;
   usefulLifeMonths: number; depreciationMethod: string;
 }>) {
   const res = await api.put(`/organisations/${organisationId}/assets/${assetId}`, data);

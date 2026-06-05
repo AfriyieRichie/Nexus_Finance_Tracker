@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, Fragment } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Package, Plus, Play, Eye, ChevronRight, RotateCcw, Trash2, TrendingUp, AlertTriangle, Settings, Download, Upload } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
@@ -42,7 +42,7 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
   const [sourceLineId, setSourceLineId] = useState('');
   const [form, setForm] = useState({
     code: '', name: '', category: '', categoryId: '',
-    serialNumber: '', location: '',
+    serialNumber: '', location: '', custodian: '',
     acquisitionDate: new Date().toISOString().split('T')[0],
     acquisitionCost: '', residualValue: '0',
     usefulLifeMonths: '60', depreciationMethod: 'STRAIGHT_LINE',
@@ -130,6 +130,7 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
     categoryId: form.categoryId || undefined,
     serialNumber: form.serialNumber || undefined,
     location: form.location || undefined,
+    custodian: form.custodian || undefined,
     acquisitionDate: form.acquisitionDate,
     residualValue: Number(form.residualValue),
     usefulLifeMonths: Number(form.usefulLifeMonths),
@@ -151,6 +152,7 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
           name: d.name,
           serialNumber: qtyNum === 1 ? d.serialNumber : undefined,
           location: d.location,
+          custodian: d.custodian,
           acquisitionDate: d.acquisitionDate,
           residualValue: d.residualValue,
           usefulLifeMonths: d.usefulLifeMonths,
@@ -266,9 +268,11 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
               <div><label className="text-xs font-medium mb-1 block">Serial Number</label>
                 <Input value={form.serialNumber} onChange={(e) => set('serialNumber', e.target.value)} placeholder="SN-001" className="h-8 text-xs" /></div>
             )}
-            <div className={mode === 'clearing' && qtyNum > 1 ? 'col-span-2' : ''}><label className="text-xs font-medium mb-1 block">Location</label>
+            <div><label className="text-xs font-medium mb-1 block">Location</label>
               <Input value={form.location} onChange={(e) => set('location', e.target.value)} placeholder="Head Office" className="h-8 text-xs" /></div>
           </div>
+          <div><label className="text-xs font-medium mb-1 block">Custodian <span className="text-muted-foreground font-normal">(person / department responsible)</span></label>
+            <Input value={form.custodian} onChange={(e) => set('custodian', e.target.value)} placeholder="e.g. IT Department / J. Mensah" className="h-8 text-xs" /></div>
           {mode === 'clearing' && qtyNum > 1 && (
             <div>
               <label className="text-xs font-medium mb-1 block">Serial numbers <span className="text-muted-foreground font-normal">(optional — one per unit)</span></label>
@@ -620,6 +624,7 @@ function AssetDetailPanel({ organisationId, assetId, onClose }: { organisationId
                 ['Acquisition Date', new Date(asset.acquisitionDate).toLocaleDateString()],
                 ...(asset.serialNumber ? [['Serial Number', asset.serialNumber]] : []),
                 ...(asset.location ? [['Location', asset.location]] : []),
+                ...(asset.custodian ? [['Custodian', asset.custodian]] : []),
                 ...(asset.lastDeprnDate ? [['Last Depreciation', new Date(asset.lastDeprnDate).toLocaleDateString()]] : []),
               ].map(([k, v]) => (
                 <div key={String(k)}><span className="text-muted-foreground">{k}: </span><span className="font-medium">{String(v)}</span></div>
@@ -1123,7 +1128,7 @@ function DepreciationRunsTab({ organisationId }: { organisationId: string }) {
 // ─── CSV helpers ─────────────────────────────────────────────────────────────
 
 const CSV_HEADERS = [
-  'Code', 'Name', 'Category', 'Serial Number', 'Location',
+  'Code', 'Name', 'Category', 'Serial Number', 'Location', 'Custodian',
   'Acquisition Date', 'Cost', 'Residual Value', 'Useful Life (months)',
   'Depreciation Method', 'Total Production Units',
   'Accumulated Deprn', 'Carrying Value', 'Status',
@@ -1133,7 +1138,7 @@ function downloadCSV(assets: assetSvc.FixedAsset[]) {
   const esc = (v: string | number) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const rows = assets.map((a) => [
     a.code, a.name, a.category,
-    a.serialNumber ?? '', a.location ?? '',
+    a.serialNumber ?? '', a.location ?? '', a.custodian ?? '',
     new Date(a.acquisitionDate).toISOString().split('T')[0],
     a.acquisitionCost, a.residualValue, a.usefulLifeMonths,
     a.depreciationMethod, a.unitsOfProductionTotal ?? '',
@@ -1327,8 +1332,11 @@ export function AssetsPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
+  const [locationFilter, setLocationFilter] = useState('');
+  const [custodianFilter, setCustodianFilter] = useState('');
   const [fromFilter, setFromFilter] = useState('');
   const [toFilter, setToFilter] = useState('');
+  const [groupByCategory, setGroupByCategory] = useState(false);
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'assets' | 'categories' | 'runs'>('assets');
 
@@ -1338,24 +1346,36 @@ export function AssetsPage() {
     enabled: !!activeOrganisationId,
   });
 
+  const filters = {
+    status: statusFilter || undefined,
+    categoryId: categoryFilter || undefined,
+    location: locationFilter || undefined,
+    custodian: custodianFilter || undefined,
+    from: fromFilter || undefined,
+    to: toFilter || undefined,
+    search: search || undefined,
+  };
+
   const { data, isLoading } = useQuery({
-    queryKey: ['assets', activeOrganisationId, { statusFilter, categoryFilter, fromFilter, toFilter, search }],
-    queryFn: () => assetSvc.listAssets(activeOrganisationId!, {
-      status: statusFilter || undefined,
-      categoryId: categoryFilter || undefined,
-      from: fromFilter || undefined,
-      to: toFilter || undefined,
-      search: search || undefined,
-    }),
-    enabled: !!activeOrganisationId,
+    queryKey: ['assets', activeOrganisationId, filters],
+    queryFn: () => assetSvc.listAssets(activeOrganisationId!, filters),
+    enabled: !!activeOrganisationId && !groupByCategory,
   });
 
-  const assets = data?.assets ?? [];
-  const hasFilters = !!(search || statusFilter || categoryFilter || fromFilter || toFilter);
+  const { data: register, isLoading: registerLoading } = useQuery({
+    queryKey: ['asset-register', activeOrganisationId, filters],
+    queryFn: () => assetSvc.getAssetRegister(activeOrganisationId!, filters),
+    enabled: !!activeOrganisationId && groupByCategory,
+  });
 
-  // Summary cards
-  const totalCost = assets.reduce((s, a) => s + Number(a.acquisitionCost), 0);
-  const totalNbv = assets.reduce((s, a) => s + Number(a.carryingValue), 0);
+  const assets = groupByCategory
+    ? (register?.groups.flatMap((g) => g.assets) ?? [])
+    : (data?.assets ?? []);
+  const hasFilters = !!(search || statusFilter || categoryFilter || locationFilter || custodianFilter || fromFilter || toFilter);
+
+  // Summary cards — exact grand totals when grouping (register covers all assets)
+  const totalCost = groupByCategory && register ? register.totals.cost : assets.reduce((s, a) => s + Number(a.acquisitionCost), 0);
+  const totalNbv = groupByCategory && register ? register.totals.carryingValue : assets.reduce((s, a) => s + Number(a.carryingValue), 0);
   const activeCount = assets.filter((a) => a.status === 'ACTIVE').length;
 
   return (
@@ -1427,18 +1447,78 @@ export function AssetsPage() {
                 <label className="text-[10px] text-muted-foreground block">to</label>
                 <Input type="date" value={toFilter} onChange={(e) => setToFilter(e.target.value)} className="w-36 h-8 text-xs" />
               </div>
+              <Input placeholder="Location" value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)} className="w-32 h-8 text-xs" />
+              <Input placeholder="Custodian" value={custodianFilter} onChange={(e) => setCustodianFilter(e.target.value)} className="w-32 h-8 text-xs" />
               {hasFilters && (
                 <Button variant="ghost" size="sm" className="h-8 text-xs"
-                  onClick={() => { setSearch(''); setStatusFilter(''); setCategoryFilter(''); setFromFilter(''); setToFilter(''); }}>
+                  onClick={() => { setSearch(''); setStatusFilter(''); setCategoryFilter(''); setLocationFilter(''); setCustodianFilter(''); setFromFilter(''); setToFilter(''); }}>
                   Clear
                 </Button>
               )}
+              <label className="flex items-center gap-1.5 text-xs ml-auto cursor-pointer select-none">
+                <input type="checkbox" checked={groupByCategory} onChange={(e) => setGroupByCategory(e.target.checked)} />
+                Group by category
+              </label>
             </div>
             <Card><CardContent className="p-0">
-              {isLoading ? (
+              {(isLoading || registerLoading) ? (
                 <div className="p-6 space-y-2">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}</div>
               ) : assets.length === 0 ? (
                 <div className="py-16 text-center text-sm text-muted-foreground">No assets found.</div>
+              ) : groupByCategory && register ? (
+                <Table>
+                  <TableHeader><TableRow>
+                    <TableHead className="w-24">Code</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Location</TableHead>
+                    <TableHead>Custodian</TableHead>
+                    <TableHead>Method</TableHead>
+                    <TableHead className="text-right">Cost</TableHead>
+                    <TableHead className="text-right">Accum. Deprn</TableHead>
+                    <TableHead className="text-right">NBV</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="w-8" />
+                  </TableRow></TableHeader>
+                  <TableBody>
+                    {register.groups.map((g) => (
+                      <Fragment key={g.categoryId ?? g.categoryName}>
+                        <TableRow className="bg-muted/60">
+                          <TableCell colSpan={10} className="text-xs font-semibold py-1.5">
+                            {g.categoryCode ? `${g.categoryCode} · ` : ''}{g.categoryName} <span className="text-muted-foreground font-normal">({g.subtotal.count})</span>
+                          </TableCell>
+                        </TableRow>
+                        {g.assets.map((a) => (
+                          <TableRow key={a.id} className="cursor-pointer hover:bg-muted/40" onClick={() => setSelectedAssetId(a.id === selectedAssetId ? null : a.id)}>
+                            <TableCell className="font-mono text-xs font-medium text-muted-foreground">{a.code}</TableCell>
+                            <TableCell className="text-sm font-medium">{a.name}</TableCell>
+                            <TableCell className="text-xs text-muted-foreground">{a.location ?? '—'}</TableCell>
+                            <TableCell className="text-xs text-muted-foreground">{a.custodian ?? '—'}</TableCell>
+                            <TableCell className="text-xs text-muted-foreground">{a.depreciationMethod.replace(/_/g, ' ')}</TableCell>
+                            <TableCell className="text-right text-xs">{fmt(a.acquisitionCost)}</TableCell>
+                            <TableCell className="text-right text-xs text-muted-foreground">{fmt(a.accumulatedDeprn)}</TableCell>
+                            <TableCell className="text-right text-xs font-medium">{fmt(a.carryingValue)}</TableCell>
+                            <TableCell><Badge variant={STATUS_VARIANT[a.status] ?? 'secondary'}>{a.status.replace(/_/g, ' ')}</Badge></TableCell>
+                            <TableCell><ChevronRight size={14} className={`text-muted-foreground transition-transform ${a.id === selectedAssetId ? 'rotate-90' : ''}`} /></TableCell>
+                          </TableRow>
+                        ))}
+                        <TableRow className="border-t-2">
+                          <TableCell colSpan={5} className="text-right text-xs font-medium text-muted-foreground py-1.5">Subtotal — {g.categoryName}</TableCell>
+                          <TableCell className="text-right text-xs font-semibold">{fmt(g.subtotal.cost)}</TableCell>
+                          <TableCell className="text-right text-xs font-semibold">{fmt(g.subtotal.accumulatedDeprn)}</TableCell>
+                          <TableCell className="text-right text-xs font-semibold">{fmt(g.subtotal.carryingValue)}</TableCell>
+                          <TableCell colSpan={2} />
+                        </TableRow>
+                      </Fragment>
+                    ))}
+                    <TableRow className="border-t-4 bg-muted/30">
+                      <TableCell colSpan={5} className="text-right text-xs font-bold py-2">Grand total — {register.totals.count} assets</TableCell>
+                      <TableCell className="text-right text-xs font-bold">{fmt(register.totals.cost)}</TableCell>
+                      <TableCell className="text-right text-xs font-bold">{fmt(register.totals.accumulatedDeprn)}</TableCell>
+                      <TableCell className="text-right text-xs font-bold">{fmt(register.totals.carryingValue)}</TableCell>
+                      <TableCell colSpan={2} />
+                    </TableRow>
+                  </TableBody>
+                </Table>
               ) : (
                 <Table>
                   <TableHeader><TableRow>
@@ -1446,6 +1526,7 @@ export function AssetsPage() {
                     <TableHead>Name</TableHead>
                     <TableHead>Category</TableHead>
                     <TableHead>Location</TableHead>
+                    <TableHead>Custodian</TableHead>
                     <TableHead>Method</TableHead>
                     <TableHead className="text-right">Cost</TableHead>
                     <TableHead className="text-right">Accum. Deprn</TableHead>
@@ -1460,6 +1541,7 @@ export function AssetsPage() {
                         <TableCell className="text-sm font-medium">{a.name}</TableCell>
                         <TableCell className="text-xs text-muted-foreground">{a.category}</TableCell>
                         <TableCell className="text-xs text-muted-foreground">{a.location ?? '—'}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{a.custodian ?? '—'}</TableCell>
                         <TableCell className="text-xs text-muted-foreground">{a.depreciationMethod.replace(/_/g, ' ')}</TableCell>
                         <TableCell className="text-right text-xs">{fmt(a.acquisitionCost)}</TableCell>
                         <TableCell className="text-right text-xs text-muted-foreground">{fmt(a.accumulatedDeprn)}</TableCell>

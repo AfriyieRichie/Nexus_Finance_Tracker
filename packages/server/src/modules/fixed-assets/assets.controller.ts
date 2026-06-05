@@ -50,6 +50,11 @@ export const listAssets = asyncHandler(async (req: Request, res: Response) => {
   return sendPaginated(res, assets, buildPagination(page, pageSize, total));
 });
 
+export const getAssetRegister = asyncHandler(async (req: Request, res: Response) => {
+  const query = listAssetsSchema.parse(req.query);
+  return sendSuccess(res, await svc.getAssetRegister(req.params.organisationId, query));
+});
+
 export const getAsset = asyncHandler(async (req: Request, res: Response) => {
   return sendSuccess(res, await svc.getAsset(req.params.organisationId, req.params.assetId));
 });
