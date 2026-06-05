@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Users, Settings, Play, Download, ChevronDown, ChevronRight, CheckCircle, XCircle, Plus, Trash2, Lock } from 'lucide-react';
+import { Users, Settings, Play, Download, ChevronDown, ChevronRight, CheckCircle, XCircle, Plus, Trash2, Lock, Check } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import * as payrollSvc from '@/services/payroll.service';
 import type { PayrollRun, Employee, SalaryComponent, Payslip, SalaryComponentType, EmployeeLoan, OvertimeType } from '@/services/payroll.service';
@@ -651,26 +651,60 @@ export function EmployeeDialog({ organisationId, emp, employees, onClose, fullPa
   return (
     <div className="flex flex-col">
 
-      {/* Tab bar */}
-      <div className="flex border-b mb-5 overflow-x-auto gap-0">
-        {EMP_TABS.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            onClick={() => goTo(t.key)}
-            disabled={tabLocked(t.key)}
-            className={[
-              'px-4 py-2 text-sm font-medium whitespace-nowrap border-b-2 -mb-px transition-colors',
-              activeTab === t.key
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground',
-              tabLocked(t.key) ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer',
-            ].join(' ')}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      {/* Progress stepper (full page) */}
+      {fullPage ? (
+        <div className="mb-6 overflow-x-auto pb-1">
+          <ol className="flex items-center min-w-max">
+            {EMP_TABS.map((t, i) => {
+              const isActive = activeTab === t.key;
+              const isDone = i < tabIdx;
+              const locked = tabLocked(t.key);
+              return (
+                <li key={t.key} className="flex items-center">
+                  <button
+                    type="button"
+                    onClick={() => goTo(t.key)}
+                    disabled={locked}
+                    title={locked ? 'Save the employee first to unlock this step' : t.label}
+                    className={['flex items-center gap-2', locked ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'].join(' ')}
+                  >
+                    <span className={[
+                      'flex items-center justify-center w-7 h-7 rounded-full text-xs font-semibold border transition-colors shrink-0',
+                      isActive ? 'bg-primary text-primary-foreground border-primary'
+                        : isDone ? 'bg-primary/10 text-primary border-primary/30'
+                        : 'bg-muted text-muted-foreground border-transparent',
+                    ].join(' ')}>
+                      {locked ? <Lock size={12} /> : isDone ? <Check size={14} /> : i + 1}
+                    </span>
+                    <span className={['text-sm whitespace-nowrap', isActive ? 'font-semibold text-foreground' : 'text-muted-foreground'].join(' ')}>{t.label}</span>
+                  </button>
+                  {i < EMP_TABS.length - 1 && <div className={['h-px w-8 mx-2 shrink-0', isDone ? 'bg-primary/40' : 'bg-border'].join(' ')} />}
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+      ) : (
+        <div className="flex border-b mb-5 overflow-x-auto gap-0">
+          {EMP_TABS.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => goTo(t.key)}
+              disabled={tabLocked(t.key)}
+              className={[
+                'px-4 py-2 text-sm font-medium whitespace-nowrap border-b-2 -mb-px transition-colors',
+                activeTab === t.key
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground',
+                tabLocked(t.key) ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer',
+              ].join(' ')}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Content */}
       <div className={fullPage ? 'pr-1' : 'max-h-[55vh] overflow-y-auto pr-1'}>
