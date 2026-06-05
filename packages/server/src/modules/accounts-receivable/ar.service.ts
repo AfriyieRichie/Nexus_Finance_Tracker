@@ -324,6 +324,7 @@ export async function postInvoice(organisationId: string, invoiceId: string, per
       const fallbackVatAccount =
         taxPayables.find((a) => /output\s*vat/i.test(a.name)) ??
         taxPayables.find((a) => /\bvat\b/i.test(a.name)) ??
+        taxPayables.find((a) => !/wht|withhold/i.test(a.name)) ?? // never grab WHT Payable
         taxPayables[0];
       if (!fallbackVatAccount) {
         throw new ValidationError(

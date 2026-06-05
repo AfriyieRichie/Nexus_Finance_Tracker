@@ -51,11 +51,13 @@ async function findWhtPayableAccount(organisationId: string) {
   });
   if (named) return named;
 
-  // Fall back to any TAX_PAYABLE account
-  return prisma.account.findFirst({
+  // Fall back to a TAX_PAYABLE account that isn't a VAT account, so WHT never
+  // lands in Output VAT (both share the TAX_PAYABLE type).
+  const candidates = await prisma.account.findMany({
     where: { organisationId, type: 'TAX_PAYABLE', isActive: true, isDeleted: false },
     orderBy: { code: 'asc' },
   });
+  return candidates.find((a) => !/vat/i.test(a.name)) ?? candidates[0] ?? null;
 }
 
 // ─── Suppliers ───────────────────────────────────────────────────────────────
