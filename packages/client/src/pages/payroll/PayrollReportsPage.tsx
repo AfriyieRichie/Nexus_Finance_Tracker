@@ -76,8 +76,8 @@ const DEPARTMENT_COLS: Column[] = [
   { key: 'gross', label: 'Gross', money: true },
   { key: 'deductions', label: 'Deductions', money: true },
   { key: 'netPay', label: 'Net Pay', money: true },
-  { key: 'employerCost', label: 'Employer Cost', money: true },
-  { key: 'totalCost', label: 'Total Cost', money: true },
+  { key: 'employerContrib', label: 'Employer Contrib.', money: true },
+  { key: 'totalCost', label: 'Total Cost (CTC)', money: true },
 ];
 
 const YTD_COLS: Column[] = [

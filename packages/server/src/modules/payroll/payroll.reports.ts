@@ -221,6 +221,8 @@ export async function getDepartmentCostAnalysis(organisationId: string, f: Repor
     g.count += 1;
     groups.set(key, g);
   }
+  // totalEmployerCost already = gross + employer contributions (the full cost to
+  // company). So Total Cost IS that figure; employer contributions = it minus gross.
   const rows = [...groups.values()]
     .map((g) => ({
       department: g.department,
@@ -229,8 +231,8 @@ export async function getDepartmentCostAnalysis(organisationId: string, f: Repor
       gross: g.gross,
       deductions: g.deductions,
       netPay: g.netPay,
-      employerCost: g.employerCost,
-      totalCost: g.gross + g.employerCost,
+      employerContrib: g.employerCost - g.gross,
+      totalCost: g.employerCost,
     }))
     .sort((a, b) => b.totalCost - a.totalCost);
   const totals = {
@@ -238,7 +240,7 @@ export async function getDepartmentCostAnalysis(organisationId: string, f: Repor
     gross: rows.reduce((s, r) => s + r.gross, 0),
     deductions: rows.reduce((s, r) => s + r.deductions, 0),
     netPay: rows.reduce((s, r) => s + r.netPay, 0),
-    employerCost: rows.reduce((s, r) => s + r.employerCost, 0),
+    employerContrib: rows.reduce((s, r) => s + r.employerContrib, 0),
     totalCost: rows.reduce((s, r) => s + r.totalCost, 0),
   };
   return { meta: await scopeMeta(organisationId, f), rows, totals };
