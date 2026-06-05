@@ -2,7 +2,7 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, BookOpen, FileText, BarChart3, TrendingUp, Building2,
   ChevronDown, ChevronRight, LogOut, Settings, Scale, Banknote, Users, ShoppingCart,
-  Package, Landmark, Archive, PiggyBank, Receipt, CheckCircle, Shield,
+  Package, Landmark, Archive, PiggyBank, Receipt, CheckCircle, Shield, ShoppingBag,
   Bell, UserCog, RefreshCw,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -57,6 +57,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: 'Accounts Receivable', to: '/ar', icon: <Users size={16} />, roles: AR_ROLES },
       { label: 'Accounts Payable', to: '/ap', icon: <ShoppingCart size={16} />, roles: AP_ROLES },
+      { label: 'Purchase Orders', to: '/purchase-orders', icon: <ShoppingBag size={16} />, roles: AP_ROLES },
       { label: 'Fixed Assets', to: '/assets', icon: <Package size={16} />, roles: ACCOUNTING_ROLES },
       { label: 'Bank Reconciliation', to: '/bank', icon: <Landmark size={16} />, roles: ACCOUNTING_ROLES },
       { label: 'Inventory', to: '/inventory', icon: <Archive size={16} />, roles: ACCOUNTING_ROLES },

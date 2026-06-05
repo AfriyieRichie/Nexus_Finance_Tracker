@@ -662,6 +662,11 @@ async function handleRejection(
   // record's old values (the staged change is simply discarded).
   await rejectMasterDataChange(request.entityType, request.entityId, request.changeType);
 
+  // Purchase order rejected → back to DRAFT for correction.
+  if (request.entityType === ApprovalEntityType.PURCHASE_ORDER) {
+    await prisma.purchaseOrder.updateMany({ where: { id: request.entityId }, data: { status: 'DRAFT' } });
+  }
+
   await notify(
     [request.requestedBy],
     organisationId,
@@ -740,6 +745,9 @@ async function dispatchApprovalComplete(
         where: { id: entityId },
         data:  { status: InvoiceStatus.APPROVED },
       });
+      break;
+    case ApprovalEntityType.PURCHASE_ORDER:
+      await prisma.purchaseOrder.updateMany({ where: { id: entityId }, data: { status: 'APPROVED' } });
       break;
     case ApprovalEntityType.SUPPLIER: {
       // CREATE: activate the pending record. UPDATE: apply the staged change only.

@@ -295,6 +295,24 @@ enum InvoiceStatus {
   VOID
 }
 
+enum PurchaseOrderStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  PARTIALLY_BILLED
+  BILLED
+  CLOSED
+  CANCELLED
+}
+
+enum PaymentVoucherStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  PAID
+  CANCELLED
+}
+
 enum PaymentRunStatus {
   DRAFT
   PENDING_APPROVAL
@@ -392,6 +410,8 @@ model Organisation {
   fixedAssets        FixedAsset[]
   assetCategories    AssetCategory[]
   assetLocations     AssetLocation[]
+  purchaseOrders     PurchaseOrder[]
+  paymentVouchers    PaymentVoucher[]
   depreciationRuns   DepreciationRun[]
   assetRevaluations        AssetRevaluation[]
   assetImpairments         AssetImpairment[]
@@ -901,10 +921,102 @@ model Supplier {
   supplierInvoices    SupplierInvoice[]
   supplierPayments    SupplierPayment[]
   supplierCreditNotes SupplierCreditNote[]
+  purchaseOrders      PurchaseOrder[]
+  paymentVouchers     PaymentVoucher[]
 
   @@unique([organisationId, code])
   @@index([organisationId])
   @@map("suppliers")
+}
+
+// ─── Procure-to-pay ────────────────────────────────────────────────────────────
+
+model PurchaseOrder {
+  id             String              @id @default(uuid())
+  organisationId String
+  poNumber       String
+  supplierId     String
+  orderDate      DateTime            @db.Date
+  expectedDate   DateTime?           @db.Date
+  currency       String
+  exchangeRate   Decimal             @default(1) @db.Decimal(20, 6)
+  status         PurchaseOrderStatus @default(DRAFT)
+  subtotal       Decimal             @db.Decimal(20, 4)
+  taxAmount      Decimal             @default(0) @db.Decimal(20, 4)
+  totalAmount    Decimal             @db.Decimal(20, 4)
+  notes          String?
+  createdBy      String
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  organisation Organisation        @relation(fields: [organisationId], references: [id])
+  supplier     Supplier            @relation(fields: [supplierId], references: [id])
+  lines        PurchaseOrderLine[]
+  invoices     SupplierInvoice[]
+
+  @@unique([organisationId, poNumber])
+  @@index([organisationId, status])
+  @@index([supplierId])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderLine {
+  id               String  @id @default(uuid())
+  purchaseOrderId  String
+  lineNumber       Int
+  description      String
+  quantity         Decimal @db.Decimal(20, 4)
+  unitPrice        Decimal @db.Decimal(20, 4)
+  accountId        String?
+  taxCode          String?
+  taxAmount        Decimal @default(0) @db.Decimal(20, 4)
+  lineTotal        Decimal @db.Decimal(20, 4)
+  quantityReceived Decimal @default(0) @db.Decimal(20, 4)
+  quantityBilled   Decimal @default(0) @db.Decimal(20, 4)
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+
+  @@index([purchaseOrderId])
+  @@map("purchase_order_lines")
+}
+
+model PaymentVoucher {
+  id             String               @id @default(uuid())
+  organisationId String
+  pvNumber       String
+  supplierId     String
+  voucherDate    DateTime             @db.Date
+  bankAccountId  String?
+  currency       String
+  status         PaymentVoucherStatus @default(DRAFT)
+  totalAmount    Decimal              @db.Decimal(20, 4)
+  payeeMemo      String?
+  notes          String?
+  createdBy      String
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  organisation Organisation         @relation(fields: [organisationId], references: [id])
+  supplier     Supplier             @relation(fields: [supplierId], references: [id])
+  lines        PaymentVoucherLine[]
+
+  @@unique([organisationId, pvNumber])
+  @@index([organisationId, status])
+  @@index([supplierId])
+  @@map("payment_vouchers")
+}
+
+model PaymentVoucherLine {
+  id               String  @id @default(uuid())
+  paymentVoucherId String
+  supplierInvoiceId String
+  amount           Decimal @db.Decimal(20, 4)
+
+  paymentVoucher PaymentVoucher  @relation(fields: [paymentVoucherId], references: [id], onDelete: Cascade)
+  supplierInvoice SupplierInvoice @relation(fields: [supplierInvoiceId], references: [id])
+
+  @@index([paymentVoucherId])
+  @@map("payment_voucher_lines")
 }
 
 model SupplierInvoice {
@@ -924,6 +1036,7 @@ model SupplierInvoice {
   status         InvoiceStatus @default(DRAFT)
   notes          String?
   apAccountId    String?
+  purchaseOrderId String?
   journalEntryId String?
   createdBy      String
   createdAt      DateTime      @default(now())
@@ -931,6 +1044,8 @@ model SupplierInvoice {
 
   organisation        Organisation         @relation(fields: [organisationId], references: [id])
   supplier            Supplier             @relation(fields: [supplierId], references: [id])
+  purchaseOrder       PurchaseOrder?       @relation(fields: [purchaseOrderId], references: [id])
+  paymentVoucherLines PaymentVoucherLine[]
   lines               SupplierInvoiceLine[]
   supplierPayments    SupplierPayment[]
   supplierCreditNotes SupplierCreditNote[]
