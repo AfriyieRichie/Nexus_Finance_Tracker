@@ -10,7 +10,7 @@ import type {
   DisposeAssetInput, RevalueAssetInput, ImpairAssetInput,
   CreateCategoryInput, UpdateCategoryInput, BulkCreateAssetsInput,
   SetAssetStatusInput, ReverseImpairmentInput, DepreciationScheduleQuery,
-  CapitaliseFromClearingInput,
+  CapitaliseFromClearingInput, CreateLocationInput, UpdateLocationInput,
 } from './assets.schemas';
 
 // ─── Depreciation Formulas ───────────────────────────────────────────────────
@@ -126,6 +126,27 @@ export async function listCategories(organisationId: string) {
     where: { organisationId, isDeleted: false },
     orderBy: { code: 'asc' },
   });
+}
+
+// ─── Locations ────────────────────────────────────────────────────────────────
+
+export async function listLocations(organisationId: string) {
+  return prisma.assetLocation.findMany({
+    where: { organisationId },
+    orderBy: { name: 'asc' },
+  });
+}
+
+export async function createLocation(organisationId: string, input: CreateLocationInput) {
+  const exists = await prisma.assetLocation.findFirst({ where: { organisationId, name: input.name } });
+  if (exists) throw new ConflictError(`Location '${input.name}' already exists`);
+  return prisma.assetLocation.create({ data: { organisationId, name: input.name } });
+}
+
+export async function updateLocation(organisationId: string, locationId: string, input: UpdateLocationInput) {
+  const loc = await prisma.assetLocation.findFirst({ where: { id: locationId, organisationId } });
+  if (!loc) throw new NotFoundError('Location not found');
+  return prisma.assetLocation.update({ where: { id: locationId }, data: input });
 }
 
 export async function createCategory(organisationId: string, input: CreateCategoryInput) {
@@ -256,7 +277,7 @@ export async function createAsset(organisationId: string, input: CreateAssetInpu
       description: input.description,
       category: input.category,
       categoryId: input.categoryId,
-      serialNumber: input.serialNumber,
+      serialNumber: input.serialNumber?.trim() || await nextAutoSerial(organisationId),
       location: input.location,
       custodian: input.custodian,
       acquisitionDate: new Date(input.acquisitionDate),
@@ -447,6 +468,23 @@ async function nextAssetCodes(organisationId: string, categoryCode: string, coun
   }
   const width = 4;
   return Array.from({ length: count }, (_, i) => `${categoryCode}-${String(max + 1 + i).padStart(width, '0')}`);
+}
+
+// Next auto serial/tag (SN-NNNNNN), continuing from the highest existing auto serial
+// in the org. Used only when no manufacturer serial is supplied, so every asset
+// carries a unique serial without manual entry.
+async function nextAutoSerial(organisationId: string): Promise<string> {
+  const existing = await prisma.fixedAsset.findMany({
+    where: { organisationId, serialNumber: { startsWith: 'SN-' }, isDeleted: false },
+    select: { serialNumber: true },
+  });
+  const re = /^SN-(\d+)$/;
+  let max = 0;
+  for (const a of existing) {
+    const m = a.serialNumber?.match(re);
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  return `SN-${String(max + 1).padStart(6, '0')}`;
 }
 
 export async function capitaliseFromClearing(organisationId: string, input: CapitaliseFromClearingInput, userId: string) {

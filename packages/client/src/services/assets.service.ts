@@ -65,6 +65,27 @@ export async function listCategories(organisationId: string) {
   return res.data.data as AssetCategory[];
 }
 
+export interface AssetLocation {
+  id: string;
+  name: string;
+  isActive: boolean;
+}
+
+export async function listLocations(organisationId: string) {
+  const res = await api.get(`/organisations/${organisationId}/assets/locations`);
+  return res.data.data as AssetLocation[];
+}
+
+export async function createLocation(organisationId: string, name: string) {
+  const res = await api.post(`/organisations/${organisationId}/assets/locations`, { name });
+  return res.data.data as AssetLocation;
+}
+
+export async function updateLocation(organisationId: string, locationId: string, data: { name?: string; isActive?: boolean }) {
+  const res = await api.patch(`/organisations/${organisationId}/assets/locations/${locationId}`, data);
+  return res.data.data as AssetLocation;
+}
+
 export async function createCategory(organisationId: string, data: {
   code: string; name: string; description?: string;
   defaultDepreciationMethod?: string; defaultUsefulLifeMonths?: number;

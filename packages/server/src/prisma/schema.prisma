@@ -391,6 +391,7 @@ model Organisation {
   suppliers          Supplier[]
   fixedAssets        FixedAsset[]
   assetCategories    AssetCategory[]
+  assetLocations     AssetLocation[]
   depreciationRuns   DepreciationRun[]
   assetRevaluations        AssetRevaluation[]
   assetImpairments         AssetImpairment[]
@@ -1096,6 +1097,21 @@ model AssetCategory {
   @@unique([organisationId, code])
   @@index([organisationId])
   @@map("asset_categories")
+}
+
+model AssetLocation {
+  id             String   @id @default(uuid())
+  organisationId String
+  name           String
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organisation Organisation @relation(fields: [organisationId], references: [id])
+
+  @@unique([organisationId, name])
+  @@index([organisationId])
+  @@map("asset_locations")
 }
 
 model AssetRevaluation {

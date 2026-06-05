@@ -12,6 +12,11 @@ router.get('/categories', requireRole(UserRole.REPORT_VIEWER), ctrl.listCategori
 router.post('/categories', requireRole(UserRole.FINANCE_MANAGER), ctrl.createCategory);
 router.put('/categories/:categoryId', requireRole(UserRole.FINANCE_MANAGER), ctrl.updateCategory);
 
+// Locations
+router.get('/locations', requireRole(UserRole.REPORT_VIEWER), ctrl.listLocations);
+router.post('/locations', requireRole(UserRole.FINANCE_MANAGER), ctrl.createLocation);
+router.patch('/locations/:locationId', requireRole(UserRole.FINANCE_MANAGER), ctrl.updateLocation);
+
 // Depreciation
 router.post('/depreciation/run', requireRole(UserRole.FINANCE_MANAGER), ctrl.runDepreciation);
 router.post('/depreciation/reverse', requireRole(UserRole.FINANCE_MANAGER), ctrl.reverseDepreciation);

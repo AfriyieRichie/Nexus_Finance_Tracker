@@ -122,6 +122,15 @@ export const createCategorySchema = z.object({
 
 export const updateCategorySchema = createCategorySchema.partial();
 
+export const createLocationSchema = z.object({
+  name: z.string().min(1).max(100),
+});
+
+export const updateLocationSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  isActive: z.boolean().optional(),
+});
+
 export const setAssetStatusSchema = z.object({
   status: z.enum(['ACTIVE', 'INACTIVE']),
   reason: z.string().optional(),
@@ -159,6 +168,8 @@ export type RevalueAssetInput = z.infer<typeof revalueAssetSchema>;
 export type ImpairAssetInput = z.infer<typeof impairAssetSchema>;
 export type CreateCategoryInput = z.infer<typeof createCategorySchema>;
 export type UpdateCategoryInput = z.infer<typeof updateCategorySchema>;
+export type CreateLocationInput = z.infer<typeof createLocationSchema>;
+export type UpdateLocationInput = z.infer<typeof updateLocationSchema>;
 export type BulkCreateAssetsInput = z.infer<typeof bulkCreateAssetsSchema>;
 export type SetAssetStatusInput = z.infer<typeof setAssetStatusSchema>;
 export type ReverseImpairmentInput = z.infer<typeof reverseImpairmentSchema>;

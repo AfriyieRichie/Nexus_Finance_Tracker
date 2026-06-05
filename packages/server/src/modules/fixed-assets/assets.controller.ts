@@ -7,9 +7,23 @@ import {
   disposeAssetSchema, revalueAssetSchema, impairAssetSchema,
   createCategorySchema, updateCategorySchema, bulkCreateAssetsSchema,
   setAssetStatusSchema, reverseImpairmentSchema, depreciationScheduleSchema,
-  capitaliseFromClearingSchema,
+  capitaliseFromClearingSchema, createLocationSchema, updateLocationSchema,
 } from './assets.schemas';
 import * as svc from './assets.service';
+
+export const listLocations = asyncHandler(async (req: Request, res: Response) => {
+  return sendSuccess(res, await svc.listLocations(req.params.organisationId));
+});
+
+export const createLocation = asyncHandler(async (req: Request, res: Response) => {
+  const input = createLocationSchema.parse(req.body);
+  return sendCreated(res, await svc.createLocation(req.params.organisationId, input), 'Location created');
+});
+
+export const updateLocation = asyncHandler(async (req: Request, res: Response) => {
+  const input = updateLocationSchema.parse(req.body);
+  return sendSuccess(res, await svc.updateLocation(req.params.organisationId, req.params.locationId, input), 'Location updated');
+});
 
 export const listCategories = asyncHandler(async (req: Request, res: Response) => {
   return sendSuccess(res, await svc.listCategories(req.params.organisationId));

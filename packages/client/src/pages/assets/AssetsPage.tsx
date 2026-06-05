@@ -1,6 +1,6 @@
 import { useState, Fragment } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Package, Plus, Play, Eye, ChevronRight, RotateCcw, Trash2, TrendingUp, AlertTriangle, Settings, Download, Upload } from 'lucide-react';
+import { Package, Plus, Play, Eye, ChevronRight, RotateCcw, Trash2, TrendingUp, AlertTriangle, Settings, Download, Upload, MapPin } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import * as assetSvc from '@/services/assets.service';
 import { listPeriods } from '@/services/periods.service';
@@ -58,6 +58,13 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
     queryFn: () => assetSvc.listCategories(organisationId),
     enabled: !!organisationId,
   });
+
+  const { data: locations = [] } = useQuery({
+    queryKey: ['asset-locations', organisationId],
+    queryFn: () => assetSvc.listLocations(organisationId),
+    enabled: open,
+  });
+  const activeLocations = locations.filter((l) => l.isActive);
 
   // Items billed to the Fixed Asset Clearing account, awaiting capitalisation.
   const { data: pending } = useQuery({
@@ -266,16 +273,20 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
           <div className="grid grid-cols-2 gap-3">
             {!(mode === 'clearing' && qtyNum > 1) && (
               <div><label className="text-xs font-medium mb-1 block">Serial Number</label>
-                <Input value={form.serialNumber} onChange={(e) => set('serialNumber', e.target.value)} placeholder="SN-001" className="h-8 text-xs" /></div>
+                <Input value={form.serialNumber} onChange={(e) => set('serialNumber', e.target.value)} placeholder="Auto-generated if blank" className="h-8 text-xs" />
+                <p className="text-[10px] text-muted-foreground mt-0.5">Leave blank to auto-assign (SN-000001…); or enter the manufacturer serial.</p></div>
             )}
             <div><label className="text-xs font-medium mb-1 block">Location</label>
-              <Input value={form.location} onChange={(e) => set('location', e.target.value)} placeholder="Head Office" className="h-8 text-xs" /></div>
+              <Select value={form.location} onChange={(e) => set('location', e.target.value)} className="h-8 text-xs" disabled={activeLocations.length === 0}>
+                <option value="">{activeLocations.length === 0 ? '— Add locations in the Locations tab —' : '— Select location —'}</option>
+                {activeLocations.map((l) => <option key={l.id} value={l.name}>{l.name}</option>)}
+              </Select></div>
           </div>
           <div><label className="text-xs font-medium mb-1 block">Custodian <span className="text-muted-foreground font-normal">(person / department responsible)</span></label>
             <Input value={form.custodian} onChange={(e) => set('custodian', e.target.value)} placeholder="e.g. IT Department / J. Mensah" className="h-8 text-xs" /></div>
           {mode === 'clearing' && qtyNum > 1 && (
             <div>
-              <label className="text-xs font-medium mb-1 block">Serial numbers <span className="text-muted-foreground font-normal">(optional — one per unit)</span></label>
+              <label className="text-xs font-medium mb-1 block">Serial numbers <span className="text-muted-foreground font-normal">(optional — one per unit; blanks auto-assign SN-…)</span></label>
               <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto">
                 {Array.from({ length: qtyNum }, (_, i) => (
                   <Input
@@ -1023,6 +1034,73 @@ function CategoriesTab({ organisationId }: { organisationId: string }) {
   );
 }
 
+// ─── Locations Tab ───────────────────────────────────────────────────────────
+
+function LocationsTab({ organisationId }: { organisationId: string }) {
+  const qc = useQueryClient();
+  const [name, setName] = useState('');
+
+  const { data: locations = [], isLoading } = useQuery({
+    queryKey: ['asset-locations', organisationId],
+    queryFn: () => assetSvc.listLocations(organisationId),
+    enabled: !!organisationId,
+  });
+
+  const invalidate = () => void qc.invalidateQueries({ queryKey: ['asset-locations', organisationId] });
+
+  const add = useMutation({
+    mutationFn: () => assetSvc.createLocation(organisationId, name.trim()),
+    onSuccess: () => { setName(''); invalidate(); },
+  });
+  const toggle = useMutation({
+    mutationFn: ({ id, isActive }: { id: string; isActive: boolean }) => assetSvc.updateLocation(organisationId, id, { isActive }),
+    onSuccess: invalidate,
+  });
+
+  return (
+    <div className="space-y-3 max-w-xl">
+      <Card><CardContent className="p-3">
+        <label className="text-xs font-medium mb-1 block">Add a location</label>
+        <div className="flex gap-2">
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Head Office, Tema Warehouse" className="h-8 text-xs"
+            onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) add.mutate(); }} />
+          <Button size="sm" disabled={!name.trim() || add.isPending} onClick={() => add.mutate()}>
+            <Plus size={14} /> Add
+          </Button>
+        </div>
+        {add.isError && <p className="text-[11px] text-destructive mt-1">{errMsg(add.error)}</p>}
+        <p className="text-[10px] text-muted-foreground mt-1">Locations appear as a dropdown when adding or capitalising assets.</p>
+      </CardContent></Card>
+
+      <Card><CardContent className="p-0">
+        {isLoading ? (
+          <div className="p-6 space-y-2">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-9 w-full" />)}</div>
+        ) : locations.length === 0 ? (
+          <div className="py-12 text-center text-sm text-muted-foreground">No locations yet. Add one above.</div>
+        ) : (
+          <Table>
+            <TableHeader><TableRow><TableHead>Location</TableHead><TableHead>Status</TableHead><TableHead className="w-20" /></TableRow></TableHeader>
+            <TableBody>
+              {locations.map((l) => (
+                <TableRow key={l.id}>
+                  <TableCell className="text-sm font-medium">{l.name}</TableCell>
+                  <TableCell><Badge variant={l.isActive ? 'success' : 'secondary'}>{l.isActive ? 'Active' : 'Inactive'}</Badge></TableCell>
+                  <TableCell className="text-right">
+                    <button className="text-xs text-primary hover:underline disabled:opacity-50" disabled={toggle.isPending}
+                      onClick={() => toggle.mutate({ id: l.id, isActive: !l.isActive })}>
+                      {l.isActive ? 'Deactivate' : 'Reactivate'}
+                    </button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent></Card>
+    </div>
+  );
+}
+
 // ─── Depreciation Runs Tab ───────────────────────────────────────────────────
 
 function DepreciationRunsTab({ organisationId }: { organisationId: string }) {
@@ -1338,7 +1416,7 @@ export function AssetsPage() {
   const [toFilter, setToFilter] = useState('');
   const [groupByCategory, setGroupByCategory] = useState(false);
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'assets' | 'categories' | 'runs'>('assets');
+  const [activeTab, setActiveTab] = useState<'assets' | 'categories' | 'locations' | 'runs'>('assets');
 
   const { data: categories = [] } = useQuery({
     queryKey: ['asset-categories', activeOrganisationId],
@@ -1407,16 +1485,20 @@ export function AssetsPage() {
 
       {/* Tabs */}
       <div className="flex border-b text-sm gap-6">
-        {(['assets', 'categories', 'runs'] as const).map((t) => (
+        {(['assets', 'categories', 'locations', 'runs'] as const).map((t) => (
           <button key={t} onClick={() => setActiveTab(t)}
             className={`pb-2 capitalize font-medium ${activeTab === t ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
-            {t === 'assets' ? `Assets (${data?.total ?? 0})` : t === 'categories' ? <span className="flex items-center gap-1"><Settings size={13} /> Categories</span> : <span className="flex items-center gap-1"><RotateCcw size={13} /> Deprn Runs</span>}
+            {t === 'assets' ? `Assets (${data?.total ?? 0})` : t === 'categories' ? <span className="flex items-center gap-1"><Settings size={13} /> Categories</span> : t === 'locations' ? <span className="flex items-center gap-1"><MapPin size={13} /> Locations</span> : <span className="flex items-center gap-1"><RotateCcw size={13} /> Deprn Runs</span>}
           </button>
         ))}
       </div>
 
       {activeTab === 'categories' && activeOrganisationId && (
         <CategoriesTab organisationId={activeOrganisationId} />
+      )}
+
+      {activeTab === 'locations' && activeOrganisationId && (
+        <LocationsTab organisationId={activeOrganisationId} />
       )}
 
       {activeTab === 'runs' && activeOrganisationId && (
