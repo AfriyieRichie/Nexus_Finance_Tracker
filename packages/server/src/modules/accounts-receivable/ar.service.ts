@@ -315,10 +315,16 @@ export async function postInvoice(organisationId: string, invoiceId: string, per
     }
 
     if (fallbackVatAmount > 0) {
-      const fallbackVatAccount = await prisma.account.findFirst({
+      // Output VAT is determined by the sale side. Prefer an account clearly named
+      // as Output VAT so a generic tax-payable isn't picked just for sorting first.
+      const taxPayables = await prisma.account.findMany({
         where: { organisationId, type: 'TAX_PAYABLE', isActive: true, isDeleted: false },
         orderBy: { code: 'asc' },
       });
+      const fallbackVatAccount =
+        taxPayables.find((a) => /output\s*vat/i.test(a.name)) ??
+        taxPayables.find((a) => /\bvat\b/i.test(a.name)) ??
+        taxPayables[0];
       if (!fallbackVatAccount) {
         throw new ValidationError(
           'Invoice has tax but no Output VAT account (type: TAX_PAYABLE) was found. ' +

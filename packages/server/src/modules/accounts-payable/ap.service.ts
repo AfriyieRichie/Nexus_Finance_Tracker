@@ -576,10 +576,17 @@ export async function postSupplierInvoice(
     }
 
     if (fallbackVatAmount > 0) {
-      const fallbackVatAccount = await prisma.account.findFirst({
+      // Input VAT is determined by the purchase side, not the (single) tax-code GL.
+      // Prefer an account clearly named as Input VAT so a generic tax-receivable
+      // (e.g. an income-tax refund account) isn't picked just for sorting first.
+      const taxReceivables = await prisma.account.findMany({
         where: { organisationId, type: 'TAX_RECEIVABLE', isActive: true, isDeleted: false },
         orderBy: { code: 'asc' },
       });
+      const fallbackVatAccount =
+        taxReceivables.find((a) => /input\s*vat/i.test(a.name)) ??
+        taxReceivables.find((a) => /\bvat\b/i.test(a.name)) ??
+        taxReceivables[0];
       if (!fallbackVatAccount) {
         throw new ValidationError(
           'Invoice has tax but no Input VAT account (type: TAX_RECEIVABLE) was found. ' +
