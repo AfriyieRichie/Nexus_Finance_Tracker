@@ -58,6 +58,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: 'Accounts Receivable', to: '/ar', icon: <Users size={16} />, roles: AR_ROLES },
       { label: 'Accounts Payable', to: '/ap', icon: <ShoppingCart size={16} />, roles: AP_ROLES },
       { label: 'Purchase Orders', to: '/purchase-orders', icon: <ShoppingBag size={16} />, roles: AP_ROLES },
+      { label: 'Payment Vouchers', to: '/payment-vouchers', icon: <Receipt size={16} />, roles: AP_ROLES },
       { label: 'Fixed Assets', to: '/assets', icon: <Package size={16} />, roles: ACCOUNTING_ROLES },
       { label: 'Bank Reconciliation', to: '/bank', icon: <Landmark size={16} />, roles: ACCOUNTING_ROLES },
       { label: 'Inventory', to: '/inventory', icon: <Archive size={16} />, roles: ACCOUNTING_ROLES },

@@ -51,6 +51,7 @@ import { TaxPage } from './pages/tax/TaxPage';
 import { PayrollPage } from './pages/payroll/PayrollPage';
 import { EmployeeFormPage } from './pages/payroll/EmployeeFormPage';
 import { PurchaseOrdersPage } from './pages/purchase-orders/PurchaseOrdersPage';
+import { PaymentVouchersPage } from './pages/payment-vouchers/PaymentVouchersPage';
 import { ApprovalsPage } from './pages/approvals/ApprovalsPage';
 import { AuditPage } from './pages/audit/AuditPage';
 import { UserManagementPage } from './pages/admin/UserManagementPage';
@@ -136,6 +137,7 @@ export default function App() {
           <Route path="/ar" element={<ARPage />} />
           <Route path="/ap" element={<APPage />} />
           <Route path="/purchase-orders" element={<PurchaseOrdersPage />} />
+          <Route path="/payment-vouchers" element={<PaymentVouchersPage />} />
           <Route path="/assets" element={<AssetsPage />} />
           <Route path="/bank" element={<BankPage />} />
           <Route path="/inventory" element={<InventoryPage />} />
