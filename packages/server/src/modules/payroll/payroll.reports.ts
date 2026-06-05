@@ -113,15 +113,21 @@ export async function getPayrollRegister(organisationId: string, f: ReportFilter
 export async function getStatutoryReport(organisationId: string, f: ReportFilters) {
   const slips = await fetchPayslips(organisationId, f);
   const rows = slips.map((p) => {
-    const paye = num(p.payeAmount) + num(p.overtimeTax) + num(p.bonusTax);
+    // All three are income tax remitted to GRA under PAYE; broken out for detail.
+    const payeBase = num(p.payeAmount);
+    const overtimeTax = num(p.overtimeTax);
+    const bonusTax = num(p.bonusTax);
     return {
       employeeNumber: p.employee.employeeNumber,
       name: empName(p),
       tin: p.employee.tinNumber ?? '—',
       ssnitNumber: p.employee.ssnitNumber ?? '—',
       gross: num(p.grossPay),
-      // PAYE (GRA)
-      paye,
+      // GRA income tax (PAYE) — components + total
+      payeBase,
+      overtimeTax,
+      bonusTax,
+      totalTax: payeBase + overtimeTax + bonusTax,
       // SSNIT
       ssnitEmployee: num(p.ssnitEmployee),       // 5.5%
       ssnitEmployer: num(p.ssnitEmployer),       // 13%
@@ -133,7 +139,8 @@ export async function getStatutoryReport(organisationId: string, f: ReportFilter
   });
   const sum = (k: keyof (typeof rows)[number]) => rows.reduce((s, r) => s + (typeof r[k] === 'number' ? (r[k] as number) : 0), 0);
   const totals = {
-    count: rows.length, gross: sum('gross'), paye: sum('paye'),
+    count: rows.length, gross: sum('gross'),
+    payeBase: sum('payeBase'), overtimeTax: sum('overtimeTax'), bonusTax: sum('bonusTax'), totalTax: sum('totalTax'),
     ssnitEmployee: sum('ssnitEmployee'), ssnitEmployer: sum('ssnitEmployer'),
     tier1: sum('tier1'), tier2: sum('tier2'), tier3: sum('tier3'), totalSsnit: sum('totalSsnit'),
   };
@@ -153,12 +160,20 @@ export async function getPayrollGlSummary(organisationId: string, runId: string)
   const gross = num(run.totalGross);
   const employerSsnit = num(run.totalSsnitEmployer) + num(run.totalTier2) + num(run.totalTier3Employer);
 
+  // PAYE remitted to GRA = base PAYE + overtime tax + bonus tax (all income tax),
+  // matching how the run actually posts. run.totalPaye stores base PAYE only.
+  const taxAgg = await prisma.payslip.aggregate({
+    where: { payrollRunId: runId, organisationId },
+    _sum: { overtimeTax: true, bonusTax: true },
+  });
+  const totalGraTax = num(run.totalPaye) + num(taxAgg._sum.overtimeTax) + num(taxAgg._sum.bonusTax);
+
   // Debits = total cost to the company (gross + employer contributions).
   // Credits = net pay + statutory payables + other deductions.
   const lines = [
     { account: 'Salaries & Wages Expense', description: 'Gross pay', debit: gross, credit: 0 },
     { account: 'Employer SSNIT / Pension Expense', description: 'Employer contributions', debit: employerSsnit, credit: 0 },
-    { account: accName(run.payePayableAccountId), description: 'PAYE withheld (payable to GRA)', debit: 0, credit: num(run.totalPaye) },
+    { account: accName(run.payePayableAccountId), description: 'PAYE — incl. overtime & bonus tax (payable to GRA)', debit: 0, credit: totalGraTax },
     { account: accName(run.ssnitPayableAccountId), description: 'SSNIT employee + employer (payable)', debit: 0, credit: num(run.totalSsnitEmployee) + num(run.totalSsnitEmployer) },
     { account: accName(run.pensionPayableAccountId), description: 'Tier 2 / Tier 3 pension (payable)', debit: 0, credit: num(run.totalTier2) + num(run.totalTier3Employee) + num(run.totalTier3Employer) },
     { account: 'Other deductions (loans etc.)', description: 'Loan & other deductions', debit: 0, credit: num(run.totalOtherDeductions) },
