@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Users, Settings, Play, Download, ChevronDown, ChevronRight, CheckCircle, XCircle, Plus, Trash2, Lock } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
@@ -381,11 +382,12 @@ const LOAN_STATUS_COLORS: Record<string, string> = {
   SUSPENDED: 'bg-yellow-100 text-yellow-700',
 };
 
-function EmployeeDialog({ organisationId, emp, employees, onClose }: {
+export function EmployeeDialog({ organisationId, emp, employees, onClose, fullPage }: {
   organisationId: string;
   emp: Employee | null;
   employees: Employee[];
   onClose: () => void;
+  fullPage?: boolean;
 }) {
   const qc = useQueryClient();
   const today = new Date().toISOString().split('T')[0];
@@ -671,7 +673,7 @@ function EmployeeDialog({ organisationId, emp, employees, onClose }: {
       </div>
 
       {/* Content */}
-      <div className="max-h-[55vh] overflow-y-auto pr-1">
+      <div className={fullPage ? 'pr-1' : 'max-h-[55vh] overflow-y-auto pr-1'}>
 
         {/* ── Personal ── */}
         {activeTab === 'personal' && (
@@ -1062,16 +1064,15 @@ function EmployeeDialog({ organisationId, emp, employees, onClose }: {
 }
 
 function EmployeesTab({ organisationId }: { organisationId: string }) {
-  const [open, setOpen] = useState(false);
-  const [editEmp, setEditEmp] = useState<Employee | null>(null);
+  const navigate = useNavigate();
 
   const { data: employees = [], isLoading } = useQuery({
     queryKey: ['payroll-employees', organisationId],
     queryFn:  () => payrollSvc.listEmployees(organisationId),
   });
 
-  function openCreate() { setEditEmp(null); setOpen(true); }
-  function openEdit(e: Employee) { setEditEmp(e); setOpen(true); }
+  function openCreate() { navigate('/payroll/employees/new'); }
+  function openEdit(e: Employee) { navigate(`/payroll/employees/${e.id}/edit`); }
 
   if (isLoading) return <Skeleton className="h-40" />;
 
@@ -1106,13 +1107,6 @@ function EmployeesTab({ organisationId }: { organisationId: string }) {
           </TableBody>
         </Table>
       </CardContent></Card>
-
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-3xl">
-          <h2 className="text-lg font-semibold mb-2">{editEmp ? 'Edit Employee' : 'New Employee'}</h2>
-          <EmployeeDialog organisationId={organisationId} emp={editEmp} employees={employees} onClose={() => setOpen(false)} />
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
@@ -1560,29 +1554,18 @@ const TABS: { key: Tab; label: string }[] = [
 
 export function PayrollPage() {
   const orgId = useAuthStore((s) => s.activeOrganisationId) ?? '';
-  const [tab, setTab] = useState<Tab>('runs');
+  const { section } = useParams<{ section: string }>();
+  const tab: Tab = (TABS.some((t) => t.key === section) ? section : 'runs') as Tab;
+  const sectionLabel = TABS.find((t) => t.key === tab)?.label ?? 'Payroll';
 
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Payroll</h1>
+          <p className="text-xs text-muted-foreground">Payroll <span className="mx-1">›</span> <span className="text-foreground font-medium">{sectionLabel}</span></p>
+          <h1 className="text-2xl font-bold text-gray-900 mt-0.5">{sectionLabel}</h1>
           <p className="text-sm text-gray-500 mt-1">Ghana GRA compliant payroll with PAYE, SSNIT Tier 1/2/3 and four-eyes approval workflow</p>
         </div>
-      </div>
-
-      <div className="flex border-b gap-1">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-              tab === t.key ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
       </div>
 
       {tab === 'runs'       && <RunsTab            organisationId={orgId} />}

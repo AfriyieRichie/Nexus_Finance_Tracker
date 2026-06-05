@@ -67,7 +67,16 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: 'Budgets & Cost Centres', to: '/budgets', icon: <PiggyBank size={16} />, roles: FINANCE_AND_UP },
       { label: 'Tax & Currency', to: '/tax', icon: <Receipt size={16} />, roles: ACCOUNTING_ROLES },
-      { label: 'Payroll', to: '/payroll', icon: <Users size={16} />, roles: FINANCE_AND_UP },
+    ],
+  },
+  {
+    heading: 'Payroll',
+    roles: FINANCE_AND_UP,
+    items: [
+      { label: 'Payroll Runs', to: '/payroll/runs', icon: <Banknote size={16} />, roles: FINANCE_AND_UP },
+      { label: 'Employees', to: '/payroll/employees', icon: <Users size={16} />, roles: FINANCE_AND_UP },
+      { label: 'Salary Components', to: '/payroll/components', icon: <Receipt size={16} />, roles: FINANCE_AND_UP },
+      { label: 'Statutory Config', to: '/payroll/statutory', icon: <Settings size={16} />, roles: FINANCE_AND_UP },
     ],
   },
   {

@@ -49,6 +49,7 @@ import { InventoryPage } from './pages/inventory/InventoryPage';
 import { BudgetsPage } from './pages/budgets/BudgetsPage';
 import { TaxPage } from './pages/tax/TaxPage';
 import { PayrollPage } from './pages/payroll/PayrollPage';
+import { EmployeeFormPage } from './pages/payroll/EmployeeFormPage';
 import { ApprovalsPage } from './pages/approvals/ApprovalsPage';
 import { AuditPage } from './pages/audit/AuditPage';
 import { UserManagementPage } from './pages/admin/UserManagementPage';
@@ -138,7 +139,10 @@ export default function App() {
           <Route path="/inventory" element={<InventoryPage />} />
           <Route path="/budgets" element={<BudgetsPage />} />
           <Route path="/tax" element={<TaxPage />} />
-          <Route path="/payroll" element={<PayrollPage />} />
+          <Route path="/payroll" element={<Navigate to="/payroll/runs" replace />} />
+          <Route path="/payroll/employees/new" element={<EmployeeFormPage />} />
+          <Route path="/payroll/employees/:empId/edit" element={<EmployeeFormPage />} />
+          <Route path="/payroll/:section" element={<PayrollPage />} />
           <Route path="/approvals" element={<ApprovalsPage />} />
           <Route path="/audit" element={<AuditPage />} />
           <Route path="/ledger/trial-balance" element={<TrialBalancePage />} />
