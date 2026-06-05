@@ -16,13 +16,13 @@ import * as apService from './ap.service';
 export const createSupplier = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId } = req.params;
   const input = createSupplierSchema.parse(req.body);
-  return sendCreated(res, await apService.createSupplier(organisationId, input), 'Supplier created');
+  return sendCreated(res, await apService.createSupplier(organisationId, input, req.user!.sub), 'Supplier created');
 });
 
 export const updateSupplier = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId, supplierId } = req.params;
   const input = updateSupplierSchema.parse(req.body);
-  return sendSuccess(res, await apService.updateSupplier(organisationId, supplierId, input), 'Supplier updated');
+  return sendSuccess(res, await apService.updateSupplier(organisationId, supplierId, input, req.user!.sub), 'Supplier updated');
 });
 
 export const listSuppliers = asyncHandler(async (req: Request, res: Response) => {

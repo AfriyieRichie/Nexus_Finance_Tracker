@@ -485,6 +485,65 @@ export async function createJournalApprovalRequest(
   return { requestId: request.id, hasWorkflow: true };
 }
 
+// Raise a master-data approval request (SUPPLIER / CUSTOMER). changeType is CREATE
+// or UPDATE; for UPDATE, payload holds the staged field changes to apply on
+// approval. Returns hasWorkflow=false when no active workflow exists for the type.
+export async function createMasterDataApprovalRequest(
+  organisationId: string,
+  entityType: ApprovalEntityType,
+  entityId: string,
+  changeType: 'CREATE' | 'UPDATE',
+  payload: Prisma.InputJsonValue | undefined,
+  requestedBy: string,
+): Promise<{ requestId: string; hasWorkflow: boolean }> {
+  const workflow = await prisma.approvalWorkflow.findFirst({
+    where: { organisationId, entityType, isActive: true },
+    include: { levels: { orderBy: { levelNumber: 'asc' } } },
+  });
+  if (!workflow || workflow.levels.length === 0) {
+    return { requestId: '', hasWorkflow: false };
+  }
+
+  const firstLevel = workflow.levels[0];
+  const escalationHours = workflow.levels
+    .filter((l) => l.escalationHours != null)
+    .map((l) => l.escalationHours!)
+    .sort((a, b) => a - b)[0];
+  const slaDeadline = escalationHours ? new Date(Date.now() + escalationHours * 3_600_000) : null;
+
+  const request = await prisma.approvalRequest.create({
+    data: {
+      workflowId:   workflow.id,
+      entityType,
+      entityId,
+      requestedBy,
+      currentLevel: firstLevel.levelNumber,
+      status:       ApprovalRequestStatus.PENDING,
+      changeType,
+      payload:      payload ?? Prisma.DbNull,
+      slaDeadline,
+    },
+  });
+
+  const level1 = await prisma.approvalLevel.findFirst({
+    where:   { workflowId: workflow.id, levelNumber: firstLevel.levelNumber },
+    include: { approvers: { select: { userId: true } } },
+  });
+  if (level1) {
+    await notify(
+      level1.approvers.map((a) => a.userId),
+      organisationId,
+      NotificationType.APPROVAL_REQUESTED,
+      'Master Data Approval Required',
+      `A ${entityType.toLowerCase()} ${changeType === 'CREATE' ? 'record was created' : 'change was submitted'} and requires your approval.`,
+      request.id,
+      'APPROVAL_REQUEST',
+    );
+  }
+
+  return { requestId: request.id, hasWorkflow: true };
+}
+
 // ─── Decision Engine ──────────────────────────────────────────────────────────
 
 export async function decide(
@@ -599,6 +658,10 @@ async function handleRejection(
     });
   }
 
+  // Master data: a rejected CREATE is removed; a rejected UPDATE keeps the live
+  // record's old values (the staged change is simply discarded).
+  await rejectMasterDataChange(request.entityType, request.entityId, request.changeType);
+
   await notify(
     [request.requestedBy],
     organisationId,
@@ -652,7 +715,12 @@ async function handleDelegation(
 // Post-approval entity dispatch — update the entity's own status on full approval.
 // JOURNAL_ENTRY and BUDGET are handled inline; other entity types (PAYMENT, PAYROLL, etc.)
 // use module-specific approval flows and do not require a status update here.
-async function dispatchApprovalComplete(entityType: ApprovalEntityType, entityId: string) {
+async function dispatchApprovalComplete(
+  entityType: ApprovalEntityType,
+  entityId: string,
+  changeType?: string | null,
+  payload?: Prisma.JsonValue | null,
+) {
   switch (entityType) {
     case ApprovalEntityType.JOURNAL_ENTRY:
       await prisma.journalEntry.update({
@@ -673,10 +741,58 @@ async function dispatchApprovalComplete(entityType: ApprovalEntityType, entityId
         data:  { status: InvoiceStatus.APPROVED },
       });
       break;
-    default:
-      // PAYMENT, PURCHASE_ORDER, SALES_INVOICE, EXPENSE_CLAIM, PAYROLL, BANK_TRANSFER,
-      // SUPPLIER_INVOICE: approval is tracked at the ApprovalRequest level only.
+    case ApprovalEntityType.SUPPLIER: {
+      // CREATE: activate the pending record. UPDATE: apply the staged change only.
+      const staged = (changeType === 'UPDATE' && payload && typeof payload === 'object')
+        ? (payload as Prisma.SupplierUpdateInput) : {};
+      await prisma.supplier.updateMany({
+        where: { id: entityId },
+        data:  changeType === 'CREATE'
+          ? { approvalStatus: 'APPROVED', isActive: true }
+          : { ...staged, approvalStatus: 'APPROVED' },
+      });
       break;
+    }
+    case ApprovalEntityType.CUSTOMER: {
+      const staged = (changeType === 'UPDATE' && payload && typeof payload === 'object')
+        ? (payload as Prisma.CustomerUpdateInput) : {};
+      await prisma.customer.updateMany({
+        where: { id: entityId },
+        data:  changeType === 'CREATE'
+          ? { approvalStatus: 'APPROVED', isActive: true }
+          : { ...staged, approvalStatus: 'APPROVED' },
+      });
+      break;
+    }
+    default:
+      // PAYMENT, PURCHASE_ORDER, SALES_INVOICE, EXPENSE_CLAIM, PAYROLL, BANK_TRANSFER:
+      // approval is tracked at the ApprovalRequest level only.
+      break;
+  }
+}
+
+// Reject/withdraw of a master-data change. A rejected CREATE is soft-deleted (it
+// never went live); a rejected UPDATE just discards the staged change, leaving the
+// live record's old values untouched, and clears the pending flag.
+async function rejectMasterDataChange(
+  entityType: ApprovalEntityType,
+  entityId: string,
+  changeType?: string | null,
+) {
+  if (entityType === ApprovalEntityType.SUPPLIER) {
+    await prisma.supplier.updateMany({
+      where: { id: entityId },
+      data: changeType === 'CREATE'
+        ? { approvalStatus: 'REJECTED', isActive: false, isDeleted: true }
+        : { approvalStatus: 'APPROVED' },
+    });
+  } else if (entityType === ApprovalEntityType.CUSTOMER) {
+    await prisma.customer.updateMany({
+      where: { id: entityId },
+      data: changeType === 'CREATE'
+        ? { approvalStatus: 'REJECTED', isActive: false, isDeleted: true }
+        : { approvalStatus: 'APPROVED' },
+    });
   }
 }
 
@@ -782,7 +898,7 @@ async function checkLevelSatisfied(
   });
 
   // Dispatch: update entity status based on type
-  await dispatchApprovalComplete(request.entityType, request.entityId);
+  await dispatchApprovalComplete(request.entityType, request.entityId, request.changeType, request.payload);
 
   await notify(
     [request.requestedBy],
@@ -870,6 +986,8 @@ export async function withdrawRequest(
       data:  { status: InvoiceStatus.DRAFT },
     });
   }
+
+  await rejectMasterDataChange(request.entityType, request.entityId, request.changeType);
 
   return { status: 'WITHDRAWN', requestId: request.id };
 }

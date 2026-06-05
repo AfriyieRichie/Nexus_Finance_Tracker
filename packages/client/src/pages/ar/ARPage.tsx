@@ -1584,9 +1584,16 @@ export function ARPage() {
                       <TableCell className="text-right text-xs font-mono">
                         {c.creditLimit ? fmt(c.creditLimit) : '—'}
                       </TableCell>
-                      <TableCell><Badge variant={c.isActive ? 'success' : 'secondary'}>{c.isActive ? 'Active' : 'Inactive'}</Badge></TableCell>
+                      <TableCell>
+                        {c.approvalStatus === 'PENDING_APPROVAL'
+                          ? <Badge variant="warning">Pending approval</Badge>
+                          : <Badge variant={c.isActive ? 'success' : 'secondary'}>{c.isActive ? 'Active' : 'Inactive'}</Badge>}
+                      </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1">
+                          {activeOrganisationId && (
+                            <AttachmentsDialog organisationId={activeOrganisationId} entityType="CUSTOMER" entityId={c.id} label={`${c.code} KYC`} />
+                          )}
                           {activeOrganisationId && (
                             <CustomerStatementDialog organisationId={activeOrganisationId} customer={c} />
                           )}

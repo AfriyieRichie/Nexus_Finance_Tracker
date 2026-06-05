@@ -4,6 +4,7 @@ import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '.
 import { sendEmail } from '../../config/email';
 import { auditLog } from '../audit-trail/audit.service';
 import * as journalService from '../journals/journal.service';
+import * as approvalService from '../approvals/approval.service';
 import type {
   CreateSupplierInput, UpdateSupplierInput, ListSuppliersQuery,
   CreateSupplierInvoiceInput, ListSupplierInvoicesQuery,
@@ -59,13 +60,16 @@ async function findWhtPayableAccount(organisationId: string) {
 
 // ─── Suppliers ───────────────────────────────────────────────────────────────
 
-export async function createSupplier(organisationId: string, input: CreateSupplierInput) {
+// Fields whose change is governed by master-data approval (fraud-relevant).
+const SUPPLIER_SENSITIVE_FIELDS = ['name', 'taxId', 'paymentTerms', 'bankDetails'] as const;
+
+export async function createSupplier(organisationId: string, input: CreateSupplierInput, userId?: string) {
   const exists = await prisma.supplier.findFirst({
     where: { organisationId, code: input.code, isDeleted: false },
   });
   if (exists) throw new ConflictError(`Supplier code '${input.code}' already exists`);
 
-  return prisma.supplier.create({
+  const supplier = await prisma.supplier.create({
     data: {
       organisationId,
       code: input.code,
@@ -80,38 +84,108 @@ export async function createSupplier(organisationId: string, input: CreateSuppli
       whtClassification: input.whtClassification ?? null,
     },
   });
+
+  auditLog({
+    organisationId, userId, action: 'Created', module: 'AP', entityType: 'Supplier',
+    entityId: supplier.id, entityRef: supplier.code,
+    description: `Created supplier ${supplier.code} – ${supplier.name}`,
+    after: { code: supplier.code, name: supplier.name, taxId: supplier.taxId },
+  });
+
+  // Master-data governance: if a SUPPLIER approval workflow is active, the new
+  // supplier stays inactive (cannot be transacted on) until approved.
+  if (userId) {
+    const { hasWorkflow } = await approvalService.createMasterDataApprovalRequest(
+      organisationId, ApprovalEntityType.SUPPLIER, supplier.id, 'CREATE', undefined, userId,
+    );
+    if (hasWorkflow) {
+      const pending = await prisma.supplier.update({
+        where: { id: supplier.id },
+        data: { approvalStatus: 'PENDING_APPROVAL', isActive: false },
+      });
+      auditLog({
+        organisationId, userId, action: 'SubmittedForApproval', module: 'AP', entityType: 'Supplier',
+        entityId: supplier.id, entityRef: supplier.code,
+        description: `Supplier ${supplier.code} submitted for approval — inactive until approved`,
+      });
+      return pending;
+    }
+  }
+  return supplier;
 }
 
-export async function updateSupplier(organisationId: string, supplierId: string, input: UpdateSupplierInput) {
+export async function updateSupplier(organisationId: string, supplierId: string, input: UpdateSupplierInput, userId?: string) {
   const supplier = await prisma.supplier.findFirst({ where: { id: supplierId, organisationId, isDeleted: false } });
   if (!supplier) throw new NotFoundError('Supplier not found');
+  if (supplier.approvalStatus === 'PENDING_APPROVAL') {
+    throw new ValidationError('This supplier already has a change awaiting approval. Resolve that first.');
+  }
+
+  // Split the edit into fraud-relevant (governed) and routine changes.
+  const current: Record<string, unknown> = {
+    name: supplier.name, taxId: supplier.taxId, paymentTerms: supplier.paymentTerms,
+    bankDetails: supplier.bankDetails,
+  };
+  const sensitiveChanges: Record<string, unknown> = {};
+  for (const f of SUPPLIER_SENSITIVE_FIELDS) {
+    const next = (input as Record<string, unknown>)[f];
+    if (next !== undefined && JSON.stringify(next) !== JSON.stringify(current[f])) {
+      sensitiveChanges[f] = next;
+    }
+  }
+
+  // Apply routine (non-governed) changes immediately.
   const updated = await prisma.supplier.update({
     where: { id: supplierId },
     data: {
-      name: input.name,
       email: input.email,
       phone: input.phone,
       address: input.address as Prisma.InputJsonValue | undefined,
-      taxId: input.taxId,
-      paymentTerms: input.paymentTerms,
-      bankDetails: input.bankDetails as Prisma.InputJsonValue | undefined,
       whtRate: input.whtRate != null ? new Prisma.Decimal(input.whtRate) : undefined,
       whtClassification: input.whtClassification,
     },
   });
 
-  const snap = (s: typeof updated) => ({
-    name: s.name, email: s.email, phone: s.phone, taxId: s.taxId, paymentTerms: s.paymentTerms,
-    whtRate: s.whtRate != null ? Number(s.whtRate) : null, whtClassification: s.whtClassification,
-  });
+  const hasSensitive = Object.keys(sensitiveChanges).length > 0;
+  if (hasSensitive && userId) {
+    const { hasWorkflow } = await approvalService.createMasterDataApprovalRequest(
+      organisationId, ApprovalEntityType.SUPPLIER, supplierId, 'UPDATE',
+      sensitiveChanges as Prisma.InputJsonValue, userId,
+    );
+    if (hasWorkflow) {
+      await prisma.supplier.update({ where: { id: supplierId }, data: { approvalStatus: 'PENDING_APPROVAL' } });
+      auditLog({
+        organisationId, userId, action: 'ChangeSubmittedForApproval', module: 'AP', entityType: 'Supplier',
+        entityId: supplierId, entityRef: supplier.code,
+        description: `Supplier ${supplier.code} sensitive change staged for approval`,
+        before: current, after: sensitiveChanges,
+      });
+      return { ...updated, approvalStatus: 'PENDING_APPROVAL' as const };
+    }
+  }
+
+  // No workflow (or no sensitive change): apply the sensitive fields now too.
+  const final = hasSensitive
+    ? await prisma.supplier.update({
+        where: { id: supplierId },
+        data: {
+          name: sensitiveChanges.name as string | undefined,
+          taxId: sensitiveChanges.taxId as string | undefined,
+          paymentTerms: sensitiveChanges.paymentTerms as number | undefined,
+          bankDetails: sensitiveChanges.bankDetails as Prisma.InputJsonValue | undefined,
+        },
+      })
+    : updated;
+
   auditLog({
-    organisationId, action: 'Updated', module: 'AP', entityType: 'Supplier',
-    entityId: updated.id, entityRef: updated.code,
-    description: `Updated supplier ${updated.code} – ${updated.name}`,
-    before: snap(supplier), after: snap(updated),
+    organisationId, userId, action: 'Updated', module: 'AP', entityType: 'Supplier',
+    entityId: final.id, entityRef: final.code,
+    description: `Updated supplier ${final.code} – ${final.name}`,
+    before: current,
+    after: { name: final.name, taxId: final.taxId, paymentTerms: final.paymentTerms, bankDetails: final.bankDetails },
   });
 
-  return updated;
+  return final;
 }
 
 export async function listSuppliers(organisationId: string, query: ListSuppliersQuery) {

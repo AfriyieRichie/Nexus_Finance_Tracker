@@ -1,7 +1,8 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, ApprovalEntityType } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { ConflictError, NotFoundError, ValidationError, ForbiddenError } from '../../utils/errors';
 import * as journalService from '../journals/journal.service';
+import * as approvalService from '../approvals/approval.service';
 import { createAuditLog, auditLog } from '../audit-trail/audit.service';
 import { sendEmail } from '../../config/email';
 import type {
@@ -22,13 +23,16 @@ async function getUserRole(organisationId: string, userId: string): Promise<stri
 
 // ─── Customers ───────────────────────────────────────────────────────────────
 
-export async function createCustomer(organisationId: string, input: CreateCustomerInput) {
+// Fields whose change is governed by master-data approval.
+const CUSTOMER_SENSITIVE_FIELDS = ['name', 'taxId', 'paymentTerms', 'creditLimit'] as const;
+
+export async function createCustomer(organisationId: string, input: CreateCustomerInput, userId?: string) {
   const exists = await prisma.customer.findFirst({
     where: { organisationId, code: input.code, isDeleted: false },
   });
   if (exists) throw new ConflictError(`Customer code '${input.code}' already exists`);
 
-  return prisma.customer.create({
+  const customer = await prisma.customer.create({
     data: {
       organisationId,
       code: input.code,
@@ -41,39 +45,106 @@ export async function createCustomer(organisationId: string, input: CreateCustom
       paymentTerms: input.paymentTerms,
     },
   });
+
+  auditLog({
+    organisationId, userId, action: 'Created', module: 'AR', entityType: 'Customer',
+    entityId: customer.id, entityRef: customer.code,
+    description: `Created customer ${customer.code} – ${customer.name}`,
+    after: { code: customer.code, name: customer.name, taxId: customer.taxId },
+  });
+
+  // Master-data governance: if a CUSTOMER approval workflow is active, the new
+  // customer stays inactive (cannot be invoiced) until approved.
+  if (userId) {
+    const { hasWorkflow } = await approvalService.createMasterDataApprovalRequest(
+      organisationId, ApprovalEntityType.CUSTOMER, customer.id, 'CREATE', undefined, userId,
+    );
+    if (hasWorkflow) {
+      const pending = await prisma.customer.update({
+        where: { id: customer.id },
+        data: { approvalStatus: 'PENDING_APPROVAL', isActive: false },
+      });
+      auditLog({
+        organisationId, userId, action: 'SubmittedForApproval', module: 'AR', entityType: 'Customer',
+        entityId: customer.id, entityRef: customer.code,
+        description: `Customer ${customer.code} submitted for approval — inactive until approved`,
+      });
+      return pending;
+    }
+  }
+  return customer;
 }
 
-export async function updateCustomer(organisationId: string, customerId: string, input: UpdateCustomerInput) {
+export async function updateCustomer(organisationId: string, customerId: string, input: UpdateCustomerInput, userId?: string) {
   const customer = await prisma.customer.findFirst({
     where: { id: customerId, organisationId, isDeleted: false },
   });
   if (!customer) throw new NotFoundError('Customer not found');
+  if (customer.approvalStatus === 'PENDING_APPROVAL') {
+    throw new ValidationError('This customer already has a change awaiting approval. Resolve that first.');
+  }
 
+  const current: Record<string, unknown> = {
+    name: customer.name, taxId: customer.taxId, paymentTerms: customer.paymentTerms,
+    creditLimit: customer.creditLimit != null ? Number(customer.creditLimit) : null,
+  };
+  const sensitiveChanges: Record<string, unknown> = {};
+  for (const f of CUSTOMER_SENSITIVE_FIELDS) {
+    const next = (input as Record<string, unknown>)[f];
+    if (next !== undefined && JSON.stringify(next) !== JSON.stringify(current[f])) {
+      sensitiveChanges[f] = next;
+    }
+  }
+
+  // Apply routine (non-governed) changes immediately.
   const updated = await prisma.customer.update({
     where: { id: customerId },
     data: {
-      name: input.name,
       email: input.email,
       phone: input.phone,
       address: input.address as Prisma.InputJsonValue | undefined,
-      taxId: input.taxId,
-      creditLimit: input.creditLimit != null ? new Prisma.Decimal(input.creditLimit) : undefined,
-      paymentTerms: input.paymentTerms,
     },
   });
 
-  const snap = (c: typeof updated) => ({
-    name: c.name, email: c.email, phone: c.phone, taxId: c.taxId,
-    creditLimit: c.creditLimit != null ? Number(c.creditLimit) : null, paymentTerms: c.paymentTerms,
-  });
+  const hasSensitive = Object.keys(sensitiveChanges).length > 0;
+  if (hasSensitive && userId) {
+    const { hasWorkflow } = await approvalService.createMasterDataApprovalRequest(
+      organisationId, ApprovalEntityType.CUSTOMER, customerId, 'UPDATE',
+      sensitiveChanges as Prisma.InputJsonValue, userId,
+    );
+    if (hasWorkflow) {
+      await prisma.customer.update({ where: { id: customerId }, data: { approvalStatus: 'PENDING_APPROVAL' } });
+      auditLog({
+        organisationId, userId, action: 'ChangeSubmittedForApproval', module: 'AR', entityType: 'Customer',
+        entityId: customerId, entityRef: customer.code,
+        description: `Customer ${customer.code} sensitive change staged for approval`,
+        before: current, after: sensitiveChanges,
+      });
+      return { ...updated, approvalStatus: 'PENDING_APPROVAL' as const };
+    }
+  }
+
+  const final = hasSensitive
+    ? await prisma.customer.update({
+        where: { id: customerId },
+        data: {
+          name: sensitiveChanges.name as string | undefined,
+          taxId: sensitiveChanges.taxId as string | undefined,
+          paymentTerms: sensitiveChanges.paymentTerms as number | undefined,
+          creditLimit: sensitiveChanges.creditLimit != null ? new Prisma.Decimal(sensitiveChanges.creditLimit as number) : undefined,
+        },
+      })
+    : updated;
+
   auditLog({
-    organisationId, action: 'Updated', module: 'AR', entityType: 'Customer',
-    entityId: updated.id, entityRef: updated.code,
-    description: `Updated customer ${updated.code} – ${updated.name}`,
-    before: snap(customer), after: snap(updated),
+    organisationId, userId, action: 'Updated', module: 'AR', entityType: 'Customer',
+    entityId: final.id, entityRef: final.code,
+    description: `Updated customer ${final.code} – ${final.name}`,
+    before: current,
+    after: { name: final.name, taxId: final.taxId, paymentTerms: final.paymentTerms, creditLimit: final.creditLimit != null ? Number(final.creditLimit) : null },
   });
 
-  return updated;
+  return final;
 }
 
 export async function listCustomers(organisationId: string, query: ListCustomersQuery) {

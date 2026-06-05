@@ -940,9 +940,14 @@ export function APPage() {
                       <TableCell className="text-sm font-medium">{s.name}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">{s.email ?? '—'}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">{s.paymentTerms} days</TableCell>
-                      <TableCell><Badge variant={s.isActive ? 'success' : 'secondary'}>{s.isActive ? 'Active' : 'Inactive'}</Badge></TableCell>
+                      <TableCell>
+                        {s.approvalStatus === 'PENDING_APPROVAL'
+                          ? <Badge variant="warning">Pending approval</Badge>
+                          : <Badge variant={s.isActive ? 'success' : 'secondary'}>{s.isActive ? 'Active' : 'Inactive'}</Badge>}
+                      </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
+                          <AttachmentsDialog organisationId={activeOrganisationId!} entityType="SUPPLIER" entityId={s.id} label={`${s.code} KYC`} />
                           <SupplierStatementDialog
                             organisationId={activeOrganisationId!}
                             supplier={s}

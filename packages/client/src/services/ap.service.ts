@@ -13,6 +13,7 @@ export interface Supplier {
   whtRate: string | null;
   whtClassification: string | null;
   isActive: boolean;
+  approvalStatus?: 'APPROVED' | 'PENDING_APPROVAL' | 'REJECTED';
 }
 
 export interface SupplierInput {

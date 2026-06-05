@@ -32,6 +32,8 @@ export interface ApprovalRequest {
   requester?: { id: string; firstName: string; lastName: string };
   workflow?: { name: string; entityType: string };
   decisions?: ApprovalDecision[];
+  changeType?: string | null;
+  payload?: Record<string, unknown> | null;
 }
 
 export interface ApprovalLevelUser {

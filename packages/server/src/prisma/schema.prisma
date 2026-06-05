@@ -91,6 +91,14 @@ enum ApprovalEntityType {
   PAYROLL
   BANK_TRANSFER
   SUPPLIER_INVOICE
+  SUPPLIER
+  CUSTOMER
+}
+
+enum MasterDataStatus {
+  APPROVED
+  PENDING_APPROVAL
+  REJECTED
 }
 
 enum ApprovalType {
@@ -686,6 +694,9 @@ model ApprovalRequest {
   completedAt  DateTime?
   slaDeadline  DateTime?
   escalatedAt  DateTime?
+  // Master-data approval: CREATE/UPDATE and the staged change to apply on approval.
+  changeType   String?
+  payload      Json?
 
   workflow  ApprovalWorkflow   @relation(fields: [workflowId], references: [id])
   requester User               @relation("ApprovalRequestedBy", fields: [requestedBy], references: [id])
@@ -802,6 +813,7 @@ model Customer {
   paymentTerms   Int      @default(30)
   isActive       Boolean  @default(true)
   isDeleted      Boolean  @default(false)
+  approvalStatus MasterDataStatus @default(APPROVED)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -880,6 +892,7 @@ model Supplier {
   whtClassification String?
   isActive          Boolean  @default(true)
   isDeleted         Boolean  @default(false)
+  approvalStatus    MasterDataStatus @default(APPROVED)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 

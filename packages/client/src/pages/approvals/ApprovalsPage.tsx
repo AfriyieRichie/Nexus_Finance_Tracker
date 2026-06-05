@@ -24,7 +24,7 @@ import { cn } from '@/lib/utils';
 
 const ENTITY_TYPES = [
   'JOURNAL_ENTRY', 'PAYMENT', 'PURCHASE_ORDER', 'SALES_INVOICE', 'SUPPLIER_INVOICE',
-  'EXPENSE_CLAIM', 'BUDGET', 'PAYROLL', 'BANK_TRANSFER',
+  'EXPENSE_CLAIM', 'BUDGET', 'PAYROLL', 'BANK_TRANSFER', 'SUPPLIER', 'CUSTOMER',
 ];
 
 const APPROVAL_TYPES = [
@@ -367,6 +367,42 @@ function RequestDetailDialog({ organisationId, requestId, onClose }: { organisat
 
           {/* Supporting documents attached to the transaction — review before deciding */}
           <Attachments organisationId={organisationId} entityType={request.entityType} entityId={request.entityId} title="Supporting documents" readOnly />
+
+          {/* Master-data change detail (SUPPLIER / CUSTOMER) */}
+          {(request.entityType === 'SUPPLIER' || request.entityType === 'CUSTOMER') && (
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                {request.entityType === 'SUPPLIER' ? 'Supplier' : 'Customer'} {request.changeType === 'CREATE' ? 'creation' : 'change'} — review before approving
+              </p>
+              {request.changeType === 'CREATE' ? (
+                <p className="text-xs text-muted-foreground bg-muted/30 rounded-lg p-3">
+                  A new {request.entityType.toLowerCase()} record was created and is inactive until approved. Approving activates it; rejecting removes it.
+                </p>
+              ) : request.payload && Object.keys(request.payload).length > 0 ? (
+                <div className="border rounded-lg overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead><tr className="bg-muted/40 border-b">
+                      <th className="px-3 py-2 text-left font-medium text-muted-foreground">Field</th>
+                      <th className="px-3 py-2 text-left font-medium text-muted-foreground">Proposed new value</th>
+                    </tr></thead>
+                    <tbody>
+                      {Object.entries(request.payload).map(([k, v]) => (
+                        <tr key={k} className="border-b last:border-0">
+                          <td className="px-3 py-2 font-medium">{k}</td>
+                          <td className="px-3 py-2 font-mono">{typeof v === 'object' ? JSON.stringify(v) : String(v)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p className="text-[10px] text-amber-600 px-3 py-2 border-t bg-amber-50/50">
+                    These changes are staged and only take effect once approved. The live record keeps its current values until then.
+                  </p>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">No staged field changes.</p>
+              )}
+            </div>
+          )}
 
           {/* Journal detail */}
           {isJournal && (journalLoading ? (

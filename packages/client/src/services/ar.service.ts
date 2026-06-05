@@ -10,6 +10,7 @@ export interface Customer {
   creditLimit: string | null;
   paymentTerms: number;
   isActive: boolean;
+  approvalStatus?: 'APPROVED' | 'PENDING_APPROVAL' | 'REJECTED';
   address: { street?: string; city?: string; country?: string } | null;
 }
 

@@ -14,14 +14,14 @@ import * as arService from './ar.service';
 export const createCustomer = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId } = req.params;
   const input = createCustomerSchema.parse(req.body);
-  const customer = await arService.createCustomer(organisationId, input);
+  const customer = await arService.createCustomer(organisationId, input, req.user!.sub);
   return sendCreated(res, customer, 'Customer created');
 });
 
 export const updateCustomer = asyncHandler(async (req: Request, res: Response) => {
   const { organisationId, customerId } = req.params;
   const input = updateCustomerSchema.parse(req.body);
-  const customer = await arService.updateCustomer(organisationId, customerId, input);
+  const customer = await arService.updateCustomer(organisationId, customerId, input, req.user!.sub);
   return sendSuccess(res, customer, 'Customer updated');
 });
 
