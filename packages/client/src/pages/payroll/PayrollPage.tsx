@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Users, Settings, Play, Download, ChevronDown, ChevronRight, CheckCircle, XCircle, Plus, Trash2, Lock, Check } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
+import { PayrollReportsPage } from './PayrollReportsPage';
 import * as payrollSvc from '@/services/payroll.service';
 import type { PayrollRun, Employee, SalaryComponent, Payslip, SalaryComponentType, EmployeeLoan, OvertimeType } from '@/services/payroll.service';
 import { listAccounts } from '@/services/accounts.service';
@@ -1577,13 +1578,14 @@ function RunsTab({ organisationId }: { organisationId: string }) {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-type Tab = 'runs' | 'employees' | 'components' | 'statutory';
+type Tab = 'runs' | 'employees' | 'components' | 'statutory' | 'reports';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'runs',       label: 'Payroll Runs' },
   { key: 'employees',  label: 'Employees' },
   { key: 'components', label: 'Salary Components' },
   { key: 'statutory',  label: 'Statutory Config' },
+  { key: 'reports',    label: 'Reports' },
 ];
 
 export function PayrollPage() {
@@ -1606,6 +1608,7 @@ export function PayrollPage() {
       {tab === 'employees'  && <EmployeesTab        organisationId={orgId} />}
       {tab === 'components' && <SalaryComponentsTab organisationId={orgId} />}
       {tab === 'statutory'  && <StatutoryTab        organisationId={orgId} />}
+      {tab === 'reports'    && <PayrollReportsPage />}
     </div>
   );
 }

@@ -172,3 +172,42 @@ export const listPayrollEntries = asyncHandler(async (req: Request, res: Respons
   const { entries, pagination } = await svc.listPayrollEntries(req.params.organisationId, { page, pageSize });
   return sendPaginated(res, entries, pagination);
 });
+
+// ─── Reports ────────────────────────────────────────────────────────────────
+
+import * as reports from './payroll.reports';
+
+function reportFilters(req: Request): reports.ReportFilters {
+  const q = req.query;
+  return {
+    runId: (q.runId as string) || undefined,
+    year: q.year ? parseInt(q.year as string, 10) : undefined,
+    month: q.month ? parseInt(q.month as string, 10) : undefined,
+    departmentId: (q.departmentId as string) || undefined,
+    employeeId: (q.employeeId as string) || undefined,
+  };
+}
+
+export const reportRegister = asyncHandler(async (req: Request, res: Response) => {
+  return sendSuccess(res, await reports.getPayrollRegister(req.params.organisationId, reportFilters(req)));
+});
+
+export const reportStatutory = asyncHandler(async (req: Request, res: Response) => {
+  return sendSuccess(res, await reports.getStatutoryReport(req.params.organisationId, reportFilters(req)));
+});
+
+export const reportGlSummary = asyncHandler(async (req: Request, res: Response) => {
+  return sendSuccess(res, await reports.getPayrollGlSummary(req.params.organisationId, req.query.runId as string));
+});
+
+export const reportBank = asyncHandler(async (req: Request, res: Response) => {
+  return sendSuccess(res, await reports.getBankDisbursement(req.params.organisationId, reportFilters(req)));
+});
+
+export const reportDepartment = asyncHandler(async (req: Request, res: Response) => {
+  return sendSuccess(res, await reports.getDepartmentCostAnalysis(req.params.organisationId, reportFilters(req)));
+});
+
+export const reportEmployeeYtd = asyncHandler(async (req: Request, res: Response) => {
+  return sendSuccess(res, await reports.getEmployeeYtd(req.params.organisationId, reportFilters(req)));
+});

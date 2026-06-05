@@ -323,3 +323,47 @@ export const listPayrollEntries = (organisationId: string, params?: { page?: num
     entries: r.data.data,
     total:   r.data.pagination?.total ?? 0,
   }));
+
+// ─── Reports ────────────────────────────────────────────────────────────────
+
+export interface PayrollReportMeta {
+  type: 'run' | 'period';
+  runNumber?: string;
+  description?: string;
+  paymentDate?: string;
+  status?: string;
+  year?: number;
+  month?: number | null;
+}
+
+export type ReportRow = Record<string, string | number | boolean>;
+
+export interface PayrollReport {
+  meta: PayrollReportMeta;
+  rows: ReportRow[];
+  totals: Record<string, number | boolean>;
+}
+
+export interface PayrollGlReport {
+  meta: PayrollReportMeta;
+  lines: { account: string; description: string; debit: number; credit: number }[];
+  totals: { totalDebit: number; totalCredit: number; balanced: boolean };
+}
+
+export interface ReportParams {
+  runId?: string;
+  year?: number;
+  month?: number;
+  departmentId?: string;
+  employeeId?: string;
+}
+
+const reportGet = <T>(organisationId: string, path: string, params: ReportParams) =>
+  api.get(`/organisations/${organisationId}/payroll/reports/${path}`, { params }).then((r) => r.data.data as T);
+
+export const reportRegister     = (orgId: string, p: ReportParams) => reportGet<PayrollReport>(orgId, 'register', p);
+export const reportStatutory    = (orgId: string, p: ReportParams) => reportGet<PayrollReport>(orgId, 'statutory', p);
+export const reportBank         = (orgId: string, p: ReportParams) => reportGet<PayrollReport>(orgId, 'bank', p);
+export const reportDepartment   = (orgId: string, p: ReportParams) => reportGet<PayrollReport>(orgId, 'department', p);
+export const reportEmployeeYtd  = (orgId: string, p: ReportParams) => reportGet<PayrollReport>(orgId, 'employee-ytd', p);
+export const reportGlSummary    = (orgId: string, p: ReportParams) => reportGet<PayrollGlReport>(orgId, 'gl-summary', p);

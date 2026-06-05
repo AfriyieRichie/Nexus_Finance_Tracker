@@ -41,6 +41,14 @@ payrollRouter.post('/runs/:id/pay',             requireRole(FINANCE_MANAGER), ct
 payrollRouter.post('/runs/:id/lock',            requireRole(FINANCE_MANAGER), ctrl.lockPayrollRun);
 payrollRouter.get('/runs/:id/payment-file',     requireRole(FINANCE_MANAGER), ctrl.downloadPaymentFile);
 
+// ─── Reports ─────────────────────────────────────────────────────────────────
+payrollRouter.get('/reports/register',          requireRole(REPORT_VIEWER),   ctrl.reportRegister);
+payrollRouter.get('/reports/statutory',         requireRole(REPORT_VIEWER),   ctrl.reportStatutory);
+payrollRouter.get('/reports/gl-summary',        requireRole(REPORT_VIEWER),   ctrl.reportGlSummary);
+payrollRouter.get('/reports/bank',              requireRole(REPORT_VIEWER),   ctrl.reportBank);
+payrollRouter.get('/reports/department',        requireRole(REPORT_VIEWER),   ctrl.reportDepartment);
+payrollRouter.get('/reports/employee-ytd',      requireRole(REPORT_VIEWER),   ctrl.reportEmployeeYtd);
+
 // ─── Legacy journal-based payroll ────────────────────────────────────────────
 payrollRouter.get('/',                          requireRole(REPORT_VIEWER),   ctrl.listPayrollEntries);
 payrollRouter.post('/',                         requireRole(FINANCE_MANAGER), ctrl.processPayroll);
