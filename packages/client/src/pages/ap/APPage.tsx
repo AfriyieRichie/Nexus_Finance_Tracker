@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ShoppingCart, Plus, FileText, TrendingDown, Trash2, Pencil, BookOpen, Printer, Mail } from 'lucide-react';
+import { ShoppingCart, Plus, FileText, TrendingDown, Trash2, Pencil, BookOpen, Printer, Mail, Eye, CreditCard } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/stores/auth.store';
-import { listSuppliers, createSupplier, updateSupplier, getSupplierStatement, emailSupplierStatement, listSupplierInvoices, createSupplierInvoice, postSupplierInvoice, submitInvoiceForApproval, approveSupplierInvoice, rejectSupplierInvoice, getApAgeing } from '@/services/ap.service';
+import { listSuppliers, createSupplier, updateSupplier, getSupplierStatement, emailSupplierStatement, listSupplierInvoices, createSupplierInvoice, postSupplierInvoice, submitInvoiceForApproval, approveSupplierInvoice, rejectSupplierInvoice, getSupplierInvoice, recordSupplierPayment, getApAgeing } from '@/services/ap.service';
 import { listWorkflows } from '@/services/approvals.service';
+import { uploadAttachment } from '@/services/attachments.service';
 import type { Supplier, SupplierInput, SupplierStatement } from '@/services/ap.service';
 import { listAccounts } from '@/services/accounts.service';
 import { listTaxCodes } from '@/services/tax.service';
@@ -627,6 +629,196 @@ function PostSupplierInvoiceButton({ organisationId, invoiceId, invoiceDate, sta
   );
 }
 
+// ─── Supplier invoice detail (view) ───────────────────────────────────────────
+
+const fmtMoney = (v: string | number) => Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+function SupplierInvoiceDetailDialog({ organisationId, invoiceId, trigger }: { organisationId: string; invoiceId: string; trigger: React.ReactNode }) {
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const { data: inv, isLoading } = useQuery({
+    queryKey: ['ap-invoice', invoiceId],
+    queryFn: () => getSupplierInvoice(organisationId, invoiceId),
+    enabled: open,
+  });
+  const outstanding = inv ? Number(inv.totalAmount) - Number(inv.amountPaid) : 0;
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>{trigger}</DialogTrigger>
+      <DialogContent className="max-w-2xl" title="Supplier Invoice" description="">
+        {isLoading ? (
+          <div className="space-y-2">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}</div>
+        ) : inv ? (
+          <div className="space-y-4">
+            <div className="grid grid-cols-3 gap-3 text-xs">
+              <div><p className="text-muted-foreground">Invoice #</p><p className="font-mono font-semibold">{inv.invoiceNumber}</p></div>
+              <div><p className="text-muted-foreground">Supplier</p><p className="font-medium">{inv.supplier?.name}</p></div>
+              <div><p className="text-muted-foreground">Status</p><Badge variant={STATUS_VARIANT[inv.status] ?? 'secondary'}>{inv.status.replace(/_/g, ' ')}</Badge></div>
+              <div><p className="text-muted-foreground">Supplier Ref</p><p>{inv.supplierRef ?? '—'}</p></div>
+              <div><p className="text-muted-foreground">Invoice Date</p><p>{new Date(inv.invoiceDate).toLocaleDateString()}</p></div>
+              <div><p className="text-muted-foreground">Due Date</p><p>{new Date(inv.dueDate).toLocaleDateString()}</p></div>
+            </div>
+
+            {inv.lines && inv.lines.length > 0 && (
+              <div className="border rounded-md overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/50"><tr>
+                    <th className="text-left px-3 py-2 font-medium">Description</th>
+                    <th className="text-right px-3 py-2 font-medium">Qty</th>
+                    <th className="text-right px-3 py-2 font-medium">Unit Price</th>
+                    <th className="text-right px-3 py-2 font-medium">Tax</th>
+                    <th className="text-right px-3 py-2 font-medium">Total</th>
+                  </tr></thead>
+                  <tbody>
+                    {inv.lines.map((l) => (
+                      <tr key={l.id} className="border-t">
+                        <td className="px-3 py-2">{l.description}</td>
+                        <td className="px-3 py-2 text-right">{Number(l.quantity).toFixed(2)}</td>
+                        <td className="px-3 py-2 text-right">{fmtMoney(l.unitPrice)}</td>
+                        <td className="px-3 py-2 text-right">{fmtMoney(l.taxAmount)}</td>
+                        <td className="px-3 py-2 text-right font-medium">{fmtMoney(l.lineTotal)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="flex justify-end">
+              <div className="text-xs space-y-1 w-48">
+                <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span>{fmtMoney(inv.subtotal)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Tax</span><span>{fmtMoney(inv.taxAmount)}</span></div>
+                <div className="flex justify-between font-semibold border-t pt-1"><span>Total</span><span>{fmtMoney(inv.totalAmount)} {inv.currency}</span></div>
+                <div className="flex justify-between text-muted-foreground"><span>Paid</span><span>{fmtMoney(inv.amountPaid)}</span></div>
+                <div className={cn('flex justify-between font-semibold', outstanding > 0 && 'text-destructive')}><span>Outstanding</span><span>{fmtMoney(outstanding)}</span></div>
+              </div>
+            </div>
+
+            {inv.supplierPayments && inv.supplierPayments.length > 0 && (
+              <div className="border-t pt-2">
+                <p className="text-xs font-semibold mb-1">Payment history</p>
+                <div className="space-y-1">
+                  {inv.supplierPayments.map((p) => (
+                    <div key={p.id} className="flex justify-between text-xs text-muted-foreground">
+                      <span>{new Date(p.paymentDate).toLocaleDateString()}{p.reference ? ` · ${p.reference}` : ''}</span>
+                      <span>{fmtMoney(p.amount)}{Number(p.whtAmount) > 0 ? ` (WHT ${fmtMoney(p.whtAmount)})` : ''}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {inv.journalEntryId && (
+              <div className="flex items-center justify-between pt-2 border-t">
+                <span className="text-xs text-muted-foreground">Journal entry posted</span>
+                <Button variant="outline" size="sm" onClick={() => { setOpen(false); navigate(`/journals/${inv.journalEntryId}`); }}>View Journal</Button>
+              </div>
+            )}
+          </div>
+        ) : null}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Record supplier payment ──────────────────────────────────────────────────
+
+function RecordSupplierPaymentDialog({ organisationId, invoice, trigger }: {
+  organisationId: string;
+  invoice: { id: string; invoiceNumber: string; currency: string; totalAmount: string; amountPaid: string };
+  trigger: React.ReactNode;
+}) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const outstanding = Number(invoice.totalAmount) - Number(invoice.amountPaid);
+  const [amount, setAmount] = useState(outstanding.toFixed(2));
+  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
+  const [bankAccountId, setBankAccountId] = useState('');
+  const [periodId, setPeriodId] = useState('');
+  const [reference, setReference] = useState('');
+  const [applyWht, setApplyWht] = useState(true);
+  const [receipt, setReceipt] = useState<File | null>(null);
+
+  const { data: accountsData } = useQuery({
+    queryKey: ['accounts', organisationId, 'bank-cash'],
+    queryFn: () => listAccounts(organisationId, { pageSize: 200 } as Parameters<typeof listAccounts>[1]),
+    enabled: open,
+  });
+  const { data: periodsData } = useQuery({
+    queryKey: ['periods', organisationId],
+    queryFn: () => listPeriods(organisationId),
+    enabled: open,
+  });
+  const bankAccounts = (accountsData?.accounts ?? []).filter((a) => (a.type === 'BANK' || a.type === 'CASH') && a.isActive && !a.isControlAccount);
+  const openPeriods = (periodsData ?? []).filter((p) => p.status === 'OPEN');
+
+  const handleOpen = (v: boolean) => {
+    setOpen(v);
+    if (v) {
+      setAmount(outstanding.toFixed(2)); setPaymentDate(new Date().toISOString().split('T')[0]);
+      setBankAccountId(''); setPeriodId(''); setReference(''); setApplyWht(true); setReceipt(null);
+    }
+  };
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const result = await recordSupplierPayment(organisationId, {
+        supplierInvoiceId: invoice.id, amount: Number(amount), paymentDate, bankAccountId, periodId,
+        reference: reference || undefined, applyWht,
+      });
+      if (receipt && result.journalEntryId) {
+        try { await uploadAttachment(organisationId, 'JOURNAL_ENTRY', result.journalEntryId, receipt); } catch { /* don't fail the payment if upload fails */ }
+      }
+      return result;
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['ap-invoices'] });
+      void qc.invalidateQueries({ queryKey: ['ap-ageing'] });
+      setOpen(false);
+    },
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpen}>
+      <DialogTrigger asChild>{trigger}</DialogTrigger>
+      <DialogContent title="Record Payment" description={`Paying ${invoice.invoiceNumber}. Outstanding: ${fmtMoney(outstanding)} ${invoice.currency}`}>
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="text-xs font-medium mb-1 block">Amount *</label>
+              <Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} max={outstanding} className="h-8 text-xs" /></div>
+            <div><label className="text-xs font-medium mb-1 block">Payment Date *</label>
+              <Input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} className="h-8 text-xs" /></div>
+          </div>
+          <div><label className="text-xs font-medium mb-1 block">Bank / Cash Account *</label>
+            <AccountSelect value={bankAccountId} onChange={setBankAccountId} accounts={bankAccounts} placeholder="Select account…" /></div>
+          <div><label className="text-xs font-medium mb-1 block">Accounting Period *</label>
+            <Select value={periodId} onChange={(e) => setPeriodId(e.target.value)} className="h-8 text-xs">
+              <option value="">Select period…</option>
+              {openPeriods.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </Select></div>
+          <div><label className="text-xs font-medium mb-1 block">Reference</label>
+            <Input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Cheque / transfer reference" className="h-8 text-xs" /></div>
+          <label className="flex items-center gap-2 text-xs">
+            <input type="checkbox" checked={applyWht} onChange={(e) => setApplyWht(e.target.checked)} />
+            Apply withholding tax (if configured on the supplier)
+          </label>
+          <div><label className="text-xs font-medium mb-1 block">Receipt / proof of payment <span className="text-muted-foreground font-normal">(optional)</span></label>
+            <Input type="file" accept="application/pdf,image/*" onChange={(e) => setReceipt(e.target.files?.[0] ?? null)} className="h-8 text-xs" />
+            {receipt && <p className="text-[10px] text-muted-foreground mt-0.5">{receipt.name} — attaches to this payment's journal entry.</p>}</div>
+          {mutation.isError && <p className="text-xs text-destructive">{errMsg(mutation.error)}</p>}
+          <div className="flex justify-end gap-2 pt-1">
+            <DialogClose asChild><Button variant="outline" size="sm">Cancel</Button></DialogClose>
+            <Button size="sm" disabled={!amount || !bankAccountId || !periodId || Number(amount) <= 0 || mutation.isPending} onClick={() => mutation.mutate()}>
+              {mutation.isPending ? 'Recording…' : 'Record Payment'}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─── Submit-for-approval button ───────────────────────────────────────────────
 
 function SubmitForApprovalButton({ organisationId, invoiceId }: { organisationId: string; invoiceId: string }) {
@@ -900,7 +1092,19 @@ export function APPage() {
                       <TableCell>
                         {activeOrganisationId && (
                           <div className="flex items-center justify-end gap-1">
+                            <SupplierInvoiceDetailDialog
+                              organisationId={activeOrganisationId}
+                              invoiceId={inv.id}
+                              trigger={<button className="p-1.5 rounded hover:bg-muted text-muted-foreground" title="View invoice"><Eye size={14} /></button>}
+                            />
                             <AttachmentsDialog organisationId={activeOrganisationId} entityType="SUPPLIER_INVOICE" entityId={inv.id} label={inv.invoiceNumber} />
+                            {['SENT', 'PARTIALLY_PAID', 'OVERDUE'].includes(inv.status) && (Number(inv.totalAmount) - Number(inv.amountPaid)) > 0 && (
+                              <RecordSupplierPaymentDialog
+                                organisationId={activeOrganisationId}
+                                invoice={inv}
+                                trigger={<button className="p-1.5 rounded hover:bg-muted text-emerald-600" title="Record payment"><CreditCard size={14} /></button>}
+                              />
+                            )}
                             <SupplierInvoiceActionCell organisationId={activeOrganisationId} inv={inv} workflowActive={apWorkflowActive} canApprove={canApprove} />
                           </div>
                         )}

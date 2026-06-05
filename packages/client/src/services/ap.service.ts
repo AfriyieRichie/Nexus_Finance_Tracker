@@ -123,11 +123,30 @@ export async function rejectSupplierInvoice(organisationId: string, invoiceId: s
   return res.data.data;
 }
 
+export interface SupplierInvoiceDetail extends SupplierInvoice {
+  notes?: string | null;
+  journalEntryId?: string | null;
+  exchangeRate?: string;
+  lines: Array<{ id: string; lineNumber: number; description: string; quantity: string; unitPrice: string; taxCode: string | null; taxAmount: string; lineTotal: string }>;
+  supplierPayments: Array<{ id: string; paymentDate: string; amount: string; whtAmount: string; reference: string | null; journalEntryId: string | null }>;
+}
+
+export async function getSupplierInvoice(organisationId: string, invoiceId: string) {
+  const res = await api.get(`/organisations/${organisationId}/ap/invoices/${invoiceId}`);
+  return res.data.data as SupplierInvoiceDetail;
+}
+
+export async function listSupplierPayments(organisationId: string, invoiceId: string) {
+  const res = await api.get(`/organisations/${organisationId}/ap/invoices/${invoiceId}/payments`);
+  return res.data.data;
+}
+
 export async function recordSupplierPayment(organisationId: string, data: {
   supplierInvoiceId: string; amount: number; paymentDate: string; bankAccountId: string; periodId: string;
+  reference?: string; applyWht?: boolean;
 }) {
   const res = await api.post(`/organisations/${organisationId}/ap/payments`, data);
-  return res.data.data;
+  return res.data.data as { paymentId: string; status: string; amountPaid: string; whtDeducted: string; netCashOut: string; journalEntryId: string };
 }
 
 export async function getApAgeing(organisationId: string) {
