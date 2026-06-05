@@ -411,18 +411,41 @@ export async function listPendingCapitalisations(organisationId: string) {
 
   return {
     clearingAccountId: clearingId,
-    items: lines.map((l) => ({
-      lineId: l.id,
-      supplierInvoiceId: l.supplierInvoice.id,
-      invoiceNumber: l.supplierInvoice.invoiceNumber,
-      invoiceDate: l.supplierInvoice.invoiceDate,
-      status: l.supplierInvoice.status,
-      supplierName: l.supplierInvoice.supplier.name,
-      supplierCode: l.supplierInvoice.supplier.code,
-      description: l.description,
-      amount: Number(l.lineTotal) - Number(l.taxAmount), // net posted to clearing
-    })),
+    items: lines.map((l) => {
+      const amount = Number(l.lineTotal) - Number(l.taxAmount); // net posted to clearing
+      const quantity = Math.max(1, Math.round(Number(l.quantity)));
+      return {
+        lineId: l.id,
+        supplierInvoiceId: l.supplierInvoice.id,
+        invoiceNumber: l.supplierInvoice.invoiceNumber,
+        invoiceDate: l.supplierInvoice.invoiceDate,
+        status: l.supplierInvoice.status,
+        supplierName: l.supplierInvoice.supplier.name,
+        supplierCode: l.supplierInvoice.supplier.code,
+        description: l.description,
+        amount,
+        quantity,
+        unitCost: quantity > 0 ? amount / quantity : amount,
+      };
+    }),
   };
+}
+
+// Next N structured asset codes for a category: {categoryCode}-{zero-padded seq},
+// continuing from the highest existing sequence already used by that category.
+async function nextAssetCodes(organisationId: string, categoryCode: string, count: number): Promise<string[]> {
+  const existing = await prisma.fixedAsset.findMany({
+    where: { organisationId, code: { startsWith: `${categoryCode}-` }, isDeleted: false },
+    select: { code: true },
+  });
+  const re = new RegExp(`^${categoryCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-(\\d+)$`);
+  let max = 0;
+  for (const a of existing) {
+    const m = a.code.match(re);
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  const width = 4;
+  return Array.from({ length: count }, (_, i) => `${categoryCode}-${String(max + 1 + i).padStart(width, '0')}`);
 }
 
 export async function capitaliseFromClearing(organisationId: string, input: CapitaliseFromClearingInput, userId: string) {
@@ -439,13 +462,51 @@ export async function capitaliseFromClearing(organisationId: string, input: Capi
     throw new ValidationError('The supplier invoice must be posted before capitalising.');
   }
 
-  const cost = Number(line.lineTotal) - Number(line.taxAmount);
+  const totalCost = Number(line.lineTotal) - Number(line.taxAmount);
 
-  // Create the asset record only (no journal — createAsset auto-posts solely when
-  // a supplier/credit account is supplied, which we omit here).
-  const { sourceLineId: _sourceLineId, ...assetDetails } = input;
-  const asset = await createAsset(organisationId, { ...assetDetails, acquisitionCost: cost }, userId);
-  if (!asset.assetAccountId) {
+  // Category drives both the GL accounts and the structured asset code.
+  const category = await prisma.assetCategory.findFirst({
+    where: { id: input.categoryId, organisationId },
+    select: { code: true, name: true },
+  });
+  if (!category) throw new NotFoundError('Asset category not found');
+
+  // Split the line into N identical units. Each carries an equal share of the
+  // cost; the final unit absorbs the rounding remainder so the shares sum exactly
+  // to the line total (clearing nets to zero).
+  const qty = Math.max(1, input.quantity);
+  const perUnit = new Prisma.Decimal(totalCost).dividedBy(qty).toDecimalPlaces(2);
+  const unitCosts = Array.from({ length: qty }, (_, i) =>
+    i < qty - 1 ? perUnit : new Prisma.Decimal(totalCost).minus(perUnit.times(qty - 1)),
+  );
+  if (unitCosts.some((c) => c.lessThanOrEqualTo(0))) {
+    throw new ValidationError(`Cost ${totalCost} cannot be split across ${qty} assets — each unit must be positive.`);
+  }
+
+  const codes = await nextAssetCodes(organisationId, category.code, qty);
+  const { sourceLineId: _sourceLineId, categoryId, quantity: _q, serialNumbers, ...rest } = input;
+
+  // Create the N asset records only (no journal — createAsset auto-posts solely
+  // when a supplier/credit account is supplied, which we omit here).
+  const assets = [];
+  for (let i = 0; i < qty; i++) {
+    const asset = await createAsset(
+      organisationId,
+      {
+        ...rest,
+        code: codes[i],
+        category: category.name,
+        categoryId,
+        serialNumber: serialNumbers?.[i] || rest.serialNumber,
+        acquisitionCost: Number(unitCosts[i]),
+      },
+      userId,
+    );
+    assets.push(asset);
+  }
+
+  const assetAccountId = assets[0].assetAccountId;
+  if (!assetAccountId) {
     throw new ValidationError('No asset cost account resolved — choose a category that has an Asset Cost Account, or set the GL accounts.');
   }
 
@@ -458,30 +519,33 @@ export async function capitaliseFromClearing(organisationId: string, input: Capi
   });
   if (!period) throw new ValidationError('No open accounting period for the acquisition date.');
 
-  // Move the cost out of clearing into the asset cost account.
+  // One journal moves the whole line cost out of clearing into the asset cost
+  // account (all units share the same category cost account). Clearing nets to zero.
+  const label = qty > 1 ? `${assets[0].name} ×${qty} (${codes[0]}–${codes[qty - 1]})` : `${assets[0].name} (${codes[0]})`;
   await journalService.createAndPostSystemEntry(
     organisationId,
     {
       type: 'GENERAL',
-      description: `Asset capitalisation — ${asset.name} (${asset.code})`,
+      description: `Asset capitalisation — ${label}`,
       entryDate: input.acquisitionDate,
       periodId: period.id,
       currency, exchangeRate: 1,
       lines: [
-        { accountId: asset.assetAccountId, description: `Asset cost — ${asset.name}`, debitAmount: cost, creditAmount: 0, currency, exchangeRate: 1 },
-        { accountId: clearingId, description: `FA clearing — ${asset.name}`, debitAmount: 0, creditAmount: cost, currency, exchangeRate: 1 },
+        { accountId: assetAccountId, description: `Asset cost — ${label}`, debitAmount: totalCost, creditAmount: 0, currency, exchangeRate: 1 },
+        { accountId: clearingId, description: `FA clearing — ${label}`, debitAmount: 0, creditAmount: totalCost, currency, exchangeRate: 1 },
       ],
     },
     userId,
   );
 
-  await prisma.supplierInvoiceLine.update({ where: { id: line.id }, data: { capitalisedAssetId: asset.id } });
-  await prisma.fixedAsset.update({
-    where: { id: asset.id },
+  // Consume the clearing line (representative asset id) and stamp acquisition source.
+  await prisma.supplierInvoiceLine.update({ where: { id: line.id }, data: { capitalisedAssetId: assets[0].id } });
+  await prisma.fixedAsset.updateMany({
+    where: { id: { in: assets.map((a) => a.id) } },
     data: { acquisitionSupplierId: line.supplierInvoice.supplierId, acquisitionSupplierInvoiceId: line.supplierInvoice.id },
   });
 
-  return asset;
+  return { count: assets.length, codes, assets };
 }
 
 export async function updateAsset(organisationId: string, assetId: string, input: UpdateAssetInput) {

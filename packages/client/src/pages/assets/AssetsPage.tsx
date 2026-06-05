@@ -50,6 +50,8 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
   });
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
   const [acqMode, setAcqMode] = useState<'cash' | 'credit' | 'none'>('none');
+  const [quantity, setQuantity] = useState('1');
+  const [serials, setSerials] = useState<string[]>([]);
 
   const { data: categories = [] } = useQuery({
     queryKey: ['asset-categories', organisationId],
@@ -70,6 +72,7 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
     setSourceLineId(lineId);
     const item = pendingItems.find((p) => p.lineId === lineId);
     if (item) {
+      setQuantity(String(item.quantity || 1));
       setForm((f) => ({
         ...f,
         name: f.name || item.description || '',
@@ -78,6 +81,16 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
       }));
     }
   };
+
+  const selectedCategory = categories.find((c) => c.id === form.categoryId);
+  const qtyNum = Math.max(1, Math.floor(Number(quantity) || 1));
+  // Live preview of the structured codes that will be generated.
+  const codePreview = selectedCategory
+    ? qtyNum > 1
+      ? `${selectedCategory.code}-#### … ${selectedCategory.code}-#### (×${qtyNum})`
+      : `${selectedCategory.code}-####`
+    : '— select a category —';
+  const perUnitCost = selectedPending ? selectedPending.amount / qtyNum : 0;
 
   const { data: bankAccountsData } = useQuery({
     queryKey: ['accounts-bank', organisationId],
@@ -124,16 +137,34 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
     unitsOfProductionTotal: form.unitsOfProductionTotal ? Number(form.unitsOfProductionTotal) : undefined,
   });
 
-  const mutation = useMutation({
-    mutationFn: () =>
-      mode === 'clearing'
-        ? assetSvc.capitaliseFromClearing(organisationId, { sourceLineId, ...assetDetails() })
-        : assetSvc.createAsset(organisationId, {
-            ...assetDetails(),
-            acquisitionCost: Number(form.acquisitionCost),
-            acquisitionCreditAccountId: acqMode === 'cash' ? (form.acquisitionCreditAccountId || undefined) : undefined,
-            supplierId: acqMode === 'credit' ? (form.supplierId || undefined) : undefined,
-          }),
+  const mutation = useMutation<assetSvc.CapitalisationResult | assetSvc.FixedAsset>({
+    mutationFn: () => {
+      if (mode === 'clearing') {
+        const d = assetDetails();
+        return assetSvc.capitaliseFromClearing(organisationId, {
+          sourceLineId,
+          categoryId: form.categoryId,
+          quantity: qtyNum,
+          serialNumbers: serials.slice(0, qtyNum).map((s) => s.trim()).some(Boolean)
+            ? serials.slice(0, qtyNum).map((s) => s.trim())
+            : undefined,
+          name: d.name,
+          serialNumber: qtyNum === 1 ? d.serialNumber : undefined,
+          location: d.location,
+          acquisitionDate: d.acquisitionDate,
+          residualValue: d.residualValue,
+          usefulLifeMonths: d.usefulLifeMonths,
+          depreciationMethod: d.depreciationMethod,
+          unitsOfProductionTotal: d.unitsOfProductionTotal,
+        });
+      }
+      return assetSvc.createAsset(organisationId, {
+        ...assetDetails(),
+        acquisitionCost: Number(form.acquisitionCost),
+        acquisitionCreditAccountId: acqMode === 'cash' ? (form.acquisitionCreditAccountId || undefined) : undefined,
+        supplierId: acqMode === 'credit' ? (form.supplierId || undefined) : undefined,
+      });
+    },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['assets'] });
       void qc.invalidateQueries({ queryKey: ['ap-invoices'] });
@@ -144,7 +175,7 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
 
   const canSubmit =
     mode === 'clearing'
-      ? !!sourceLineId && !!form.code && !!form.name && !mutation.isPending
+      ? !!sourceLineId && !!form.categoryId && !!form.name && qtyNum >= 1 && !mutation.isPending
       : !!form.code && !!form.name && !!form.acquisitionCost && !mutation.isPending;
 
   return (
@@ -191,29 +222,69 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
                   Raise a supplier bill in Payables with a line coded to the <strong>Fixed Asset Clearing</strong> account. Once posted it will appear here ready to capitalise.
                 </p>
               )}
+
+              {selectedPending && (
+                <div className="grid grid-cols-2 gap-3 mt-2 pt-2 border-t">
+                  <div>
+                    <label className="text-xs font-medium mb-1 block">Split into how many assets? *</label>
+                    <Input type="number" min={1} value={quantity} onChange={(e) => setQuantity(e.target.value)} className="h-8 text-xs" />
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      {qtyNum} asset{qtyNum > 1 ? 's' : ''} @ {perUnitCost.toLocaleString(undefined, { minimumFractionDigits: 2 })} each
+                    </p>
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium mb-1 block">Asset codes (auto)</label>
+                    <div className="h-8 px-2 flex items-center rounded-md border bg-background text-xs font-mono text-muted-foreground">{codePreview}</div>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">Sequenced from the category code.</p>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
           <div className="grid grid-cols-2 gap-3">
-            <div><label className="text-xs font-medium mb-1 block">Code *</label>
-              <Input value={form.code} onChange={(e) => set('code', e.target.value)} placeholder="FA001" className="h-8 text-xs" /></div>
-            <div><label className="text-xs font-medium mb-1 block">Category</label>
+            {mode === 'manual' && (
+              <div><label className="text-xs font-medium mb-1 block">Code *</label>
+                <Input value={form.code} onChange={(e) => set('code', e.target.value)} placeholder="FA001" className="h-8 text-xs" /></div>
+            )}
+            <div className={mode === 'clearing' ? 'col-span-2' : ''}><label className="text-xs font-medium mb-1 block">Category {mode === 'clearing' ? '*' : ''}</label>
               <Select value={form.categoryId} onChange={(e) => onCategoryChange(e.target.value)} className="h-8 text-xs" disabled={categories.length === 0}>
                 <option value="">{categories.length === 0 ? '— Create a category first —' : '— Select category —'}</option>
                 {categories.map((c) => <option key={c.id} value={c.id}>{c.code} · {c.name}</option>)}
               </Select>
               {categories.length === 0 && (
                 <p className="text-[10px] text-amber-600 mt-1">No categories defined. Go to the Categories tab to create one with GL accounts before adding assets.</p>
+              )}
+              {mode === 'clearing' && selectedCategory && (
+                <p className="text-[10px] text-muted-foreground mt-0.5">Drives the asset code prefix <span className="font-mono">{selectedCategory.code}-</span> and the GL accounts.</p>
               )}</div>
           </div>
           <div><label className="text-xs font-medium mb-1 block">Name *</label>
             <Input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Asset description" className="h-8 text-xs" /></div>
           <div className="grid grid-cols-2 gap-3">
-            <div><label className="text-xs font-medium mb-1 block">Serial Number</label>
-              <Input value={form.serialNumber} onChange={(e) => set('serialNumber', e.target.value)} placeholder="SN-001" className="h-8 text-xs" /></div>
-            <div><label className="text-xs font-medium mb-1 block">Location</label>
+            {!(mode === 'clearing' && qtyNum > 1) && (
+              <div><label className="text-xs font-medium mb-1 block">Serial Number</label>
+                <Input value={form.serialNumber} onChange={(e) => set('serialNumber', e.target.value)} placeholder="SN-001" className="h-8 text-xs" /></div>
+            )}
+            <div className={mode === 'clearing' && qtyNum > 1 ? 'col-span-2' : ''}><label className="text-xs font-medium mb-1 block">Location</label>
               <Input value={form.location} onChange={(e) => set('location', e.target.value)} placeholder="Head Office" className="h-8 text-xs" /></div>
           </div>
+          {mode === 'clearing' && qtyNum > 1 && (
+            <div>
+              <label className="text-xs font-medium mb-1 block">Serial numbers <span className="text-muted-foreground font-normal">(optional — one per unit)</span></label>
+              <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto">
+                {Array.from({ length: qtyNum }, (_, i) => (
+                  <Input
+                    key={i}
+                    value={serials[i] ?? ''}
+                    onChange={(e) => setSerials((s) => { const n = [...s]; n[i] = e.target.value; return n; })}
+                    placeholder={`Unit ${i + 1} S/N`}
+                    className="h-7 text-xs"
+                  />
+                ))}
+              </div>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div><label className="text-xs font-medium mb-1 block">Acquisition Date</label>
               <Input type="date" value={form.acquisitionDate} onChange={(e) => set('acquisitionDate', e.target.value)} className="h-8 text-xs" /></div>
@@ -286,7 +357,7 @@ function NewAssetDialog({ organisationId }: { organisationId: string }) {
           <div className="flex justify-end gap-2 pt-1">
             <DialogClose asChild><Button variant="outline" size="sm">Cancel</Button></DialogClose>
             <Button size="sm" disabled={!canSubmit} onClick={() => mutation.mutate()}>
-              {mutation.isPending ? 'Saving…' : mode === 'clearing' ? 'Capitalise Asset' : 'Save Asset'}
+              {mutation.isPending ? 'Saving…' : mode === 'clearing' ? `Capitalise ${qtyNum} asset${qtyNum > 1 ? 's' : ''}` : 'Save Asset'}
             </Button>
           </div>
         </div>

@@ -115,6 +115,8 @@ export interface PendingCapitalisation {
   supplierCode: string;
   description: string;
   amount: number;
+  quantity: number;
+  unitCost: number;
 }
 
 export async function getPendingCapitalisations(organisationId: string) {
@@ -122,9 +124,18 @@ export async function getPendingCapitalisations(organisationId: string) {
   return res.data.data as { clearingAccountId: string | null; items: PendingCapitalisation[] };
 }
 
+export interface CapitalisationResult {
+  count: number;
+  codes: string[];
+  assets: FixedAsset[];
+}
+
 export async function capitaliseFromClearing(organisationId: string, data: {
   sourceLineId: string;
-  code: string; name: string; category: string; categoryId?: string;
+  categoryId: string;
+  quantity: number;
+  serialNumbers?: string[];
+  name: string;
   serialNumber?: string; location?: string;
   acquisitionDate: string;
   residualValue?: number; usefulLifeMonths: number;
@@ -132,7 +143,7 @@ export async function capitaliseFromClearing(organisationId: string, data: {
   assetAccountId?: string; deprnAccountId?: string; accDeprnAccountId?: string;
 }) {
   const res = await api.post(`/organisations/${organisationId}/assets/capitalise`, data);
-  return res.data.data as FixedAsset;
+  return res.data.data as CapitalisationResult;
 }
 
 export async function updateAsset(organisationId: string, assetId: string, data: Partial<{

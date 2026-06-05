@@ -37,11 +37,21 @@ export const updateAssetSchema = createAssetSchema
   .partial()
   .omit({ acquisitionDate: true, acquisitionCost: true });
 
-// Capitalise an asset from a clearing-account item. Cost comes from the source
-// supplier-invoice line, so it isn't supplied here.
+// Capitalise asset(s) from a clearing-account item. Cost comes from the source
+// supplier-invoice line, so it isn't supplied here. A single line of N identical
+// units (e.g. 10 laptops) is split into N separate asset records, each costing
+// lineTotal / N, with structured codes derived from the asset category
+// ({categoryCode}-{sequence}). categoryId is required because it drives both the
+// GL accounts and the asset code.
 export const capitaliseFromClearingSchema = createAssetSchema
-  .omit({ acquisitionCost: true, acquisitionCreditAccountId: true, supplierId: true })
-  .extend({ sourceLineId: z.string().uuid() });
+  .omit({ acquisitionCost: true, acquisitionCreditAccountId: true, supplierId: true, code: true, category: true })
+  .extend({
+    sourceLineId: z.string().uuid(),
+    categoryId: z.string().uuid(),
+    quantity: z.number().int().positive().max(500).default(1),
+    // Optional per-unit serial numbers, aligned to each created asset by index.
+    serialNumbers: z.array(z.string().max(100)).optional(),
+  });
 
 export const listAssetsSchema = z.object({
   category: z.string().optional(),
