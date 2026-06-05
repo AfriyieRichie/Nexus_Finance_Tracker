@@ -55,7 +55,11 @@ export const capitaliseFromClearingSchema = createAssetSchema
 
 export const listAssetsSchema = z.object({
   category: z.string().optional(),
-  status: z.enum(['ACTIVE', 'DISPOSED', 'FULLY_DEPRECIATED']).optional(),
+  categoryId: z.string().uuid().optional(),
+  status: z.enum(['ACTIVE', 'INACTIVE', 'DISPOSED', 'FULLY_DEPRECIATED']).optional(),
+  location: z.string().optional(),
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   search: z.string().optional(),
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().positive().max(200).default(50),

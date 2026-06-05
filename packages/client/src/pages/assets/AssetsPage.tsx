@@ -1326,18 +1326,32 @@ export function AssetsPage() {
   const activeOrganisationId = useAuthStore((s) => s.activeOrganisationId);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [fromFilter, setFromFilter] = useState('');
+  const [toFilter, setToFilter] = useState('');
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'assets' | 'categories' | 'runs'>('assets');
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['assets', activeOrganisationId, statusFilter],
-    queryFn: () => assetSvc.listAssets(activeOrganisationId!, { status: statusFilter || undefined }),
+  const { data: categories = [] } = useQuery({
+    queryKey: ['asset-categories', activeOrganisationId],
+    queryFn: () => assetSvc.listCategories(activeOrganisationId!),
     enabled: !!activeOrganisationId,
   });
 
-  const assets = (data?.assets ?? []).filter(
-    (a) => !search || a.name.toLowerCase().includes(search.toLowerCase()) || a.code.toLowerCase().includes(search.toLowerCase()),
-  );
+  const { data, isLoading } = useQuery({
+    queryKey: ['assets', activeOrganisationId, { statusFilter, categoryFilter, fromFilter, toFilter, search }],
+    queryFn: () => assetSvc.listAssets(activeOrganisationId!, {
+      status: statusFilter || undefined,
+      categoryId: categoryFilter || undefined,
+      from: fromFilter || undefined,
+      to: toFilter || undefined,
+      search: search || undefined,
+    }),
+    enabled: !!activeOrganisationId,
+  });
+
+  const assets = data?.assets ?? [];
+  const hasFilters = !!(search || statusFilter || categoryFilter || fromFilter || toFilter);
 
   // Summary cards
   const totalCost = assets.reduce((s, a) => s + Number(a.acquisitionCost), 0);
@@ -1392,14 +1406,33 @@ export function AssetsPage() {
       {activeTab === 'assets' && (
         <div className={`flex gap-4 ${selectedAssetId ? 'items-start' : ''}`}>
           <div className="flex-1 min-w-0 space-y-3">
-            <div className="flex gap-3">
-              <Input placeholder="Search assets…" value={search} onChange={(e) => setSearch(e.target.value)} className="max-w-xs h-8 text-xs" />
-              <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-44 h-8 text-xs">
+            <div className="flex flex-wrap gap-2 items-end">
+              <Input placeholder="Search code, name, serial…" value={search} onChange={(e) => setSearch(e.target.value)} className="max-w-xs h-8 text-xs" />
+              <Select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="w-44 h-8 text-xs">
+                <option value="">All categories</option>
+                {categories.map((c) => <option key={c.id} value={c.id}>{c.code} · {c.name}</option>)}
+              </Select>
+              <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-40 h-8 text-xs">
                 <option value="">All statuses</option>
                 <option value="ACTIVE">Active</option>
+                <option value="INACTIVE">Inactive</option>
                 <option value="FULLY_DEPRECIATED">Fully Depreciated</option>
                 <option value="DISPOSED">Disposed</option>
               </Select>
+              <div>
+                <label className="text-[10px] text-muted-foreground block">Acquired from</label>
+                <Input type="date" value={fromFilter} onChange={(e) => setFromFilter(e.target.value)} className="w-36 h-8 text-xs" />
+              </div>
+              <div>
+                <label className="text-[10px] text-muted-foreground block">to</label>
+                <Input type="date" value={toFilter} onChange={(e) => setToFilter(e.target.value)} className="w-36 h-8 text-xs" />
+              </div>
+              {hasFilters && (
+                <Button variant="ghost" size="sm" className="h-8 text-xs"
+                  onClick={() => { setSearch(''); setStatusFilter(''); setCategoryFilter(''); setFromFilter(''); setToFilter(''); }}>
+                  Clear
+                </Button>
+              )}
             </div>
             <Card><CardContent className="p-0">
               {isLoading ? (

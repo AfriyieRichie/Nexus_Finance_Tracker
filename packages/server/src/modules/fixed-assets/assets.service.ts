@@ -585,11 +585,20 @@ export async function listAssets(organisationId: string, query: ListAssetsQuery)
     organisationId,
     isDeleted: false,
     ...(query.category && { category: query.category }),
+    ...(query.categoryId && { categoryId: query.categoryId }),
     ...(query.status && { status: query.status }),
+    ...(query.location && { location: { contains: query.location, mode: 'insensitive' } }),
+    ...((query.from || query.to) && {
+      acquisitionDate: {
+        ...(query.from && { gte: new Date(query.from + 'T00:00:00Z') }),
+        ...(query.to && { lte: new Date(query.to + 'T23:59:59Z') }),
+      },
+    }),
     ...(query.search && {
       OR: [
         { name: { contains: query.search, mode: 'insensitive' } },
         { code: { contains: query.search, mode: 'insensitive' } },
+        { serialNumber: { contains: query.search, mode: 'insensitive' } },
       ],
     }),
   };

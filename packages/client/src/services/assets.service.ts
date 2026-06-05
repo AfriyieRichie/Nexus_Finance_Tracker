@@ -87,7 +87,9 @@ export async function updateCategory(organisationId: string, categoryId: string,
   return res.data.data as AssetCategory;
 }
 
-export async function listAssets(organisationId: string, params?: { search?: string; status?: string; page?: number }) {
+export async function listAssets(organisationId: string, params?: {
+  search?: string; status?: string; categoryId?: string; location?: string; from?: string; to?: string; page?: number;
+}) {
   const res = await api.get(`/organisations/${organisationId}/assets`, { params: { pageSize: 100, ...params } });
   return { assets: res.data.data as FixedAsset[], total: res.data.pagination?.total ?? 0 };
 }
