@@ -13,6 +13,8 @@ import {
   updateVatReturnStatusSchema,
   runFxRevaluationSchema,
   reverseFxRevaluationSchema,
+  taxSummaryQuerySchema,
+  taxTransactionsQuerySchema,
 } from './tax.schemas';
 
 // ─── Tax Codes ────────────────────────────────────────────────────────────────
@@ -84,6 +86,18 @@ export const generateVatReturn = asyncHandler(async (req: Request, res: Response
   const input = generateVatReturnSchema.parse(req.body);
   const vr = await svc.generateVatReturn(organisationId, req.user!.sub, input);
   return sendCreated(res, vr, 'VAT return generated');
+});
+
+// ─── Tax Centre ───────────────────────────────────────────────────────────────
+
+export const getTaxSummary = asyncHandler(async (req: Request, res: Response) => {
+  const query = taxSummaryQuerySchema.parse(req.query);
+  return sendSuccess(res, await svc.getTaxSummary(req.params.organisationId, query));
+});
+
+export const getTaxTransactions = asyncHandler(async (req: Request, res: Response) => {
+  const query = taxTransactionsQuerySchema.parse(req.query);
+  return sendSuccess(res, await svc.getTaxTransactions(req.params.organisationId, query));
 });
 
 export const getVatReturn = asyncHandler(async (req: Request, res: Response) => {

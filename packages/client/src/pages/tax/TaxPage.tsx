@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, Fragment } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Receipt, Plus, Globe, FileText, TrendingUp, TrendingDown,
@@ -749,14 +749,196 @@ function FxRevaluationView({ organisationId }: { organisationId: string }) {
   );
 }
 
+// ── Tax Centre (liability report) ───────────────────────────────────────────────
+
+function TaxCentreTxns({ organisationId, from, to, taxCode }: { organisationId: string; from: string; to: string; taxCode: string }) {
+  const { data: txns, isLoading } = useQuery({
+    queryKey: ['tax-transactions', organisationId, from, to, taxCode],
+    queryFn: () => taxSvc.getTaxTransactions(organisationId, { from, to, taxCode }),
+    enabled: !!organisationId,
+  });
+
+  if (isLoading) return <TableRow><TableCell colSpan={7} className="py-3"><Skeleton className="h-5 w-full" /></TableCell></TableRow>;
+  if (!txns || txns.length === 0) return <TableRow><TableCell colSpan={7} className="py-3 text-center text-xs text-muted-foreground">No transactions.</TableCell></TableRow>;
+
+  return (
+    <>
+      {txns.map((t) => (
+        <TableRow key={t.id} className="bg-muted/30 text-[11px]">
+          <TableCell className="py-1.5 pl-8">{new Date(t.entryDate).toLocaleDateString()}</TableCell>
+          <TableCell className="py-1.5 font-mono text-[10px]">{t.reference}</TableCell>
+          <TableCell className="py-1.5">{t.accountCode} · {t.accountName}</TableCell>
+          <TableCell className="py-1.5">
+            <Badge variant={t.direction === 'OUTPUT' ? 'info' : 'secondary'} className="text-[9px] h-4 px-1">{t.direction}</Badge>
+          </TableCell>
+          <TableCell className="py-1.5 text-right font-mono">{fmt(t.netAmount)}</TableCell>
+          <TableCell className="py-1.5 text-right font-mono">{fmt(t.taxAmount)}</TableCell>
+          <TableCell />
+        </TableRow>
+      ))}
+    </>
+  );
+}
+
+function TaxCentreView({ organisationId }: { organisationId: string }) {
+  const toISO = (d: Date) => d.toISOString().split('T')[0];
+  const today = new Date();
+  const [from, setFrom] = useState(toISO(new Date(today.getFullYear(), today.getMonth(), 1)));
+  const [to, setTo] = useState(toISO(today));
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['tax-summary', organisationId, from, to],
+    queryFn: () => taxSvc.getTaxSummary(organisationId, { from, to }),
+    enabled: !!organisationId,
+  });
+
+  return (
+    <div className="space-y-4">
+      {/* Period filter */}
+      <Card>
+        <CardContent className="p-3 flex flex-wrap items-end gap-3">
+          <div>
+            <label className="text-[10px] font-medium text-muted-foreground block mb-1">From</label>
+            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-8 text-xs w-40" />
+          </div>
+          <div>
+            <label className="text-[10px] font-medium text-muted-foreground block mb-1">To</label>
+            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-8 text-xs w-40" />
+          </div>
+          <p className="text-[11px] text-muted-foreground ml-auto max-w-md">
+            Output tax collected on sales, less input tax paid on purchases, per tax code. Click a row to see the transactions behind it.
+          </p>
+        </CardContent>
+      </Card>
+
+      {error && <ErrorMsg error={error} />}
+
+      {/* Summary cards */}
+      {data && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <Card><CardContent className="p-3">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Output Tax</p>
+            <p className="text-lg font-semibold">{fmt(data.totals.outputTax)}</p>
+          </CardContent></Card>
+          <Card><CardContent className="p-3">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Input Tax</p>
+            <p className="text-lg font-semibold">{fmt(data.totals.inputTax)}</p>
+          </CardContent></Card>
+          <Card><CardContent className="p-3">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Net Tax {data.totals.netTax >= 0 ? 'Payable' : 'Reclaimable'}</p>
+            <p className={cn('text-lg font-semibold', data.totals.netTax >= 0 ? 'text-foreground' : 'text-emerald-600')}>{fmt(Math.abs(data.totals.netTax))}</p>
+          </CardContent></Card>
+          <Card><CardContent className="p-3">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wide">WHT Withheld</p>
+            <p className="text-lg font-semibold">{fmt(data.whtWithheld)}</p>
+          </CardContent></Card>
+        </div>
+      )}
+
+      {/* Per-code table */}
+      <Card>
+        <CardContent className="p-0">
+          {isLoading ? (
+            <div className="p-6 space-y-2">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-9 w-full" />)}</div>
+          ) : !data || data.byCode.length === 0 ? (
+            <div className="py-16 text-center space-y-1">
+              <p className="text-sm text-muted-foreground">No tax activity in this period.</p>
+              <p className="text-xs text-muted-foreground">Post sales or purchases with a tax code to see them here.</p>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow className="text-[10px]">
+                  <TableHead className="py-1.5">Tax Code</TableHead>
+                  <TableHead className="py-1.5">Treatment</TableHead>
+                  <TableHead className="py-1.5 text-right">Output Net</TableHead>
+                  <TableHead className="py-1.5 text-right">Output Tax</TableHead>
+                  <TableHead className="py-1.5 text-right">Input Net</TableHead>
+                  <TableHead className="py-1.5 text-right">Input Tax</TableHead>
+                  <TableHead className="py-1.5 text-right">Net Tax</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.byCode.map((r) => (
+                  <Fragment key={r.code}>
+                    <TableRow
+                      className="text-[11px] cursor-pointer hover:bg-accent/50"
+                      onClick={() => setExpanded(expanded === r.code ? null : r.code)}
+                    >
+                      <TableCell className="py-1.5 font-medium">
+                        <span className="inline-flex items-center gap-1">
+                          {expanded === r.code ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                          {r.code} · {r.name}
+                        </span>
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <Badge variant="outline" className="text-[9px] h-4 px-1">{r.rate}%</Badge>
+                      </TableCell>
+                      <TableCell className="py-1.5 text-right font-mono">{fmt(r.outputNet)}</TableCell>
+                      <TableCell className="py-1.5 text-right font-mono">{fmt(r.outputTax)}</TableCell>
+                      <TableCell className="py-1.5 text-right font-mono">{fmt(r.inputNet)}</TableCell>
+                      <TableCell className="py-1.5 text-right font-mono">{fmt(r.inputTax)}</TableCell>
+                      <TableCell className="py-1.5 text-right font-mono font-semibold">{fmt(r.netTax)}</TableCell>
+                    </TableRow>
+                    {expanded === r.code && (
+                      <TaxCentreTxns organisationId={organisationId} from={from} to={to} taxCode={r.code} />
+                    )}
+                  </Fragment>
+                ))}
+                <TableRow className="text-[11px] font-semibold border-t-2">
+                  <TableCell className="py-2" colSpan={3}>Total</TableCell>
+                  <TableCell className="py-2 text-right font-mono">{fmt(data.totals.outputTax)}</TableCell>
+                  <TableCell className="py-2 text-right font-mono" />
+                  <TableCell className="py-2 text-right font-mono">{fmt(data.totals.inputTax)}</TableCell>
+                  <TableCell className="py-2 text-right font-mono">{fmt(data.totals.netTax)}</TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Tax control-account balances */}
+      {data && data.accounts.length > 0 && (
+        <Card>
+          <CardContent className="p-0">
+            <div className="px-3 py-2 border-b">
+              <p className="text-xs font-semibold">Tax Account Balances <span className="font-normal text-muted-foreground">as of {new Date(to).toLocaleDateString()}</span></p>
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow className="text-[10px]">
+                  <TableHead className="py-1.5">Account</TableHead>
+                  <TableHead className="py-1.5">Class</TableHead>
+                  <TableHead className="py-1.5 text-right">Balance</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.accounts.map((a) => (
+                  <TableRow key={a.id} className="text-[11px]">
+                    <TableCell className="py-1.5">{a.code} · {a.name}</TableCell>
+                    <TableCell className="py-1.5"><Badge variant="secondary" className="text-[9px] h-4 px-1">{a.class}</Badge></TableCell>
+                    <TableCell className="py-1.5 text-right font-mono">{fmt(a.balance)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
-type Tab = 'tax-codes' | 'exchange-rates' | 'vat-returns' | 'fx-revaluation';
+type Tab = 'tax-centre' | 'tax-codes' | 'exchange-rates' | 'vat-returns' | 'fx-revaluation';
 
 export function TaxPage() {
   const organisationId = useAuthStore((s) => s.activeOrganisationId);
   const qc = useQueryClient();
-  const [tab, setTab] = useState<Tab>('tax-codes');
+  const [tab, setTab] = useState<Tab>('tax-centre');
 
   const { data: taxCodes, isLoading: taxLoading } = useQuery({
     queryKey: ['tax-codes', organisationId],
@@ -777,6 +959,7 @@ export function TaxPage() {
   });
 
   const tabs = [
+    { id: 'tax-centre' as Tab, label: 'Tax Centre', icon: TrendingDown },
     { id: 'tax-codes' as Tab, label: 'Tax Codes', icon: Receipt },
     { id: 'exchange-rates' as Tab, label: 'Exchange Rates', icon: Globe },
     { id: 'vat-returns' as Tab, label: 'VAT Returns', icon: FileText },
@@ -792,7 +975,7 @@ export function TaxPage() {
           <h1 className="text-xl font-semibold flex items-center gap-2">
             <Receipt size={18} /> Tax & Multi-Currency
           </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">VAT codes, exchange rates, VAT returns, and FX revaluation (IAS 21)</p>
+          <p className="text-sm text-muted-foreground mt-0.5">Tax liability report, tax codes, exchange rates, VAT returns, and FX revaluation (IAS 21)</p>
         </div>
         <div className="flex gap-2">
           {tab === 'tax-codes' && <TaxCodeDialog organisationId={organisationId} />}
@@ -811,6 +994,9 @@ export function TaxPage() {
           </button>
         ))}
       </div>
+
+      {/* Tax Centre */}
+      {tab === 'tax-centre' && <TaxCentreView organisationId={organisationId} />}
 
       {/* Tax Codes */}
       {tab === 'tax-codes' && (

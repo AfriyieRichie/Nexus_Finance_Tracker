@@ -59,6 +59,20 @@ export const updateVatReturnStatusSchema = z.object({
   status: z.enum(['DRAFT', 'SUBMITTED', 'FILED']),
 });
 
+// ─── Tax Centre (liability report) ────────────────────────────────────────────
+
+export const taxSummaryQuerySchema = z.object({
+  from: z.string().regex(dateRegex),
+  to: z.string().regex(dateRegex),
+});
+
+export const taxTransactionsQuerySchema = z.object({
+  from: z.string().regex(dateRegex),
+  to: z.string().regex(dateRegex),
+  taxCode: z.string().min(1),
+  direction: z.enum(['OUTPUT', 'INPUT', 'ALL']).optional().default('ALL'),
+});
+
 // ─── FX Revaluation ──────────────────────────────────────────────────────────
 
 export const runFxRevaluationSchema = z.object({
@@ -80,5 +94,7 @@ export type UpdateTaxCodeInput = z.infer<typeof updateTaxCodeSchema>;
 export type ComputeTaxInput = z.infer<typeof computeTaxSchema>;
 export type UpsertExchangeRateInput = z.infer<typeof upsertExchangeRateSchema>;
 export type GenerateVatReturnInput = z.infer<typeof generateVatReturnSchema>;
+export type TaxSummaryQuery = z.infer<typeof taxSummaryQuerySchema>;
+export type TaxTransactionsQuery = z.infer<typeof taxTransactionsQuerySchema>;
 export type RunFxRevaluationInput = z.infer<typeof runFxRevaluationSchema>;
 export type ReverseFxRevaluationInput = z.infer<typeof reverseFxRevaluationSchema>;

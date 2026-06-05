@@ -163,6 +163,58 @@ export const updateVatReturnStatus = (organisationId: string, id: string, status
 export const deleteVatReturn = (organisationId: string, id: string) =>
   api.delete(`/organisations/${organisationId}/tax/vat-returns/${id}`);
 
+// ── Tax Centre (liability report) ──────────────────────────────────────────────
+
+export interface TaxSummaryRow {
+  code: string;
+  name: string;
+  treatment: string;
+  rate: number;
+  outputNet: number;
+  outputTax: number;
+  inputNet: number;
+  inputTax: number;
+  netTax: number;
+}
+
+export interface TaxAccountBalance {
+  id: string;
+  code: string;
+  name: string;
+  class: string;
+  balance: number;
+}
+
+export interface TaxSummary {
+  from: string;
+  to: string;
+  byCode: TaxSummaryRow[];
+  totals: { outputNet: number; outputTax: number; inputNet: number; inputTax: number; netTax: number };
+  accounts: TaxAccountBalance[];
+  whtWithheld: number;
+}
+
+export interface TaxTransaction {
+  id: string;
+  entryDate: string;
+  reference: string;
+  accountCode: string;
+  accountName: string;
+  description: string | null;
+  direction: 'OUTPUT' | 'INPUT';
+  netAmount: number;
+  taxAmount: number;
+}
+
+export const getTaxSummary = (organisationId: string, params: { from: string; to: string }) =>
+  api.get(`/organisations/${organisationId}/tax/tax-summary`, { params }).then((r) => r.data.data as TaxSummary);
+
+export const getTaxTransactions = (
+  organisationId: string,
+  params: { from: string; to: string; taxCode: string; direction?: 'OUTPUT' | 'INPUT' | 'ALL' },
+) =>
+  api.get(`/organisations/${organisationId}/tax/tax-transactions`, { params }).then((r) => r.data.data as TaxTransaction[]);
+
 // ── FX Revaluation ────────────────────────────────────────────────────────────
 
 export const listFxRevaluations = (organisationId: string) =>

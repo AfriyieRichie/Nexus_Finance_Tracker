@@ -14,6 +14,11 @@ taxRouter.get('/exchange-rates/latest', requireRole(UserRole.REPORT_VIEWER), ctr
 taxRouter.get('/exchange-rates', requireRole(UserRole.REPORT_VIEWER), ctrl.listExchangeRates);
 taxRouter.post('/exchange-rates', requireRole(UserRole.ACCOUNTANT), ctrl.upsertExchangeRate);
 
+// ─── Tax Centre (liability report) ────────────────────────────────────────────
+
+taxRouter.get('/tax-summary', requireRole(UserRole.REPORT_VIEWER), ctrl.getTaxSummary);
+taxRouter.get('/tax-transactions', requireRole(UserRole.REPORT_VIEWER), ctrl.getTaxTransactions);
+
 // ─── VAT Returns ──────────────────────────────────────────────────────────────
 
 taxRouter.get('/vat-returns', requireRole(UserRole.REPORT_VIEWER), ctrl.listVatReturns);

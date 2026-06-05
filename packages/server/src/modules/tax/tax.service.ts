@@ -57,6 +57,18 @@ export interface ReverseFxRevaluationInput {
   periodId: string;
 }
 
+export interface TaxSummaryQuery {
+  from: string;
+  to: string;
+}
+
+export interface TaxTransactionsQuery {
+  from: string;
+  to: string;
+  taxCode: string;
+  direction?: 'OUTPUT' | 'INPUT' | 'ALL';
+}
+
 // ─── Tax Codes ────────────────────────────────────────────────────────────────
 
 export async function listTaxCodes(organisationId: string, isActive?: boolean) {
@@ -425,6 +437,149 @@ export async function deleteVatReturn(organisationId: string, id: string) {
   if (!vr) throw new NotFoundError('VAT return');
   if (vr.status !== VatReturnStatus.DRAFT) throw new ForbiddenError('Only draft VAT returns can be deleted');
   await prisma.vatReturn.delete({ where: { id } });
+}
+
+// ─── Tax Centre (multi-tax liability report) ──────────────────────────────────
+
+// Aggregate every posted, tax-tagged journal line over a period, grouped by tax
+// code, splitting output tax (on revenue) from input tax (on expense/asset). Net
+// per code = output − input = amount owed to / (reclaimable from) the authority.
+// Also returns the live GL balance of each tax control account so the report ties
+// back to the ledger, plus WHT withheld in the period.
+export async function getTaxSummary(organisationId: string, query: TaxSummaryQuery) {
+  const start = new Date(query.from + 'T00:00:00Z');
+  const end = new Date(query.to + 'T23:59:59Z');
+  if (start > end) throw new ValidationError('`to` must be on or after `from`');
+
+  const taxLines = await prisma.journalLine.findMany({
+    where: {
+      journalEntry: { organisationId, status: 'POSTED', entryDate: { gte: start, lte: end } },
+      taxCode: { not: null },
+      taxAmount: { not: null },
+    },
+    select: {
+      taxCode: true, taxAmount: true, debitAmount: true, creditAmount: true,
+      account: { select: { class: true } },
+    },
+  });
+
+  const taxCodes = await prisma.taxCode.findMany({ where: { organisationId } });
+  const tcMap = new Map(taxCodes.map((tc) => [tc.code, tc]));
+
+  type Row = {
+    code: string; name: string; treatment: TaxTreatment; rate: number;
+    outputNet: number; outputTax: number; inputNet: number; inputTax: number;
+  };
+  const rows = new Map<string, Row>();
+
+  for (const line of taxLines) {
+    const code = line.taxCode!;
+    const tc = tcMap.get(code);
+    const row = rows.get(code) ?? {
+      code,
+      name: tc?.name ?? code,
+      treatment: tc?.treatment ?? TaxTreatment.STANDARD,
+      rate: tc ? Number(tc.rate) : 0,
+      outputNet: 0, outputTax: 0, inputNet: 0, inputTax: 0,
+    };
+    const taxAmt = Number(line.taxAmount ?? 0);
+    const netAmt = Math.abs(Number(line.debitAmount) - Number(line.creditAmount));
+    // Revenue lines carry output tax; expense/asset lines carry input (recoverable) tax.
+    if (line.account.class === 'REVENUE') { row.outputNet += netAmt; row.outputTax += taxAmt; }
+    else { row.inputNet += netAmt; row.inputTax += taxAmt; }
+    rows.set(code, row);
+  }
+
+  const byCode = [...rows.values()]
+    .map((r) => ({ ...r, netTax: r.outputTax - r.inputTax }))
+    .sort((a, b) => a.code.localeCompare(b.code));
+
+  const totals = byCode.reduce(
+    (a, r) => ({
+      outputNet: a.outputNet + r.outputNet, outputTax: a.outputTax + r.outputTax,
+      inputNet: a.inputNet + r.inputNet, inputTax: a.inputTax + r.inputTax,
+      netTax: a.netTax + r.netTax,
+    }),
+    { outputNet: 0, outputTax: 0, inputNet: 0, inputTax: 0, netTax: 0 },
+  );
+
+  // ── Tax control-account balances (as of `to`) ─────────────────────────────
+  const taxAccountIds = new Set<string>();
+  for (const tc of taxCodes) if (tc.glAccountId) taxAccountIds.add(tc.glAccountId);
+  const typedTaxAccounts = await prisma.account.findMany({
+    where: { organisationId, type: { in: ['TAX_PAYABLE', 'TAX_RECEIVABLE'] }, isDeleted: false },
+    select: { id: true },
+  });
+  typedTaxAccounts.forEach((a) => taxAccountIds.add(a.id));
+
+  const accounts: Array<{ id: string; code: string; name: string; class: string; balance: number }> = [];
+  if (taxAccountIds.size > 0) {
+    const ids = [...taxAccountIds];
+    const [accs, sums] = await Promise.all([
+      prisma.account.findMany({ where: { id: { in: ids } }, select: { id: true, code: true, name: true, class: true } }),
+      prisma.journalLine.groupBy({
+        by: ['accountId'],
+        where: { accountId: { in: ids }, journalEntry: { organisationId, status: 'POSTED', entryDate: { lte: end } } },
+        _sum: { debitAmount: true, creditAmount: true },
+      }),
+    ]);
+    const sumMap = new Map(sums.map((s) => [s.accountId, s]));
+    for (const a of accs) {
+      const s = sumMap.get(a.id);
+      const debit = Number(s?._sum.debitAmount ?? 0);
+      const credit = Number(s?._sum.creditAmount ?? 0);
+      // Show each in its natural balance: liabilities credit-positive, assets debit-positive.
+      const balance = a.class === 'LIABILITY' ? credit - debit : debit - credit;
+      accounts.push({ id: a.id, code: a.code, name: a.name, class: a.class, balance });
+    }
+    accounts.sort((x, y) => x.code.localeCompare(y.code));
+  }
+
+  // ── WHT withheld in the period (from supplier payments) ───────────────────
+  const whtAgg = await prisma.supplierPayment.aggregate({
+    where: { organisationId, paymentDate: { gte: start, lte: end } },
+    _sum: { whtAmount: true },
+  });
+  const whtWithheld = Number(whtAgg._sum.whtAmount ?? 0);
+
+  return { from: query.from, to: query.to, byCode, totals, accounts, whtWithheld };
+}
+
+// Line-level drill-down behind a tax code for a period.
+export async function getTaxTransactions(organisationId: string, query: TaxTransactionsQuery) {
+  const start = new Date(query.from + 'T00:00:00Z');
+  const end = new Date(query.to + 'T23:59:59Z');
+
+  const lines = await prisma.journalLine.findMany({
+    where: {
+      taxCode: query.taxCode,
+      taxAmount: { not: null },
+      journalEntry: { organisationId, status: 'POSTED', entryDate: { gte: start, lte: end } },
+    },
+    select: {
+      id: true, description: true, debitAmount: true, creditAmount: true, taxAmount: true,
+      account: { select: { code: true, name: true, class: true } },
+      journalEntry: { select: { entryDate: true, reference: true, journalNumber: true } },
+    },
+    orderBy: { journalEntry: { entryDate: 'asc' } },
+  });
+
+  return lines
+    .map((l) => {
+      const direction: 'OUTPUT' | 'INPUT' = l.account.class === 'REVENUE' ? 'OUTPUT' : 'INPUT';
+      return {
+        id: l.id,
+        entryDate: l.journalEntry.entryDate,
+        reference: l.journalEntry.reference ?? l.journalEntry.journalNumber,
+        accountCode: l.account.code,
+        accountName: l.account.name,
+        description: l.description,
+        direction,
+        netAmount: Math.abs(Number(l.debitAmount) - Number(l.creditAmount)),
+        taxAmount: Number(l.taxAmount ?? 0),
+      };
+    })
+    .filter((l) => query.direction === 'ALL' || l.direction === query.direction);
 }
 
 // ─── FX Revaluation (IAS 21) ──────────────────────────────────────────────────
