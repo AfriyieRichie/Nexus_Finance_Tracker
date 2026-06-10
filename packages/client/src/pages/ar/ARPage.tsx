@@ -1196,6 +1196,12 @@ function InvoiceActions({ organisationId, invoice }: { organisationId: string; i
     enabled: invoice.status === 'APPROVED',
   });
   const openPeriods = (periodsData ?? []).filter((p) => p.status === 'OPEN');
+  // Post into the open period that contains the invoice date; fall back to the
+  // latest open period so an invoice never silently lands in the wrong month.
+  const invDate = new Date(invoice.invoiceDate);
+  const targetPeriod =
+    openPeriods.find((p) => new Date(p.startDate) <= invDate && invDate <= new Date(p.endDate)) ??
+    [...openPeriods].sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime())[0];
 
   const [rejectReason, setRejectReason] = useState('');
   const [showRejectInput, setShowRejectInput] = useState(false);
@@ -1298,16 +1304,27 @@ function InvoiceActions({ organisationId, invoice }: { organisationId: string; i
       )}
 
       {/* APPROVED: managers can post to ledger */}
-      {invoice.status === 'APPROVED' && isManager && openPeriods.length > 0 && (
-        <button
-          onClick={() => postMutation.mutate(openPeriods[0].id)}
-          disabled={postMutation.isPending}
-          className="text-xs text-primary hover:underline disabled:opacity-50 flex items-center gap-1 font-medium"
-          title="Post to ledger"
-        >
-          <CheckCircle size={11} />
-          {postMutation.isPending ? 'Posting…' : 'Post'}
-        </button>
+      {invoice.status === 'APPROVED' && isManager && (
+        targetPeriod ? (
+          <div className="flex flex-col items-end gap-0.5">
+            <button
+              onClick={() => postMutation.mutate(targetPeriod.id)}
+              disabled={postMutation.isPending}
+              title={`Post to ${targetPeriod.name}`}
+              className="text-xs text-primary hover:underline disabled:opacity-50 flex items-center gap-1 font-medium"
+            >
+              <CheckCircle size={11} />
+              {postMutation.isPending ? 'Posting…' : 'Post'}
+            </button>
+            {postMutation.isError && (
+              <span className="text-[10px] text-destructive max-w-[220px] text-right leading-tight">
+                {(postMutation.error as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message ?? 'Failed to post'}
+              </span>
+            )}
+          </div>
+        ) : (
+          <span className="text-xs text-amber-600" title="No open accounting period — open one in Settings → Periods">No open period</span>
+        )
       )}
 
       {/* Payment, credit note, bad debt — post-ledger actions */}
