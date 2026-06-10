@@ -171,17 +171,40 @@ function PoDetailDialog({ organisationId, poId, canApprove, trigger }: { organis
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState('');
 
+  const [converting, setConverting] = useState(false);
+  const [dueDate, setDueDate] = useState('');
+  const [supplierRef, setSupplierRef] = useState('');
+  const [apAccountId, setApAccountId] = useState('');
+  const [lineAccts, setLineAccts] = useState<Record<string, string>>({});
+
   const { data: po, isLoading } = useQuery({ queryKey: ['purchase-order', poId], queryFn: () => poSvc.getPurchaseOrder(organisationId, poId), enabled: open });
   const { data: periodsData } = useQuery({ queryKey: ['periods', organisationId], queryFn: () => listPeriods(organisationId), enabled: open });
   const hasOpenPeriod = (periodsData ?? []).some((p) => p.status === 'OPEN');
+  const { data: accountsData } = useQuery({ queryKey: ['accounts', organisationId], queryFn: () => listAccounts(organisationId, { pageSize: 300 } as Parameters<typeof listAccounts>[1]), enabled: open && converting });
+  // Expense/asset accounts (incl. Fixed Asset Clearing) for the line coding.
+  const codingAccounts = (accountsData?.accounts ?? []).filter((a) => (a.class === 'EXPENSE' || a.class === 'ASSET') && a.isActive && !a.isControlAccount);
+  const apAccounts = (accountsData?.accounts ?? []).filter((a) => a.type === 'PAYABLE' && a.isActive && !a.isControlAccount);
 
   const invalidate = () => { void qc.invalidateQueries({ queryKey: ['purchase-orders'] }); void qc.invalidateQueries({ queryKey: ['purchase-order', poId] }); };
+
+  const startConvert = () => {
+    setLineAccts(Object.fromEntries((po?.lines ?? []).filter((l) => Number(l.quantity) - Number(l.quantityBilled) > 0.0001).map((l) => [l.id, l.accountId ?? ''])));
+    setDueDate(''); setSupplierRef(''); setApAccountId(''); setConverting(true);
+  };
 
   const submit = useMutation({ mutationFn: () => poSvc.submitPoForApproval(organisationId, poId), onSuccess: invalidate });
   const approve = useMutation({ mutationFn: () => poSvc.approvePo(organisationId, poId), onSuccess: invalidate });
   const reject = useMutation({ mutationFn: () => poSvc.rejectPo(organisationId, poId, reason), onSuccess: () => { setRejecting(false); setReason(''); invalidate(); } });
   const cancel = useMutation({ mutationFn: () => poSvc.cancelPo(organisationId, poId), onSuccess: invalidate });
-  const convert = useMutation({ mutationFn: () => poSvc.convertPoToBill(organisationId, poId, {}), onSuccess: () => { invalidate(); void qc.invalidateQueries({ queryKey: ['ap-invoices'] }); } });
+  const convert = useMutation({
+    mutationFn: () => poSvc.convertPoToBill(organisationId, poId, {
+      dueDate: dueDate || undefined,
+      supplierRef: supplierRef || undefined,
+      apAccountId: apAccountId || undefined,
+      lineAccounts: Object.entries(lineAccts).filter(([, a]) => a).map(([lineId, accountId]) => ({ lineId, accountId })),
+    }),
+    onSuccess: () => { setConverting(false); invalidate(); void qc.invalidateQueries({ queryKey: ['ap-invoices'] }); },
+  });
 
   const printPo = () => {
     if (!po) return;
@@ -249,8 +272,8 @@ function PoDetailDialog({ organisationId, poId, canApprove, trigger }: { organis
                   <Button size="sm" disabled={approve.isPending} onClick={() => approve.mutate()}>{approve.isPending ? 'Approving…' : 'Approve'}</Button>
                 </>
               )}
-              {(po.status === 'APPROVED' || po.status === 'PARTIALLY_BILLED') && (
-                <Button size="sm" disabled={convert.isPending} onClick={() => convert.mutate()}><FileText size={14} /> {convert.isPending ? 'Creating bill…' : 'Convert to bill'}</Button>
+              {(po.status === 'APPROVED' || po.status === 'PARTIALLY_BILLED') && !converting && (
+                <Button size="sm" onClick={startConvert}><FileText size={14} /> Convert to bill</Button>
               )}
               {!['BILLED', 'CANCELLED'].includes(po.status) && (
                 <Button variant="outline" size="sm" disabled={cancel.isPending} onClick={() => cancel.mutate()}>Cancel PO</Button>
@@ -260,6 +283,33 @@ function PoDetailDialog({ organisationId, poId, canApprove, trigger }: { organis
               <div className="flex items-center gap-2 justify-end">
                 <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason for rejection…" className="h-8 text-xs w-64" />
                 <Button size="sm" variant="outline" className="text-destructive" disabled={!reason.trim() || reject.isPending} onClick={() => reject.mutate()}>Confirm reject</Button>
+              </div>
+            )}
+
+            {/* Convert-to-bill review — choose the GL account per line (e.g. route a
+                fixed-asset line to the Fixed Asset Clearing account) and the AP account. */}
+            {converting && (
+              <div className="border rounded-md p-3 bg-muted/20 space-y-3">
+                <p className="text-xs font-semibold">Create bill — review line coding</p>
+                <div className="space-y-2">
+                  {po.lines.filter((l) => Number(l.quantity) - Number(l.quantityBilled) > 0.0001).map((l) => (
+                    <div key={l.id} className="grid grid-cols-2 gap-2 items-center">
+                      <span className="text-xs truncate">{l.description} <span className="text-muted-foreground">· {fmt(Number(l.quantity) - Number(l.quantityBilled))} × {fmt(l.unitPrice)}</span></span>
+                      <AccountSelect value={lineAccts[l.id] ?? ''} onChange={(id) => setLineAccts((s) => ({ ...s, [l.id]: id }))} accounts={codingAccounts} placeholder="— Account —" />
+                    </div>
+                  ))}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><label className="text-[10px] text-muted-foreground block mb-0.5">Due date</label><Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="h-8 text-xs" /></div>
+                  <div><label className="text-[10px] text-muted-foreground block mb-0.5">Supplier ref</label><Input value={supplierRef} onChange={(e) => setSupplierRef(e.target.value)} placeholder="Supplier invoice no." className="h-8 text-xs" /></div>
+                  <div className="col-span-2"><label className="text-[10px] text-muted-foreground block mb-0.5">AP control account</label>
+                    <AccountSelect value={apAccountId} onChange={setApAccountId} accounts={apAccounts} placeholder="— Default Accounts Payable —" /></div>
+                </div>
+                <p className="text-[10px] text-muted-foreground">For a fixed-asset purchase, code the line to <strong>Fixed Asset Clearing</strong> — the bill posts Dr Clearing / Cr AP, then capitalise it in Fixed Assets.</p>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setConverting(false)}>Cancel</Button>
+                  <Button size="sm" disabled={convert.isPending} onClick={() => convert.mutate()}>{convert.isPending ? 'Creating bill…' : 'Create bill'}</Button>
+                </div>
               </div>
             )}
           </div>

@@ -74,5 +74,8 @@ export const rejectPo = (orgId: string, id: string, reason: string) =>
 export const cancelPo = (orgId: string, id: string) =>
   api.post(`/organisations/${orgId}/purchase-orders/${id}/cancel`).then((r) => r.data.data);
 
-export const convertPoToBill = (orgId: string, id: string, data: { dueDate?: string; supplierRef?: string; apAccountId?: string }) =>
+export const convertPoToBill = (orgId: string, id: string, data: {
+  dueDate?: string; supplierRef?: string; apAccountId?: string;
+  lineAccounts?: { lineId: string; accountId: string }[];
+}) =>
   api.post(`/organisations/${orgId}/purchase-orders/${id}/convert-to-bill`, data).then((r) => r.data.data as { invoiceId: string; invoiceNumber: string });

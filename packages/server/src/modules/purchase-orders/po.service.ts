@@ -203,6 +203,9 @@ export async function convertToBill(organisationId: string, id: string, userId: 
     .filter((x) => x.remaining > 0.0001);
   if (billable.length === 0) throw new ValidationError('Nothing left to bill on this purchase order.');
 
+  // Per-line account override (e.g. send a fixed-asset line to clearing) keyed by line id.
+  const overrides = new Map((input.lineAccounts ?? []).map((o) => [o.lineId, o.accountId]));
+
   const invoice = await apService.createSupplierInvoice(organisationId, userId, {
     supplierId: po.supplierId,
     supplierRef: input.supplierRef,
@@ -222,7 +225,7 @@ export async function convertToBill(organisationId: string, id: string, userId: 
         unitPrice: unit,
         taxCode: line.taxCode ?? undefined,
         taxAmount: Math.round(taxPerUnit * remaining * 10000) / 10000,
-        accountId: line.accountId ?? undefined,
+        accountId: overrides.get(line.id) ?? line.accountId ?? undefined,
       };
     }),
     skipDuplicateCheck: true,

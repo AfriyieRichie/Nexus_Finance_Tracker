@@ -31,6 +31,9 @@ export const convertToBillSchema = z.object({
   dueDate: z.string().regex(dateRegex).optional(),
   supplierRef: z.string().optional(),
   apAccountId: z.string().uuid().optional(),
+  // Optional per-line GL account overrides (e.g. route a fixed-asset line to the
+  // Fixed Asset Clearing account at billing time). Defaults to the PO line account.
+  lineAccounts: z.array(z.object({ lineId: z.string().uuid(), accountId: z.string().uuid() })).optional(),
 });
 
 export const rejectPoSchema = z.object({ reason: z.string().min(1) });
