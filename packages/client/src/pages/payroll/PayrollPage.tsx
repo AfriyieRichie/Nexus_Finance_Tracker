@@ -271,7 +271,7 @@ function StatutoryTab({ organisationId }: { organisationId: string }) {
                 <div><label className="text-xs">Junior-staff OT threshold (GHS)</label><Input type="number" value={taxRules.juniorStaffOtThreshold} onChange={(e) => setRule('juniorStaffOtThreshold', e.target.value)} className="h-8" /></div>
                 <div><label className="text-xs">Casual rate</label><Input type="number" step="0.5" value={taxRules.casualRate * 100} onChange={(e) => setTaxRules((r) => ({ ...r, casualRate: Number(e.target.value) / 100 }))} className="h-8" /></div>
                 <div><label className="text-xs">Part-time rate</label><Input type="number" step="0.5" value={taxRules.partTimeRate * 100} onChange={(e) => setTaxRules((r) => ({ ...r, partTimeRate: Number(e.target.value) / 100 }))} className="h-8" /></div>
-                <div><label className="text-xs">NSP allowance (monthly GHS)</label><Input type="number" value={taxRules.nspAllowance} onChange={(e) => setRule('nspAllowance', e.target.value)} className="h-8" /></div>
+                <div><label className="text-xs">National NSP allowance (indicative GHS)</label><Input type="number" value={taxRules.nspAllowance} onChange={(e) => setRule('nspAllowance', e.target.value)} className="h-8" /><p className="text-[10px] text-muted-foreground">Reference only — NSP pay is whatever you set on the employee, fully non-taxable.</p></div>
                 <div><label className="text-xs">Tier 3 cap (% of basic)</label><Input type="number" step="0.5" value={taxRules.tier3Cap * 100} onChange={(e) => setTaxRules((r) => ({ ...r, tier3Cap: Number(e.target.value) / 100 }))} className="h-8" /></div>
               </div>
             </div>
@@ -868,7 +868,7 @@ export function EmployeeDialog({ organisationId, emp, employees, onClose, fullPa
               <div className="grid grid-cols-3 gap-3 items-end">
                 <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.isMarried} onChange={(e) => set('isMarried', e.target.checked)} /> Married</label>
                 <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.isDisabled} onChange={(e) => set('isDisabled', e.target.checked)} /> Disabled</label>
-                <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.isNsp} onChange={(e) => set('isNsp', e.target.checked)} /> National Service (NSP)</label>
+                <label className="flex items-center gap-2 text-sm" title="No PAYE and no SSNIT — all pay is non-taxable"><input type="checkbox" checked={form.isNsp} onChange={(e) => set('isNsp', e.target.checked)} /> National Service (NSP)</label>
                 <div><label className="text-sm font-medium">Children</label><Input type="number" min={0} value={form.numberOfChildren} onChange={(e) => set('numberOfChildren', e.target.value)} /></div>
                 <div><label className="text-sm font-medium">Aged dependants</label><Input type="number" min={0} value={form.agedDependants} onChange={(e) => set('agedDependants', e.target.value)} /></div>
                 <div />

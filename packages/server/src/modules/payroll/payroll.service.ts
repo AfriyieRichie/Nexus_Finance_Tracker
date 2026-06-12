@@ -772,22 +772,23 @@ export async function createPayrollRun(
     const reliefCfg  = statutory.reliefs;
     const benefitCfg = statutory.benefits;
 
-    // NSP allowance — fixed, non-taxable cash (added to pay, excluded from PAYE).
-    const nspAllowance = emp.isNsp ? tr.nspAllowance : 0;
+    // National Service Personnel (NSP): everything they are paid is fully
+    // non-taxable, and no SSNIT/pension is deducted at all. Their gross = their net.
+    const isNsp = emp.isNsp === true;
 
-    const grossPay = round4(basic + overtime + bonuses + allowances + otherEarnings + nspAllowance);
+    const grossPay = round4(basic + overtime + bonuses + allowances + otherEarnings);
 
-    // SSNIT & Tier 2 are on basic salary only (GRA: 5.5% / 13% / 5% of basic)
-    const ssnitEmployee = round4(basic * statutory.ssnitEmployeeRate);
-    const ssnitEmployer = round4(basic * (statutory.ssnitEmployerRate - statutory.tier2Rate));
-    const tier2Employer = round4(basic * statutory.tier2Rate);
+    // SSNIT & Tier 2 are on basic salary only (GRA: 5.5% / 13% / 5% of basic) — none for NSP
+    const ssnitEmployee = isNsp ? 0 : round4(basic * statutory.ssnitEmployeeRate);
+    const ssnitEmployer = isNsp ? 0 : round4(basic * (statutory.ssnitEmployerRate - statutory.tier2Rate));
+    const tier2Employer = isNsp ? 0 : round4(basic * statutory.tier2Rate);
 
     // Tier 3 / Provident Fund — on basic salary; PAYE deductible is combined
     // employee + employer contribution capped at the voluntary pension limit (16.5%)
     const t3EmpRate     = emp.tier3EmployeeRate ? Number(emp.tier3EmployeeRate) : 0;
     const t3ErRate      = emp.tier3EmployerRate ? Number(emp.tier3EmployerRate) : 0;
-    const tier3Employee = round4(basic * t3EmpRate);
-    const tier3Employer = round4(basic * t3ErRate);
+    const tier3Employee = isNsp ? 0 : round4(basic * t3EmpRate);
+    const tier3Employer = isNsp ? 0 : round4(basic * t3ErRate);
     const tier3Deductible = round4(Math.min(tier3Employee + tier3Employer, basic * tr.tier3Cap));
 
     // Non-cash taxable benefits valued on TCE (total cash emoluments = basic + allowances)
@@ -816,7 +817,9 @@ export async function createPayrollRun(
     let bonusTax = 0, bonusInPaye = 0;
     let reliefApplied = 0;
 
-    if (flatRate !== null) {
+    if (isNsp) {
+      payeAmount = 0; // NSP income is fully non-taxable
+    } else if (flatRate !== null) {
       const flatBase = round4(basic + allowances + otherEarnings + overtime + bonuses + taxableBenefits);
       payeAmount = round4(flatBase * flatRate);
     } else {
@@ -884,7 +887,7 @@ export async function createPayrollRun(
       overtimePay:      overtime,
       bonuses,
       allowances,
-      otherEarnings:    round4(otherEarnings + nspAllowance), // NSP is non-taxable cash
+      otherEarnings,
       grossPay,
       payeAmount,
       overtimeTax,
