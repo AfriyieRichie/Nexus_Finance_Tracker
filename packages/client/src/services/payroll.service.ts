@@ -25,6 +25,24 @@ export interface StatutoryConfig {
   payeBands: PayeBand[];
   personalRelief: string;
   nonResidentFlatRate: string;
+  reliefs?: ReliefTable | null;
+  benefits?: BenefitTable | null;
+  taxRules?: TaxRules | null;
+}
+
+export interface ReliefTable {
+  marriageChild: number; oldAge: number; childEducation: number;
+  childEducationMax: number; agedDependant: number; disabilityPct: number;
+}
+export interface BenefitTable {
+  accommodation: Record<string, number>;
+  vehicle: Record<string, { pct: number; cap: number }>;
+}
+export interface TaxRules {
+  bonusThreshold: number; bonusRate: number;
+  overtimeThreshold: number; overtimeRateLow: number; overtimeRateHigh: number; juniorStaffOtThreshold: number;
+  casualRate: number; partTimeRate: number; nspAllowance: number;
+  tier3Cap: number; totalPensionCap: number;
 }
 
 export type EmployeeStatus = 'ACTIVE' | 'SUSPENDED' | 'RESIGNED' | 'DISMISSED';
@@ -83,6 +101,9 @@ export interface Employee {
   numberOfChildren: number;
   agedDependants: number;
   vehicleBenefit: string | null;
+  accommodationCode: string | null;
+  vehicleCode: string | null;
+  isNsp: boolean;
   department: { id: string; name: string } | null;
   costCentre: { id: string; name: string } | null;
   salaryExpenseAccount: { id: string; code: string; name: string } | null;

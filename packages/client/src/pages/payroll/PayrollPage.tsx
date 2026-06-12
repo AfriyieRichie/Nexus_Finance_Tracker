@@ -30,6 +30,16 @@ function fmt(n: string | number | null | undefined, dp = 2) {
 
 const RETIREMENT_AGE = 60; // Ghana statutory retirement age
 
+const DEFAULT_RELIEFS = { marriageChild: 1200, oldAge: 1500, childEducation: 600, childEducationMax: 3, agedDependant: 1000, disabilityPct: 0.25 };
+const DEFAULT_BENEFITS = {
+  accommodation: { AF: 0.10, AO: 0.075, FO: 0.025, SA: 0.025 } as Record<string, number>,
+  vehicle: { FVD: { pct: 0.125, cap: 1500 }, VF: { pct: 0.10, cap: 1250 }, V: { pct: 0.05, cap: 625 }, F: { pct: 0.05, cap: 625 } } as Record<string, { pct: number; cap: number }>,
+};
+const DEFAULT_TAX_RULES = {
+  bonusThreshold: 0.15, bonusRate: 0.05, overtimeThreshold: 0.50, overtimeRateLow: 0.05, overtimeRateHigh: 0.10,
+  juniorStaffOtThreshold: 1500, casualRate: 0.05, partTimeRate: 0.10, nspAllowance: 715, tier3Cap: 0.165, totalPensionCap: 0.35,
+};
+
 function ageFromDob(dob: string | null | undefined): number | null {
   if (!dob) return null;
   const d = new Date(dob);
@@ -112,6 +122,11 @@ function StatutoryTab({ organisationId }: { organisationId: string }) {
     nonResidentFlatRate: '25',
   });
   const [bands, setBands] = useState(DEFAULT_PAYE_BANDS);
+  const [reliefs, setReliefs] = useState(DEFAULT_RELIEFS);
+  const [benefits, setBenefits] = useState(DEFAULT_BENEFITS);
+  const [taxRules, setTaxRules] = useState(DEFAULT_TAX_RULES);
+  const setRelief = (k: keyof typeof DEFAULT_RELIEFS, v: string) => setReliefs((r) => ({ ...r, [k]: Number(v) }));
+  const setRule = (k: keyof typeof DEFAULT_TAX_RULES, v: string) => setTaxRules((r) => ({ ...r, [k]: Number(v) }));
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
   function openConfigure(cfg?: typeof configs[number]) {
@@ -132,10 +147,14 @@ function StatutoryTab({ organisationId }: { organisationId: string }) {
           rate: String(b.rate),
         }))
       );
+      setReliefs({ ...DEFAULT_RELIEFS, ...(cfg.reliefs ?? {}) });
+      setBenefits({ ...DEFAULT_BENEFITS, ...(cfg.benefits ?? {}) });
+      setTaxRules({ ...DEFAULT_TAX_RULES, ...(cfg.taxRules ?? {}) });
     } else {
       setEditConfig(null);
       setForm({ taxYear: new Date().getFullYear().toString(), ssnitEmployeeRate: '5.5', ssnitEmployerRate: '13', tier2Rate: '5', personalRelief: '0', nonResidentFlatRate: '25' });
       setBands(DEFAULT_PAYE_BANDS);
+      setReliefs(DEFAULT_RELIEFS); setBenefits(DEFAULT_BENEFITS); setTaxRules(DEFAULT_TAX_RULES);
     }
     setOpen(true);
   }
@@ -160,6 +179,9 @@ function StatutoryTab({ organisationId }: { organisationId: string }) {
         max:  b.max === '' ? null : Number(b.max),
         rate: Number(b.rate),
       })),
+      reliefs,
+      benefits,
+      taxRules,
     }),
     onSuccess: () => { setSaveError(null); void qc.invalidateQueries({ queryKey: ['payroll-statutory', organisationId] }); setOpen(false); },
     onError: (err: unknown) => {
@@ -223,6 +245,56 @@ function StatutoryTab({ organisationId }: { organisationId: string }) {
             <div><label className="text-sm font-medium">Tier 2 Rate (% of employer)</label><Input value={form.tier2Rate} onChange={(e) => set('tier2Rate', e.target.value)} type="number" step="0.1" /></div>
             <div><label className="text-sm font-medium">Monthly Personal Relief (GHS)</label><Input value={form.personalRelief} onChange={(e) => set('personalRelief', e.target.value)} type="number" /></div>
             <div><label className="text-sm font-medium">Non-resident Flat PAYE Rate (%)</label><Input value={form.nonResidentFlatRate} onChange={(e) => set('nonResidentFlatRate', e.target.value)} type="number" step="0.5" /><p className="text-xs text-muted-foreground mt-0.5">Applied to non-resident employees from this tax year onward.</p></div>
+
+            {/* Personal reliefs (annual GHS) */}
+            <div className="border-t pt-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Personal reliefs (annual GHS)</p>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div><label className="text-xs">Marriage / responsibility</label><Input type="number" value={reliefs.marriageChild} onChange={(e) => setRelief('marriageChild', e.target.value)} className="h-8" /></div>
+                <div><label className="text-xs">Old age (≥60)</label><Input type="number" value={reliefs.oldAge} onChange={(e) => setRelief('oldAge', e.target.value)} className="h-8" /></div>
+                <div><label className="text-xs">Child education (per child)</label><Input type="number" value={reliefs.childEducation} onChange={(e) => setRelief('childEducation', e.target.value)} className="h-8" /></div>
+                <div><label className="text-xs">Max children</label><Input type="number" value={reliefs.childEducationMax} onChange={(e) => setRelief('childEducationMax', e.target.value)} className="h-8" /></div>
+                <div><label className="text-xs">Aged dependant (each)</label><Input type="number" value={reliefs.agedDependant} onChange={(e) => setRelief('agedDependant', e.target.value)} className="h-8" /></div>
+                <div><label className="text-xs">Disability (% of AI)</label><Input type="number" step="0.01" value={reliefs.disabilityPct * 100} onChange={(e) => setReliefs((r) => ({ ...r, disabilityPct: Number(e.target.value) / 100 }))} className="h-8" /></div>
+              </div>
+            </div>
+
+            {/* Tax rules & thresholds */}
+            <div className="border-t pt-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Rates & thresholds (%)</p>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div><label className="text-xs">Bonus rate</label><Input type="number" step="0.5" value={taxRules.bonusRate * 100} onChange={(e) => setTaxRules((r) => ({ ...r, bonusRate: Number(e.target.value) / 100 }))} className="h-8" /></div>
+                <div><label className="text-xs">Bonus threshold (% of basic)</label><Input type="number" step="0.5" value={taxRules.bonusThreshold * 100} onChange={(e) => setTaxRules((r) => ({ ...r, bonusThreshold: Number(e.target.value) / 100 }))} className="h-8" /></div>
+                <div><label className="text-xs">Overtime low rate</label><Input type="number" step="0.5" value={taxRules.overtimeRateLow * 100} onChange={(e) => setTaxRules((r) => ({ ...r, overtimeRateLow: Number(e.target.value) / 100 }))} className="h-8" /></div>
+                <div><label className="text-xs">Overtime high rate</label><Input type="number" step="0.5" value={taxRules.overtimeRateHigh * 100} onChange={(e) => setTaxRules((r) => ({ ...r, overtimeRateHigh: Number(e.target.value) / 100 }))} className="h-8" /></div>
+                <div><label className="text-xs">Overtime threshold (% of basic)</label><Input type="number" step="0.5" value={taxRules.overtimeThreshold * 100} onChange={(e) => setTaxRules((r) => ({ ...r, overtimeThreshold: Number(e.target.value) / 100 }))} className="h-8" /></div>
+                <div><label className="text-xs">Junior-staff OT threshold (GHS)</label><Input type="number" value={taxRules.juniorStaffOtThreshold} onChange={(e) => setRule('juniorStaffOtThreshold', e.target.value)} className="h-8" /></div>
+                <div><label className="text-xs">Casual rate</label><Input type="number" step="0.5" value={taxRules.casualRate * 100} onChange={(e) => setTaxRules((r) => ({ ...r, casualRate: Number(e.target.value) / 100 }))} className="h-8" /></div>
+                <div><label className="text-xs">Part-time rate</label><Input type="number" step="0.5" value={taxRules.partTimeRate * 100} onChange={(e) => setTaxRules((r) => ({ ...r, partTimeRate: Number(e.target.value) / 100 }))} className="h-8" /></div>
+                <div><label className="text-xs">NSP allowance (monthly GHS)</label><Input type="number" value={taxRules.nspAllowance} onChange={(e) => setRule('nspAllowance', e.target.value)} className="h-8" /></div>
+                <div><label className="text-xs">Tier 3 cap (% of basic)</label><Input type="number" step="0.5" value={taxRules.tier3Cap * 100} onChange={(e) => setTaxRules((r) => ({ ...r, tier3Cap: Number(e.target.value) / 100 }))} className="h-8" /></div>
+              </div>
+            </div>
+
+            {/* Vehicle benefit table */}
+            <div className="border-t pt-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Vehicle benefit (% of TCE · monthly cap GHS)</p>
+              <div className="space-y-1">
+                {(['FVD', 'VF', 'V', 'F'] as const).map((code) => (
+                  <div key={code} className="grid grid-cols-[3rem_1fr_1fr] gap-2 items-center text-sm">
+                    <span className="font-mono text-xs">{code}</span>
+                    <Input type="number" step="0.5" value={(benefits.vehicle[code]?.pct ?? 0) * 100} onChange={(e) => setBenefits((b) => ({ ...b, vehicle: { ...b.vehicle, [code]: { ...b.vehicle[code], pct: Number(e.target.value) / 100 } } }))} className="h-7" placeholder="%" />
+                    <Input type="number" value={benefits.vehicle[code]?.cap ?? 0} onChange={(e) => setBenefits((b) => ({ ...b, vehicle: { ...b.vehicle, [code]: { ...b.vehicle[code], cap: Number(e.target.value) } } }))} className="h-7" placeholder="cap" />
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mt-3 mb-2">Accommodation benefit (% of TCE)</p>
+              <div className="grid grid-cols-4 gap-2 text-sm">
+                {(['AF', 'AO', 'FO', 'SA'] as const).map((code) => (
+                  <div key={code}><label className="text-xs font-mono">{code}</label><Input type="number" step="0.5" value={(benefits.accommodation[code] ?? 0) * 100} onChange={(e) => setBenefits((b) => ({ ...b, accommodation: { ...b.accommodation, [code]: Number(e.target.value) / 100 } }))} className="h-7" /></div>
+                ))}
+              </div>
+            </div>
 
             <div>
               <div className="flex items-center justify-between mb-1">
@@ -466,6 +538,7 @@ export function EmployeeDialog({ organisationId, emp, employees, onClose, fullPa
     gender: '', dateOfBirth: '',
     isMarried: false, isDisabled: false,
     numberOfChildren: '0', agedDependants: '0', vehicleBenefit: '',
+    accommodationCode: '', vehicleCode: '', isNsp: false,
     bankName: '', bankAccountNumber: '', bankBranch: '',
   };
 
@@ -500,6 +573,9 @@ export function EmployeeDialog({ organisationId, emp, employees, onClose, fullPa
     numberOfChildren:       String(emp.numberOfChildren ?? 0),
     agedDependants:         String(emp.agedDependants ?? 0),
     vehicleBenefit:         emp.vehicleBenefit ? String(emp.vehicleBenefit) : '',
+    accommodationCode:      emp.accommodationCode ?? '',
+    vehicleCode:            emp.vehicleCode ?? '',
+    isNsp:                  emp.isNsp ?? false,
     bankName:               emp.bankName ?? '',
     bankAccountNumber:      emp.bankAccountNumber ?? '',
     bankBranch:             emp.bankBranch ?? '',
@@ -584,7 +660,9 @@ export function EmployeeDialog({ organisationId, emp, employees, onClose, fullPa
         dateOfBirth:            form.dateOfBirth || undefined,
         numberOfChildren:       Number(form.numberOfChildren || 0),
         agedDependants:         Number(form.agedDependants || 0),
-        vehicleBenefit:         form.vehicleBenefit ? Number(form.vehicleBenefit) : undefined,
+        accommodationCode:      form.accommodationCode || null,
+        vehicleCode:            form.vehicleCode || null,
+        isNsp:                  form.isNsp,
       };
       return emp
         ? payrollSvc.updateEmployee(organisationId, emp.id, payload as unknown as Parameters<typeof payrollSvc.updateEmployee>[2])
@@ -790,10 +868,33 @@ export function EmployeeDialog({ organisationId, emp, employees, onClose, fullPa
               <div className="grid grid-cols-3 gap-3 items-end">
                 <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.isMarried} onChange={(e) => set('isMarried', e.target.checked)} /> Married</label>
                 <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.isDisabled} onChange={(e) => set('isDisabled', e.target.checked)} /> Disabled</label>
-                <div />
+                <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.isNsp} onChange={(e) => set('isNsp', e.target.checked)} /> National Service (NSP)</label>
                 <div><label className="text-sm font-medium">Children</label><Input type="number" min={0} value={form.numberOfChildren} onChange={(e) => set('numberOfChildren', e.target.value)} /></div>
                 <div><label className="text-sm font-medium">Aged dependants</label><Input type="number" min={0} value={form.agedDependants} onChange={(e) => set('agedDependants', e.target.value)} /></div>
-                <div><label className="text-sm font-medium">Vehicle benefit (monthly)</label><Input type="number" min={0} value={form.vehicleBenefit} onChange={(e) => set('vehicleBenefit', e.target.value)} placeholder="0.00" /></div>
+                <div />
+              </div>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mt-3 mb-2">Non-cash benefits (taxed on TCE)</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-sm font-medium">Accommodation</label>
+                  <Select value={form.accommodationCode} onChange={(e) => set('accommodationCode', e.target.value)}>
+                    <option value="">None</option>
+                    <option value="AF">Accommodation with furnishings (10%)</option>
+                    <option value="AO">Accommodation only (7.5%)</option>
+                    <option value="FO">Furnishings only (2.5%)</option>
+                    <option value="SA">Shared accommodation (2.5%)</option>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Vehicle / fuel</label>
+                  <Select value={form.vehicleCode} onChange={(e) => set('vehicleCode', e.target.value)}>
+                    <option value="">None</option>
+                    <option value="FVD">Vehicle, fuel & driver (12.5%, cap 1,500)</option>
+                    <option value="VF">Vehicle with fuel (10%, cap 1,250)</option>
+                    <option value="V">Vehicle only (5%, cap 625)</option>
+                    <option value="F">Fuel only (5%, cap 625)</option>
+                  </Select>
+                </div>
               </div>
             </div>
           </div>
@@ -1184,7 +1285,9 @@ function reliefSummary(e: Employee): string {
   if (e.numberOfChildren > 0) parts.push(`${e.numberOfChildren} child${e.numberOfChildren === 1 ? '' : 'ren'}`);
   if (e.agedDependants > 0) parts.push(`${e.agedDependants} aged dep.`);
   if (e.isDisabled) parts.push('Disabled');
-  if (e.vehicleBenefit && Number(e.vehicleBenefit) > 0) parts.push('Vehicle');
+  if (e.isNsp) parts.push('NSP');
+  if (e.vehicleCode) parts.push(`Vehicle (${e.vehicleCode})`);
+  if (e.accommodationCode) parts.push(`Accom (${e.accommodationCode})`);
   return parts.length ? parts.join(' · ') : '—';
 }
 
