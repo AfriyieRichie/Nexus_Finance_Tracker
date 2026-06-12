@@ -12,6 +12,9 @@ export const upsertStatutoryConfigSchema = z.object({
   tier2Rate: z.coerce.number().min(0).max(1).optional(),
   personalRelief: z.coerce.number().nonnegative().optional(),
   nonResidentFlatRate: z.coerce.number().min(0).max(1).optional(),
+  reliefs: z.record(z.any()).optional(),
+  benefits: z.record(z.any()).optional(),
+  taxRules: z.record(z.any()).optional(),
   payeBands: z.array(z.object({
     min: z.coerce.number().nonnegative(),
     max: z.coerce.number().positive().nullable(),
@@ -56,6 +59,9 @@ export const createEmployeeSchema = z.object({
   numberOfChildren: z.coerce.number().int().min(0).optional(),
   agedDependants: z.coerce.number().int().min(0).optional(),
   vehicleBenefit: z.coerce.number().nonnegative().optional(),
+  accommodationCode: z.enum(['AF', 'AO', 'FO', 'SA']).nullable().optional(),
+  vehicleCode: z.enum(['FVD', 'VF', 'V', 'F']).nullable().optional(),
+  isNsp: z.boolean().optional(),
 });
 
 export const updateEmployeeSchema = createEmployeeSchema.partial().extend({

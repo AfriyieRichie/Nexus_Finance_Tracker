@@ -1872,6 +1872,14 @@ model PayrollStatutoryConfig {
   personalRelief    Decimal  @default(0)      @db.Decimal(20, 4)
   // Flat PAYE rate for non-resident employees (decimal, e.g. 0.25 = 25%)
   nonResidentFlatRate Decimal @default(0.25)  @db.Decimal(6, 4)
+  // Configurable lookup tables (defaults applied in code when null):
+  //   reliefs:  { marriageChild, oldAge, childEducation, childEducationMax, agedDependant, disabilityPct }
+  //   benefits: { accommodation:{AF,AO,FO,SA}, vehicle:{FVD:{pct,cap},...} }
+  //   taxRules: { bonusThreshold, bonusRate, overtimeThreshold, overtimeRateLow, overtimeRateHigh,
+  //               juniorStaffOtThreshold, casualRate, partTimeRate, nspAllowance, tier3Cap, totalPensionCap }
+  reliefs           Json?
+  benefits          Json?
+  taxRules          Json?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -1921,8 +1929,13 @@ model Employee {
   isDisabled             Boolean        @default(false)
   numberOfChildren       Int            @default(0)
   agedDependants         Int            @default(0)
-  // Non-cash taxable benefit (e.g. vehicle), monthly amount
+  // Non-cash taxable benefit (e.g. vehicle), monthly amount (legacy — superseded by codes)
   vehicleBenefit         Decimal?       @db.Decimal(20, 4)
+  // GRA benefit codes: accommodation AF/AO/FO/SA, vehicle FVD/VF/V/F (null = none)
+  accommodationCode      String?
+  vehicleCode            String?
+  // National Service Personnel — receives a fixed, non-taxable NSP allowance
+  isNsp                  Boolean        @default(false)
   createdAt              DateTime       @default(now())
   updatedAt              DateTime       @updatedAt
 

@@ -21,6 +21,9 @@ export interface UpsertStatutoryConfigInput {
   payeBands?: PayeBand[];
   personalRelief?: number;
   nonResidentFlatRate?: number;
+  reliefs?: Record<string, unknown>;
+  benefits?: Record<string, unknown>;
+  taxRules?: Record<string, unknown>;
 }
 
 export interface CreateEmployeeInput {
@@ -57,6 +60,9 @@ export interface CreateEmployeeInput {
   numberOfChildren?: number;
   agedDependants?: number;
   vehicleBenefit?: number;
+  accommodationCode?: 'AF' | 'AO' | 'FO' | 'SA' | null;
+  vehicleCode?: 'FVD' | 'VF' | 'V' | 'F' | null;
+  isNsp?: boolean;
 }
 
 export interface UpdateEmployeeInput extends Partial<CreateEmployeeInput> {
@@ -129,18 +135,58 @@ export interface UpdateLoanInput {
 // ─── Ghana 2024 Default PAYE Bands (monthly GHS) ─────────────────────────────
 
 const DEFAULT_PAYE_BANDS: PayeBand[] = [
-  { min: 0,     max: 490,   rate: 0    },
-  { min: 490,   max: 600,   rate: 5    },
-  { min: 600,   max: 730,   rate: 10   },
-  { min: 730,   max: 3730,  rate: 17.5 },
-  { min: 3730,  max: 20130, rate: 25   },
-  { min: 20130, max: null,  rate: 35   },
+  { min: 0,         max: 490,       rate: 0    },
+  { min: 490,       max: 600,       rate: 5    },
+  { min: 600,       max: 730,       rate: 10   },
+  { min: 730,       max: 3896.67,   rate: 17.5 },
+  { min: 3896.67,   max: 19896.67,  rate: 25   },
+  { min: 19896.67,  max: 50416.67,  rate: 30   },
+  { min: 50416.67,  max: null,      rate: 35   },
 ];
+
+// ─── Configurable reliefs / benefits / tax rules (defaults; per-year overridable) ──
+
+export interface ReliefTable {
+  marriageChild: number; oldAge: number; childEducation: number;
+  childEducationMax: number; agedDependant: number; disabilityPct: number;
+}
+export interface BenefitTable {
+  accommodation: Record<string, number>;            // code → % of TCE
+  vehicle: Record<string, { pct: number; cap: number }>;
+}
+export interface TaxRules {
+  bonusThreshold: number; bonusRate: number;
+  overtimeThreshold: number; overtimeRateLow: number; overtimeRateHigh: number; juniorStaffOtThreshold: number;
+  casualRate: number; partTimeRate: number; nspAllowance: number;
+  tier3Cap: number; totalPensionCap: number;
+}
+
+const DEFAULT_RELIEFS: ReliefTable = {
+  marriageChild: 1200, oldAge: 1500, childEducation: 600, childEducationMax: 3, agedDependant: 1000, disabilityPct: 0.25,
+};
+const DEFAULT_BENEFITS: BenefitTable = {
+  accommodation: { AF: 0.10, AO: 0.075, FO: 0.025, SA: 0.025 },
+  vehicle: { FVD: { pct: 0.125, cap: 1500 }, VF: { pct: 0.10, cap: 1250 }, V: { pct: 0.05, cap: 625 }, F: { pct: 0.05, cap: 625 } },
+};
+const DEFAULT_TAX_RULES: TaxRules = {
+  bonusThreshold: 0.15, bonusRate: 0.05,
+  overtimeThreshold: 0.50, overtimeRateLow: 0.05, overtimeRateHigh: 0.10, juniorStaffOtThreshold: 1500,
+  casualRate: 0.05, partTimeRate: 0.10, nspAllowance: 715,
+  tier3Cap: 0.165, totalPensionCap: 0.35,
+};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function round4(n: number): number {
   return Math.round(n * 10000) / 10000;
+}
+
+function ageFromDob(dob: Date | null | undefined, asOf: Date): number | null {
+  if (!dob) return null;
+  let age = asOf.getFullYear() - dob.getFullYear();
+  const m = asOf.getMonth() - dob.getMonth();
+  if (m < 0 || (m === 0 && asOf.getDate() < dob.getDate())) age--;
+  return age;
 }
 
 export function calculatePaye(monthlyTaxable: number, bands: PayeBand[], personalRelief = 0): number {
@@ -166,6 +212,9 @@ async function getOrDefaultStatutoryConfig(organisationId: string, taxYear: numb
     payeBands:         cfg ? (cfg.payeBands as unknown as PayeBand[]) : DEFAULT_PAYE_BANDS,
     personalRelief:    cfg ? Number(cfg.personalRelief)    : 0,
     nonResidentFlatRate: cfg ? Number(cfg.nonResidentFlatRate) : 0.25,
+    reliefs:  { ...DEFAULT_RELIEFS,  ...((cfg?.reliefs  as object) ?? {}) } as ReliefTable,
+    benefits: { ...DEFAULT_BENEFITS, ...((cfg?.benefits as object) ?? {}) } as BenefitTable,
+    taxRules: { ...DEFAULT_TAX_RULES, ...((cfg?.taxRules as object) ?? {}) } as TaxRules,
   };
 }
 
@@ -206,6 +255,9 @@ export async function upsertStatutoryConfig(organisationId: string, input: Upser
       ...(input.payeBands         !== undefined && { payeBands:         input.payeBands as object }),
       ...(input.personalRelief    !== undefined && { personalRelief:    input.personalRelief }),
       ...(input.nonResidentFlatRate !== undefined && { nonResidentFlatRate: input.nonResidentFlatRate }),
+      ...(input.reliefs  !== undefined && { reliefs:  input.reliefs as object }),
+      ...(input.benefits !== undefined && { benefits: input.benefits as object }),
+      ...(input.taxRules !== undefined && { taxRules: input.taxRules as object }),
     },
     create: {
       organisationId,
@@ -216,6 +268,9 @@ export async function upsertStatutoryConfig(organisationId: string, input: Upser
       payeBands:         (input.payeBands ?? DEFAULT_PAYE_BANDS) as object,
       personalRelief:    input.personalRelief    ?? 0,
       nonResidentFlatRate: input.nonResidentFlatRate ?? 0.25,
+      reliefs:  (input.reliefs  ?? DEFAULT_RELIEFS) as object,
+      benefits: (input.benefits ?? DEFAULT_BENEFITS) as object,
+      taxRules: (input.taxRules ?? DEFAULT_TAX_RULES) as object,
     },
   });
 }
@@ -301,6 +356,9 @@ export async function createEmployee(organisationId: string, input: CreateEmploy
       numberOfChildren:       input.numberOfChildren ?? 0,
       agedDependants:         input.agedDependants ?? 0,
       vehicleBenefit:         input.vehicleBenefit,
+      accommodationCode:      input.accommodationCode ?? null,
+      vehicleCode:            input.vehicleCode ?? null,
+      isNsp:                  input.isNsp ?? false,
     },
     include: {
       department:           { select: { id: true, name: true } },
@@ -350,6 +408,9 @@ export async function updateEmployee(organisationId: string, id: string, input: 
       ...(input.numberOfChildren      !== undefined && { numberOfChildren:      input.numberOfChildren }),
       ...(input.agedDependants        !== undefined && { agedDependants:        input.agedDependants }),
       ...(input.vehicleBenefit        !== undefined && { vehicleBenefit:        input.vehicleBenefit }),
+      ...(input.accommodationCode     !== undefined && { accommodationCode:     input.accommodationCode }),
+      ...(input.vehicleCode           !== undefined && { vehicleCode:           input.vehicleCode }),
+      ...(input.isNsp                 !== undefined && { isNsp:                 input.isNsp }),
     },
     include: {
       department:           { select: { id: true, name: true } },
@@ -595,6 +656,8 @@ export async function createPayrollRun(
       id: true, basicSalary: true, departmentId: true, costCentreId: true,
       salaryExpenseAccountId: true, tier3EmployeeRate: true, tier3EmployerRate: true,
       isResident: true, overtimeType: true, overtimeFixedAmount: true, overtimeMultiplier: true,
+      employmentType: true, accommodationCode: true, vehicleCode: true, isNsp: true,
+      isMarried: true, isDisabled: true, numberOfChildren: true, agedDependants: true, dateOfBirth: true,
       components: {
         where:   { isActive: true, effectiveFrom: { lt: paymentDateNextDay } },
         orderBy: { effectiveFrom: 'desc' },
@@ -705,7 +768,14 @@ export async function createPayrollRun(
       }
     }
 
-    const grossPay = round4(basic + overtime + bonuses + allowances + otherEarnings);
+    const tr      = statutory.taxRules;
+    const reliefCfg  = statutory.reliefs;
+    const benefitCfg = statutory.benefits;
+
+    // NSP allowance — fixed, non-taxable cash (added to pay, excluded from PAYE).
+    const nspAllowance = emp.isNsp ? tr.nspAllowance : 0;
+
+    const grossPay = round4(basic + overtime + bonuses + allowances + otherEarnings + nspAllowance);
 
     // SSNIT & Tier 2 are on basic salary only (GRA: 5.5% / 13% / 5% of basic)
     const ssnitEmployee = round4(basic * statutory.ssnitEmployeeRate);
@@ -713,57 +783,76 @@ export async function createPayrollRun(
     const tier2Employer = round4(basic * statutory.tier2Rate);
 
     // Tier 3 / Provident Fund — on basic salary; PAYE deductible is combined
-    // employee + employer contribution capped at 16.5% of basic (GRA Act 896)
+    // employee + employer contribution capped at the voluntary pension limit (16.5%)
     const t3EmpRate     = emp.tier3EmployeeRate ? Number(emp.tier3EmployeeRate) : 0;
     const t3ErRate      = emp.tier3EmployerRate ? Number(emp.tier3EmployerRate) : 0;
     const tier3Employee = round4(basic * t3EmpRate);
     const tier3Employer = round4(basic * t3ErRate);
-    const tier3Deductible = round4(Math.min(tier3Employee + tier3Employer, basic * 0.165));
+    const tier3Deductible = round4(Math.min(tier3Employee + tier3Employer, basic * tr.tier3Cap));
+
+    // Non-cash taxable benefits valued on TCE (total cash emoluments = basic + allowances)
+    const tce = round4(basic + allowances);
+    const accPct = emp.accommodationCode ? (benefitCfg.accommodation[emp.accommodationCode] ?? 0) : 0;
+    const accommodationBenefit = round4(tce * accPct);
+    let vehicleBenefit = 0;
+    if (emp.vehicleCode && benefitCfg.vehicle[emp.vehicleCode]) {
+      const v = benefitCfg.vehicle[emp.vehicleCode];
+      vehicleBenefit = round4(Math.min(tce * v.pct, v.cap));
+    }
+    const taxableBenefits = round4(accommodationBenefit + vehicleBenefit);
 
     const isResident    = emp.isResident !== false;
-    const isJuniorStaff = (basic * 12) <= 18_000;
+    const isJuniorStaff = basic <= tr.juniorStaffOtThreshold;
 
-    // Overtime tax — GRA Act 896
-    let overtimeTax    = 0;
-    let overtimeInPaye = 0;
-    if (overtime > 0) {
-      if (!isResident) {
-        overtimeTax = round4(overtime * 0.20);
-      } else if (isJuniorStaff) {
-        const halfBasic = round4(basic * 0.5);
-        const at5pct    = round4(Math.min(overtime, halfBasic));
-        const at10pct   = round4(Math.max(0, overtime - halfBasic));
-        overtimeTax     = round4(at5pct * 0.05 + at10pct * 0.10);
-      } else {
-        overtimeInPaye = overtime;
+    // Flat-rate employees (non-resident / casual / part-time) are taxed at a single
+    // rate on ALL income — no bands, reliefs, or separate bonus/overtime treatment.
+    let flatRate: number | null = null;
+    if (!isResident)                      flatRate = statutory.nonResidentFlatRate;
+    else if (emp.employmentType === 'CASUAL')    flatRate = tr.casualRate;
+    else if (emp.employmentType === 'PART_TIME') flatRate = tr.partTimeRate;
+
+    let payeAmount = 0;
+    let overtimeTax = 0, overtimeInPaye = 0;
+    let bonusTax = 0, bonusInPaye = 0;
+    let reliefApplied = 0;
+
+    if (flatRate !== null) {
+      const flatBase = round4(basic + allowances + otherEarnings + overtime + bonuses + taxableBenefits);
+      payeAmount = round4(flatBase * flatRate);
+    } else {
+      // Overtime tax — junior staff: low rate up to the OT threshold, high rate above
+      if (overtime > 0) {
+        if (isJuniorStaff) {
+          const otThreshold = round4(basic * tr.overtimeThreshold);
+          const atLow  = round4(Math.min(overtime, otThreshold));
+          const atHigh = round4(Math.max(0, overtime - otThreshold));
+          overtimeTax = round4(atLow * tr.overtimeRateLow + atHigh * tr.overtimeRateHigh);
+        } else {
+          overtimeInPaye = overtime;
+        }
       }
-    }
-
-    // Bonus tax — GRA: 5% on first 15% of annual basic; excess added to PAYE income
-    let bonusTax    = 0;
-    let bonusInPaye = 0;
-    if (bonuses > 0) {
-      if (!isResident) {
-        bonusTax = round4(bonuses * 0.20);
-      } else {
-        const monthlyThreshold = round4(basic * 0.15); // 15% of monthly basic salary
-        const at5pct           = round4(Math.min(bonuses, monthlyThreshold));
-        const excess           = round4(Math.max(0, bonuses - monthlyThreshold));
-        bonusTax              = round4(at5pct * 0.05);
-        bonusInPaye           = excess;
+      // Bonus tax — flat rate on the portion ≤ threshold of basic; excess to PAYE
+      if (bonuses > 0) {
+        const bonusThreshold = round4(basic * tr.bonusThreshold);
+        const atRate = round4(Math.min(bonuses, bonusThreshold));
+        bonusTax    = round4(atRate * tr.bonusRate);
+        bonusInPaye = round4(Math.max(0, bonuses - bonusThreshold));
       }
-    }
+      // Personal reliefs (annual → monthly), driven by employee attributes
+      const age = ageFromDob(emp.dateOfBirth, paymentDate);
+      let annualRelief = 0;
+      if (emp.isMarried) annualRelief += reliefCfg.marriageChild;
+      if (age !== null && age >= 60) annualRelief += reliefCfg.oldAge;
+      annualRelief += Math.min(emp.numberOfChildren, reliefCfg.childEducationMax) * reliefCfg.childEducation;
+      annualRelief += emp.agedDependants * reliefCfg.agedDependant;
 
-    // PAYE on taxable employment income
-    // Qualifying bonus (≤15% of annual basic) is excluded — it has its own flat tax
-    // Excess bonus and non-qualifying overtime are included in the PAYE base
-    const payeGross     = round4(basic + allowances + otherEarnings + bonusInPaye + overtimeInPaye);
-    const taxableIncome = round4(Math.max(0, payeGross - ssnitEmployee - tier3Deductible));
-    // Non-residents are taxed at a flat rate (configurable, applied prospectively
-    // from the statutory config) with no bands or reliefs; residents use the bands.
-    const payeAmount    = isResident
-      ? calculatePaye(taxableIncome, bands, statutory.personalRelief)
-      : round4(payeGross * statutory.nonResidentFlatRate);
+      const payeGross        = round4(basic + allowances + otherEarnings + bonusInPaye + overtimeInPaye + taxableBenefits);
+      const assessableIncome = round4(Math.max(0, payeGross - ssnitEmployee - tier3Deductible));
+      const disabilityRelief = emp.isDisabled ? round4(assessableIncome * reliefCfg.disabilityPct) : 0;
+      reliefApplied          = round4(annualRelief / 12 + disabilityRelief + statutory.personalRelief);
+      const taxableIncome    = round4(Math.max(0, assessableIncome - reliefApplied));
+      payeAmount = calculatePaye(taxableIncome, bands, 0);
+    }
 
     const totalEmployeeDeductions = round4(ssnitEmployee + tier3Employee + payeAmount + overtimeTax + bonusTax + otherDeductions);
     const netPay                  = round4(grossPay - totalEmployeeDeductions);
@@ -795,7 +884,7 @@ export async function createPayrollRun(
       overtimePay:      overtime,
       bonuses,
       allowances,
-      otherEarnings,
+      otherEarnings:    round4(otherEarnings + nspAllowance), // NSP is non-taxable cash
       grossPay,
       payeAmount,
       overtimeTax,
