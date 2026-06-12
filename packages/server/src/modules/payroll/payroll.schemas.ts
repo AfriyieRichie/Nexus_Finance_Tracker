@@ -74,6 +74,19 @@ export const setEmployeeStatusSchema = z.object({
   endDate: z.string().regex(dateRegex).optional(),
 });
 
+// Bulk onboarding — department is given by NAME (resolved server-side); employee
+// number is optional (auto-generated when blank); UUID-only fields are excluded.
+export const bulkCreateEmployeesSchema = z.object({
+  employees: z.array(
+    createEmployeeSchema
+      .omit({ departmentId: true, costCentreId: true, salaryExpenseAccountId: true })
+      .extend({
+        employeeNumber: z.string().optional(),
+        department: z.string().optional(),
+      }),
+  ).min(1).max(2000),
+});
+
 // ─── Salary Components ────────────────────────────────────────────────────────
 
 export const createSalaryComponentSchema = z.object({
@@ -150,6 +163,7 @@ export type UpsertStatutoryConfigInput = z.infer<typeof upsertStatutoryConfigSch
 export type CreateEmployeeInput = z.infer<typeof createEmployeeSchema>;
 export type UpdateEmployeeInput = z.infer<typeof updateEmployeeSchema>;
 export type SetEmployeeStatusInput = z.infer<typeof setEmployeeStatusSchema>;
+export type BulkCreateEmployeesInput = z.infer<typeof bulkCreateEmployeesSchema>;
 export type CreateSalaryComponentInput = z.infer<typeof createSalaryComponentSchema>;
 export type AssignComponentInput = z.infer<typeof assignComponentSchema>;
 export type CreateLoanInput = z.infer<typeof createLoanSchema>;

@@ -7,6 +7,7 @@ import {
   createEmployeeSchema,
   updateEmployeeSchema,
   setEmployeeStatusSchema,
+  bulkCreateEmployeesSchema,
   createSalaryComponentSchema,
   updateSalaryComponentSchema,
   assignComponentSchema,
@@ -58,6 +59,12 @@ export const setEmployeeStatus = asyncHandler(async (req: Request, res: Response
   const input = setEmployeeStatusSchema.parse(req.body);
   const data = await svc.setEmployeeStatus(req.params.organisationId, req.params.id, input);
   return sendSuccess(res, data, `Employee marked ${input.status.toLowerCase()}`);
+});
+
+export const bulkCreateEmployees = asyncHandler(async (req: Request, res: Response) => {
+  const input = bulkCreateEmployeesSchema.parse(req.body);
+  const result = await svc.bulkCreateEmployees(req.params.organisationId, input.employees);
+  return sendSuccess(res, result, `${result.created} of ${result.total} employees imported`);
 });
 
 export const assignComponent = asyncHandler(async (req: Request, res: Response) => {

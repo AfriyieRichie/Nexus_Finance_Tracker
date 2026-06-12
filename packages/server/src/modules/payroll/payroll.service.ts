@@ -368,6 +368,47 @@ export async function createEmployee(organisationId: string, input: CreateEmploy
   });
 }
 
+export interface BulkEmployeeRow extends Omit<CreateEmployeeInput, 'employeeNumber'> {
+  employeeNumber?: string;
+  department?: string;
+}
+
+// Bulk-onboard employees from an import. Resolves department by name, auto-numbers
+// blank employee numbers, and reports per-row errors without aborting the batch.
+export async function bulkCreateEmployees(organisationId: string, rows: BulkEmployeeRow[]) {
+  const departments = await prisma.department.findMany({ where: { organisationId }, select: { id: true, name: true } });
+  const deptByName = new Map(departments.map((d) => [d.name.trim().toLowerCase(), d.id]));
+
+  const existing = await prisma.employee.findMany({ where: { organisationId }, select: { employeeNumber: true } });
+  const used = new Set(existing.map((e) => e.employeeNumber));
+  let maxSeq = 0;
+  for (const n of used) { const m = n.match(/(\d+)$/); if (m) maxSeq = Math.max(maxSeq, parseInt(m[1], 10)); }
+  const genNumber = () => { maxSeq += 1; return `EMP-${String(maxSeq).padStart(4, '0')}`; };
+
+  const created: string[] = [];
+  const errors: { row: number; employee: string; message: string }[] = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const { department, employeeNumber, ...rest } = rows[i];
+    const label = `${rest.firstName ?? ''} ${rest.lastName ?? ''}`.trim();
+    try {
+      let departmentId: string | undefined;
+      if (department && department.trim()) {
+        departmentId = deptByName.get(department.trim().toLowerCase());
+        if (!departmentId) throw new ValidationError(`Department "${department}" not found`);
+      }
+      const number = (employeeNumber && employeeNumber.trim()) || genNumber();
+      if (used.has(number)) throw new ValidationError(`Employee number ${number} already exists`);
+      used.add(number);
+      await createEmployee(organisationId, { ...rest, employeeNumber: number, departmentId });
+      created.push(number);
+    } catch (e) {
+      errors.push({ row: i + 2, employee: label, message: (e as Error).message }); // +2: header + 1-based
+    }
+  }
+  return { created: created.length, total: rows.length, errors };
+}
+
 export async function updateEmployee(organisationId: string, id: string, input: UpdateEmployeeInput) {
   const emp = await prisma.employee.findFirst({ where: { id, organisationId } });
   if (!emp) throw new NotFoundError('Employee not found');

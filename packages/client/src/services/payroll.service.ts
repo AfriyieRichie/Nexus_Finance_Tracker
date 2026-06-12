@@ -269,6 +269,15 @@ export const updateEmployee = (organisationId: string, id: string, data: Partial
 export const setEmployeeStatus = (organisationId: string, id: string, data: { status: EmployeeStatus; reason?: string; endDate?: string }) =>
   api.patch(`/organisations/${organisationId}/payroll/employees/${id}/status`, data).then((r) => r.data.data as Employee);
 
+export interface BulkImportResult {
+  created: number;
+  total: number;
+  errors: { row: number; employee: string; message: string }[];
+}
+
+export const bulkCreateEmployees = (organisationId: string, employees: Record<string, unknown>[]) =>
+  api.post(`/organisations/${organisationId}/payroll/employees/bulk`, { employees }).then((r) => r.data.data as BulkImportResult);
+
 export const assignComponent = (organisationId: string, employeeId: string, data: { componentId: string; amount?: number; rate?: number; effectiveFrom: string; effectiveTo?: string }) =>
   api.post(`/organisations/${organisationId}/payroll/employees/${employeeId}/components`, data).then((r) => r.data.data as EmployeeComponent);
 

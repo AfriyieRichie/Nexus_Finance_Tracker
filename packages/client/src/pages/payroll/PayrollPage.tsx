@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Users, Settings, Play, Download, ChevronDown, ChevronRight, CheckCircle, XCircle, Plus, Trash2, Lock, Check } from 'lucide-react';
+import { Users, Settings, Play, Download, Upload, ChevronDown, ChevronRight, CheckCircle, XCircle, Plus, Trash2, Lock, Check } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { PayrollReportsPage } from './PayrollReportsPage';
 import * as payrollSvc from '@/services/payroll.service';
@@ -1315,6 +1315,159 @@ function EmployeeStatusControl({ organisationId, employee }: { organisationId: s
   );
 }
 
+// ─── Bulk employee import (CSV) ────────────────────────────────────────────────
+
+type ColType = 'string' | 'number' | 'boolean';
+interface ImportCol { header: string; field: string; type: ColType; required?: boolean; example: string; note?: string }
+
+// Generated from the end-to-end employee onboarding form's data requirements.
+const IMPORT_COLUMNS: ImportCol[] = [
+  { header: 'employeeNumber', field: 'employeeNumber', type: 'string', example: '', note: 'blank = auto' },
+  { header: 'firstName', field: 'firstName', type: 'string', required: true, example: 'Ama' },
+  { header: 'lastName', field: 'lastName', type: 'string', required: true, example: 'Mensah' },
+  { header: 'email', field: 'email', type: 'string', example: 'ama@company.com' },
+  { header: 'phone', field: 'phone', type: 'string', example: '0244000000' },
+  { header: 'nationalId', field: 'nationalId', type: 'string', example: 'GHA-000000000-0' },
+  { header: 'tinNumber', field: 'tinNumber', type: 'string', example: 'P0001234567' },
+  { header: 'ssnitNumber', field: 'ssnitNumber', type: 'string', example: 'C000000000000' },
+  { header: 'gender', field: 'gender', type: 'string', example: 'FEMALE', note: 'MALE/FEMALE/OTHER' },
+  { header: 'dateOfBirth', field: 'dateOfBirth', type: 'string', example: '1992-05-14', note: 'YYYY-MM-DD' },
+  { header: 'employmentType', field: 'employmentType', type: 'string', example: 'FULL_TIME', note: 'FULL_TIME/PART_TIME/CONTRACT/CASUAL' },
+  { header: 'payFrequency', field: 'payFrequency', type: 'string', example: 'MONTHLY', note: 'MONTHLY/FORTNIGHTLY/WEEKLY' },
+  { header: 'startDate', field: 'startDate', type: 'string', required: true, example: '2026-01-01', note: 'YYYY-MM-DD' },
+  { header: 'jobTitle', field: 'jobTitle', type: 'string', example: 'Accountant' },
+  { header: 'department', field: 'department', type: 'string', example: 'Finance', note: 'department name' },
+  { header: 'basicSalary', field: 'basicSalary', type: 'number', required: true, example: '5000' },
+  { header: 'bankName', field: 'bankName', type: 'string', example: 'Ecobank' },
+  { header: 'bankAccountNumber', field: 'bankAccountNumber', type: 'string', example: '1234567890' },
+  { header: 'bankBranch', field: 'bankBranch', type: 'string', example: 'Accra Main' },
+  { header: 'isResident', field: 'isResident', type: 'boolean', example: 'true' },
+  { header: 'isMarried', field: 'isMarried', type: 'boolean', example: 'false' },
+  { header: 'isDisabled', field: 'isDisabled', type: 'boolean', example: 'false' },
+  { header: 'numberOfChildren', field: 'numberOfChildren', type: 'number', example: '0' },
+  { header: 'agedDependants', field: 'agedDependants', type: 'number', example: '0' },
+  { header: 'accommodationCode', field: 'accommodationCode', type: 'string', example: '', note: 'AF/AO/FO/SA' },
+  { header: 'vehicleCode', field: 'vehicleCode', type: 'string', example: '', note: 'FVD/VF/V/F' },
+  { header: 'isNsp', field: 'isNsp', type: 'boolean', example: 'false' },
+  { header: 'tier3EmployeeRate', field: 'tier3EmployeeRate', type: 'number', example: '', note: 'decimal e.g. 0.05' },
+  { header: 'tier3EmployerRate', field: 'tier3EmployerRate', type: 'number', example: '', note: 'decimal e.g. 0.05' },
+];
+
+function parseCsvLine(line: string): string[] {
+  const out: string[] = []; let cur = ''; let q = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (q) { if (c === '"' && line[i + 1] === '"') { cur += '"'; i++; } else if (c === '"') q = false; else cur += c; }
+    else { if (c === '"') q = true; else if (c === ',') { out.push(cur); cur = ''; } else cur += c; }
+  }
+  out.push(cur);
+  return out.map((s) => s.trim());
+}
+
+function downloadEmployeeTemplate() {
+  const headers = IMPORT_COLUMNS.map((c) => c.header).join(',');
+  const example = IMPORT_COLUMNS.map((c) => c.example).join(',');
+  const blob = new Blob(['﻿' + headers + '\n' + example + '\n'], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = 'employee-import-template.csv'; a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function parseEmployeeCsv(text: string): { rows: Record<string, unknown>[]; errors: string[] } {
+  const lines = text.replace(/\r/g, '').split('\n').filter((l) => l.trim());
+  if (lines.length < 2) return { rows: [], errors: ['File has no data rows.'] };
+  const headers = parseCsvLine(lines[0]).map((h) => h.replace(/^"|"$/g, ''));
+  const colByHeader = new Map(IMPORT_COLUMNS.map((c) => [c.header.toLowerCase(), c]));
+  const rows: Record<string, unknown>[] = [];
+  const errors: string[] = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const vals = parseCsvLine(lines[i]);
+    const row: Record<string, unknown> = {};
+    const rowErr: string[] = [];
+    headers.forEach((h, idx) => {
+      const col = colByHeader.get(h.toLowerCase());
+      if (!col) return;
+      const raw = (vals[idx] ?? '').trim();
+      if (raw === '') return;
+      if (col.type === 'number') { const n = Number(raw); if (isNaN(n)) rowErr.push(`${col.header} not a number`); else row[col.field] = n; }
+      else if (col.type === 'boolean') row[col.field] = /^(true|yes|y|1)$/i.test(raw);
+      else row[col.field] = col.field === 'gender' || col.field === 'employmentType' || col.field === 'payFrequency' || col.field === 'accommodationCode' || col.field === 'vehicleCode' ? raw.toUpperCase() : raw;
+    });
+    for (const c of IMPORT_COLUMNS) if (c.required && (row[c.field] === undefined || row[c.field] === '')) rowErr.push(`${c.header} required`);
+    if (rowErr.length) errors.push(`Row ${i + 1}: ${rowErr.join(', ')}`);
+    else rows.push(row);
+  }
+  return { rows, errors };
+}
+
+function BulkImportEmployeesDialog({ organisationId }: { organisationId: string }) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState<Record<string, unknown>[]>([]);
+  const [parseErrors, setParseErrors] = useState<string[]>([]);
+  const [fileName, setFileName] = useState('');
+
+  const reset = () => { setRows([]); setParseErrors([]); setFileName(''); };
+
+  const onFile = (file: File) => {
+    setFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (e) => { const { rows: r, errors } = parseEmployeeCsv(e.target?.result as string); setRows(r); setParseErrors(errors); };
+    reader.readAsText(file);
+  };
+
+  const mutation = useMutation({
+    mutationFn: () => payrollSvc.bulkCreateEmployees(organisationId, rows),
+    onSuccess: (res) => {
+      void qc.invalidateQueries({ queryKey: ['payroll-employees', organisationId] });
+      if (res.errors.length === 0) { setOpen(false); reset(); }
+    },
+  });
+  const result = mutation.data;
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) { reset(); mutation.reset(); } }}>
+      <DialogTrigger asChild><Button size="sm" variant="outline"><Upload size={14} className="mr-1" /> Bulk import</Button></DialogTrigger>
+      <DialogContent className="max-w-xl">
+        <h2 className="text-lg font-semibold mb-1">Bulk import employees</h2>
+        <p className="text-xs text-muted-foreground mb-3">Download the template, fill a row per employee, then upload. Department is matched by name; blank employee numbers auto-generate.</p>
+        <div className="space-y-3">
+          <Button size="sm" variant="outline" onClick={downloadEmployeeTemplate}><Download size={14} className="mr-1" /> Download CSV template</Button>
+          <input type="file" accept=".csv" className="text-xs block w-full border rounded p-2 cursor-pointer"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); }} />
+
+          {fileName && (
+            <p className="text-xs">{rows.length + parseErrors.length} rows · <span className="text-green-600 font-medium">{rows.length} ready</span>{parseErrors.length > 0 && <> · <span className="text-destructive font-medium">{parseErrors.length} with errors</span></>}</p>
+          )}
+          {parseErrors.length > 0 && (
+            <div className="text-xs text-destructive bg-destructive/10 rounded p-2 max-h-28 overflow-y-auto space-y-0.5">
+              {parseErrors.slice(0, 50).map((e, i) => <p key={i}>{e}</p>)}
+            </div>
+          )}
+          {result && (
+            <div className="text-xs rounded p-2 bg-muted/40 space-y-1">
+              <p className="text-green-600 font-medium">Imported {result.created} of {result.total}.</p>
+              {result.errors.length > 0 && (
+                <div className="text-destructive max-h-28 overflow-y-auto space-y-0.5">
+                  {result.errors.map((e, i) => <p key={i}>Row {e.row} ({e.employee}): {e.message}</p>)}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-1">
+            <DialogClose asChild><Button variant="outline" size="sm">Close</Button></DialogClose>
+            <Button size="sm" disabled={rows.length === 0 || mutation.isPending} onClick={() => mutation.mutate()}>
+              {mutation.isPending ? 'Importing…' : `Import ${rows.length} employees`}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function EmployeesTab({ organisationId }: { organisationId: string }) {
   const navigate = useNavigate();
   const [statusFilter, setStatusFilter] = useState('');
@@ -1345,7 +1498,10 @@ function EmployeesTab({ organisationId }: { organisationId: string }) {
           </Select>
           <span className="text-xs text-muted-foreground">Payroll runs only for <strong>Active</strong> employees.</span>
         </div>
-        <Button size="sm" onClick={openCreate}><Users className="w-4 h-4 mr-1" />Add Employee</Button>
+        <div className="flex gap-2">
+          <BulkImportEmployeesDialog organisationId={organisationId} />
+          <Button size="sm" onClick={openCreate}><Users className="w-4 h-4 mr-1" />Add Employee</Button>
+        </div>
       </div>
       <Card><CardContent className="p-0 overflow-x-auto">
         <Table>
