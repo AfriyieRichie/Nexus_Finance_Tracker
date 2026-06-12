@@ -24,7 +24,11 @@ export interface StatutoryConfig {
   tier2Rate: string;
   payeBands: PayeBand[];
   personalRelief: string;
+  nonResidentFlatRate: string;
 }
+
+export type EmployeeStatus = 'ACTIVE' | 'SUSPENDED' | 'RESIGNED' | 'DISMISSED';
+export type Gender = 'MALE' | 'FEMALE' | 'OTHER';
 
 // ── Employee ──────────────────────────────────────────────────────────────────
 
@@ -70,6 +74,15 @@ export interface Employee {
   overtimeMultiplier: string | null;
   isResident: boolean;
   isActive: boolean;
+  status: EmployeeStatus;
+  statusReason: string | null;
+  gender: Gender | null;
+  dateOfBirth: string | null;
+  isMarried: boolean;
+  isDisabled: boolean;
+  numberOfChildren: number;
+  agedDependants: number;
+  vehicleBenefit: string | null;
   department: { id: string; name: string } | null;
   costCentre: { id: string; name: string } | null;
   salaryExpenseAccount: { id: string; code: string; name: string } | null;
@@ -231,6 +244,9 @@ export const createEmployee = (organisationId: string, data: Partial<Employee> &
 
 export const updateEmployee = (organisationId: string, id: string, data: Partial<Employee>) =>
   api.patch(`/organisations/${organisationId}/payroll/employees/${id}`, data).then((r) => r.data.data as Employee);
+
+export const setEmployeeStatus = (organisationId: string, id: string, data: { status: EmployeeStatus; reason?: string; endDate?: string }) =>
+  api.patch(`/organisations/${organisationId}/payroll/employees/${id}/status`, data).then((r) => r.data.data as Employee);
 
 export const assignComponent = (organisationId: string, employeeId: string, data: { componentId: string; amount?: number; rate?: number; effectiveFrom: string; effectiveTo?: string }) =>
   api.post(`/organisations/${organisationId}/payroll/employees/${employeeId}/components`, data).then((r) => r.data.data as EmployeeComponent);

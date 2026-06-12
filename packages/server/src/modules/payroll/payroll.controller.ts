@@ -6,6 +6,7 @@ import {
   upsertStatutoryConfigSchema,
   createEmployeeSchema,
   updateEmployeeSchema,
+  setEmployeeStatusSchema,
   createSalaryComponentSchema,
   updateSalaryComponentSchema,
   assignComponentSchema,
@@ -51,6 +52,12 @@ export const updateEmployee = asyncHandler(async (req: Request, res: Response) =
   const input = updateEmployeeSchema.parse(req.body);
   const data = await svc.updateEmployee(req.params.organisationId, req.params.id, input);
   return sendSuccess(res, data);
+});
+
+export const setEmployeeStatus = asyncHandler(async (req: Request, res: Response) => {
+  const input = setEmployeeStatusSchema.parse(req.body);
+  const data = await svc.setEmployeeStatus(req.params.organisationId, req.params.id, input);
+  return sendSuccess(res, data, `Employee marked ${input.status.toLowerCase()}`);
 });
 
 export const assignComponent = asyncHandler(async (req: Request, res: Response) => {

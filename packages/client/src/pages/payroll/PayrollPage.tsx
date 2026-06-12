@@ -28,6 +28,26 @@ function fmt(n: string | number | null | undefined, dp = 2) {
   return isNaN(v) ? '0.00' : v.toLocaleString('en-GH', { minimumFractionDigits: dp, maximumFractionDigits: dp });
 }
 
+const RETIREMENT_AGE = 60; // Ghana statutory retirement age
+
+function ageFromDob(dob: string | null | undefined): number | null {
+  if (!dob) return null;
+  const d = new Date(dob);
+  if (isNaN(d.getTime())) return null;
+  const now = new Date();
+  let age = now.getFullYear() - d.getFullYear();
+  const m = now.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age--;
+  return age;
+}
+
+function ageInfo(dob: string | null | undefined): string {
+  const age = ageFromDob(dob);
+  if (age === null) return '';
+  if (age >= RETIREMENT_AGE) return `Age ${age} · Retired`;
+  return `Age ${age} · ${RETIREMENT_AGE - age} yr${RETIREMENT_AGE - age === 1 ? '' : 's'} to retirement`;
+}
+
 function toAccountOptions(accounts: ReturnType<typeof Array<{ id: string; code: string; name: string; class: string; isActive: boolean }>>[number][]): AccountOption[] {
   return accounts.map((a) => ({ id: a.id, code: a.code, name: a.name, class: a.class, isActive: a.isActive }));
 }
@@ -89,6 +109,7 @@ function StatutoryTab({ organisationId }: { organisationId: string }) {
     ssnitEmployerRate: '13',
     tier2Rate: '5',
     personalRelief: '0',
+    nonResidentFlatRate: '25',
   });
   const [bands, setBands] = useState(DEFAULT_PAYE_BANDS);
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
@@ -102,6 +123,7 @@ function StatutoryTab({ organisationId }: { organisationId: string }) {
         ssnitEmployerRate: String(Number(cfg.ssnitEmployerRate) * 100),
         tier2Rate: String(Number(cfg.tier2Rate) * 100),
         personalRelief: String(Number(cfg.personalRelief)),
+        nonResidentFlatRate: String(Number(cfg.nonResidentFlatRate ?? 0.25) * 100),
       });
       setBands(
         (cfg.payeBands ?? DEFAULT_PAYE_BANDS.map(b => ({ min: b.min, max: b.max, rate: b.rate }))).map((b) => ({
@@ -112,7 +134,7 @@ function StatutoryTab({ organisationId }: { organisationId: string }) {
       );
     } else {
       setEditConfig(null);
-      setForm({ taxYear: new Date().getFullYear().toString(), ssnitEmployeeRate: '5.5', ssnitEmployerRate: '13', tier2Rate: '5', personalRelief: '0' });
+      setForm({ taxYear: new Date().getFullYear().toString(), ssnitEmployeeRate: '5.5', ssnitEmployerRate: '13', tier2Rate: '5', personalRelief: '0', nonResidentFlatRate: '25' });
       setBands(DEFAULT_PAYE_BANDS);
     }
     setOpen(true);
@@ -132,6 +154,7 @@ function StatutoryTab({ organisationId }: { organisationId: string }) {
       ssnitEmployerRate: String(Number(form.ssnitEmployerRate) / 100),
       tier2Rate:         String(Number(form.tier2Rate)         / 100),
       personalRelief:    String(Number(form.personalRelief)),
+      nonResidentFlatRate: String(Number(form.nonResidentFlatRate) / 100),
       payeBands:         bands.map((b) => ({
         min:  Number(b.min),
         max:  b.max === '' ? null : Number(b.max),
@@ -199,6 +222,7 @@ function StatutoryTab({ organisationId }: { organisationId: string }) {
             <div><label className="text-sm font-medium">SSNIT Employer Rate (%)</label><Input value={form.ssnitEmployerRate} onChange={(e) => set('ssnitEmployerRate', e.target.value)} type="number" step="0.1" /></div>
             <div><label className="text-sm font-medium">Tier 2 Rate (% of employer)</label><Input value={form.tier2Rate} onChange={(e) => set('tier2Rate', e.target.value)} type="number" step="0.1" /></div>
             <div><label className="text-sm font-medium">Monthly Personal Relief (GHS)</label><Input value={form.personalRelief} onChange={(e) => set('personalRelief', e.target.value)} type="number" /></div>
+            <div><label className="text-sm font-medium">Non-resident Flat PAYE Rate (%)</label><Input value={form.nonResidentFlatRate} onChange={(e) => set('nonResidentFlatRate', e.target.value)} type="number" step="0.5" /><p className="text-xs text-muted-foreground mt-0.5">Applied to non-resident employees from this tax year onward.</p></div>
 
             <div>
               <div className="flex items-center justify-between mb-1">
@@ -439,6 +463,9 @@ export function EmployeeDialog({ organisationId, emp, employees, onClose, fullPa
     overtimeFixedAmount: '',
     overtimeMultiplier: '1.5',
     isResident: true,
+    gender: '', dateOfBirth: '',
+    isMarried: false, isDisabled: false,
+    numberOfChildren: '0', agedDependants: '0', vehicleBenefit: '',
     bankName: '', bankAccountNumber: '', bankBranch: '',
   };
 
@@ -466,6 +493,13 @@ export function EmployeeDialog({ organisationId, emp, employees, onClose, fullPa
     overtimeFixedAmount:    emp.overtimeFixedAmount ? String(emp.overtimeFixedAmount) : '',
     overtimeMultiplier:     emp.overtimeMultiplier  ? String(emp.overtimeMultiplier)  : '1.5',
     isResident:             emp.isResident ?? true,
+    gender:                 emp.gender ?? '',
+    dateOfBirth:            emp.dateOfBirth?.split('T')[0] ?? '',
+    isMarried:              emp.isMarried ?? false,
+    isDisabled:             emp.isDisabled ?? false,
+    numberOfChildren:       String(emp.numberOfChildren ?? 0),
+    agedDependants:         String(emp.agedDependants ?? 0),
+    vehicleBenefit:         emp.vehicleBenefit ? String(emp.vehicleBenefit) : '',
     bankName:               emp.bankName ?? '',
     bankAccountNumber:      emp.bankAccountNumber ?? '',
     bankBranch:             emp.bankBranch ?? '',
@@ -546,10 +580,15 @@ export function EmployeeDialog({ organisationId, emp, employees, onClose, fullPa
         overtimeType:           form.overtimeType,
         overtimeFixedAmount:    form.overtimeFixedAmount ? Number(form.overtimeFixedAmount) : undefined,
         overtimeMultiplier:     form.overtimeMultiplier  ? Number(form.overtimeMultiplier)  : undefined,
+        gender:                 form.gender || undefined,
+        dateOfBirth:            form.dateOfBirth || undefined,
+        numberOfChildren:       Number(form.numberOfChildren || 0),
+        agedDependants:         Number(form.agedDependants || 0),
+        vehicleBenefit:         form.vehicleBenefit ? Number(form.vehicleBenefit) : undefined,
       };
       return emp
         ? payrollSvc.updateEmployee(organisationId, emp.id, payload as unknown as Parameters<typeof payrollSvc.updateEmployee>[2])
-        : payrollSvc.createEmployee(organisationId, payload as Parameters<typeof payrollSvc.createEmployee>[1]);
+        : payrollSvc.createEmployee(organisationId, payload as unknown as Parameters<typeof payrollSvc.createEmployee>[1]);
     },
     onSuccess: (result) => {
       setSaveError(null);
@@ -723,6 +762,40 @@ export function EmployeeDialog({ organisationId, emp, employees, onClose, fullPa
             <div className="col-span-2"><label className="text-sm font-medium">Email</label><Input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} /></div>
             <div><label className="text-sm font-medium">Phone</label><Input value={form.phone} onChange={(e) => set('phone', e.target.value)} /></div>
             <div><label className="text-sm font-medium">National ID</label><Input value={form.nationalId} onChange={(e) => set('nationalId', e.target.value)} /></div>
+            <div>
+              <label className="text-sm font-medium">Gender</label>
+              <Select value={form.gender} onChange={(e) => set('gender', e.target.value)}>
+                <option value="">—</option>
+                <option value="MALE">Male</option>
+                <option value="FEMALE">Female</option>
+                <option value="OTHER">Other</option>
+              </Select>
+            </div>
+            <div>
+              <label className="text-sm font-medium">Date of Birth</label>
+              <Input type="date" value={form.dateOfBirth} onChange={(e) => set('dateOfBirth', e.target.value)} />
+              {form.dateOfBirth && <p className="text-xs text-muted-foreground mt-0.5">{ageInfo(form.dateOfBirth)}</p>}
+            </div>
+            <div>
+              <label className="text-sm font-medium">Residency</label>
+              <Select value={form.isResident ? 'resident' : 'non'} onChange={(e) => set('isResident', e.target.value === 'resident')}>
+                <option value="resident">Resident</option>
+                <option value="non">Non-resident</option>
+              </Select>
+            </div>
+
+            {/* Reliefs & dependants (feed PAYE reliefs / GRA returns) */}
+            <div className="col-span-3 border-t pt-3 mt-1">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Reliefs & dependants</p>
+              <div className="grid grid-cols-3 gap-3 items-end">
+                <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.isMarried} onChange={(e) => set('isMarried', e.target.checked)} /> Married</label>
+                <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.isDisabled} onChange={(e) => set('isDisabled', e.target.checked)} /> Disabled</label>
+                <div />
+                <div><label className="text-sm font-medium">Children</label><Input type="number" min={0} value={form.numberOfChildren} onChange={(e) => set('numberOfChildren', e.target.value)} /></div>
+                <div><label className="text-sm font-medium">Aged dependants</label><Input type="number" min={0} value={form.agedDependants} onChange={(e) => set('agedDependants', e.target.value)} /></div>
+                <div><label className="text-sm font-medium">Vehicle benefit (monthly)</label><Input type="number" min={0} value={form.vehicleBenefit} onChange={(e) => set('vehicleBenefit', e.target.value)} placeholder="0.00" /></div>
+              </div>
+            </div>
           </div>
         )}
 
@@ -1098,8 +1171,50 @@ export function EmployeeDialog({ organisationId, emp, employees, onClose, fullPa
   );
 }
 
+const EMP_STATUS_CLASS: Record<payrollSvc.EmployeeStatus, string> = {
+  ACTIVE: 'bg-green-100 text-green-700',
+  SUSPENDED: 'bg-amber-100 text-amber-700',
+  RESIGNED: 'bg-gray-100 text-gray-600',
+  DISMISSED: 'bg-red-100 text-red-700',
+};
+
+function reliefSummary(e: Employee): string {
+  const parts: string[] = [];
+  if (e.isMarried) parts.push('Married');
+  if (e.numberOfChildren > 0) parts.push(`${e.numberOfChildren} child${e.numberOfChildren === 1 ? '' : 'ren'}`);
+  if (e.agedDependants > 0) parts.push(`${e.agedDependants} aged dep.`);
+  if (e.isDisabled) parts.push('Disabled');
+  if (e.vehicleBenefit && Number(e.vehicleBenefit) > 0) parts.push('Vehicle');
+  return parts.length ? parts.join(' · ') : '—';
+}
+
+function EmployeeStatusControl({ organisationId, employee }: { organisationId: string; employee: Employee }) {
+  const qc = useQueryClient();
+  const mutation = useMutation({
+    mutationFn: (status: payrollSvc.EmployeeStatus) => {
+      const reason = status !== 'ACTIVE' ? (window.prompt(`Reason for marking ${employee.firstName} ${status.toLowerCase()} (optional):`) ?? undefined) : undefined;
+      return payrollSvc.setEmployeeStatus(organisationId, employee.id, { status, reason: reason || undefined });
+    },
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['payroll-employees', organisationId] }),
+  });
+  return (
+    <Select
+      value={employee.status}
+      onChange={(e) => mutation.mutate(e.target.value as payrollSvc.EmployeeStatus)}
+      disabled={mutation.isPending}
+      className="h-7 text-xs w-32"
+    >
+      <option value="ACTIVE">Active</option>
+      <option value="SUSPENDED">Suspended</option>
+      <option value="RESIGNED">Resigned</option>
+      <option value="DISMISSED">Dismissed</option>
+    </Select>
+  );
+}
+
 function EmployeesTab({ organisationId }: { organisationId: string }) {
   const navigate = useNavigate();
+  const [statusFilter, setStatusFilter] = useState('');
 
   const { data: employees = [], isLoading } = useQuery({
     queryKey: ['payroll-employees', organisationId],
@@ -1111,34 +1226,61 @@ function EmployeesTab({ organisationId }: { organisationId: string }) {
 
   if (isLoading) return <Skeleton className="h-40" />;
 
+  const filtered = employees.filter((e) => !statusFilter || e.status === statusFilter);
+  const activeCount = employees.filter((e) => e.status === 'ACTIVE').length;
+
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="h-8 text-xs w-40">
+            <option value="">All ({employees.length})</option>
+            <option value="ACTIVE">Active ({activeCount})</option>
+            <option value="SUSPENDED">Suspended</option>
+            <option value="RESIGNED">Resigned</option>
+            <option value="DISMISSED">Dismissed</option>
+          </Select>
+          <span className="text-xs text-muted-foreground">Payroll runs only for <strong>Active</strong> employees.</span>
+        </div>
         <Button size="sm" onClick={openCreate}><Users className="w-4 h-4 mr-1" />Add Employee</Button>
       </div>
-      <Card><CardContent className="p-0">
+      <Card><CardContent className="p-0 overflow-x-auto">
         <Table>
           <TableHeader><TableRow>
-            <TableHead>Emp No.</TableHead><TableHead>Name</TableHead><TableHead>Type</TableHead>
-            <TableHead>Basic Salary</TableHead><TableHead>Department</TableHead>
-            <TableHead>Bank Acct</TableHead><TableHead>Status</TableHead><TableHead />
+            <TableHead>Emp No.</TableHead><TableHead>Name</TableHead><TableHead>Gender</TableHead>
+            <TableHead>Age / Retirement</TableHead><TableHead>Residency</TableHead>
+            <TableHead>Reliefs</TableHead><TableHead className="text-right">Basic</TableHead>
+            <TableHead>Status</TableHead><TableHead />
           </TableRow></TableHeader>
           <TableBody>
-            {employees.length === 0 && (
-              <TableRow><TableCell colSpan={8} className="text-center text-gray-400 py-6">No employees yet</TableCell></TableRow>
+            {filtered.length === 0 && (
+              <TableRow><TableCell colSpan={9} className="text-center text-gray-400 py-6">No employees</TableCell></TableRow>
             )}
-            {employees.map((e) => (
-              <TableRow key={e.id} className={!e.isActive ? 'opacity-50' : ''}>
-                <TableCell className="font-mono text-sm">{e.employeeNumber}</TableCell>
-                <TableCell>{e.firstName} {e.lastName}</TableCell>
-                <TableCell><Badge variant="outline">{e.employmentType.replace('_', ' ')}</Badge></TableCell>
-                <TableCell className="text-right">GHS {fmt(e.basicSalary)}</TableCell>
-                <TableCell className="text-sm text-gray-500">{e.department?.name ?? '—'}</TableCell>
-                <TableCell className="font-mono text-xs">{e.bankAccountNumber ?? '—'}</TableCell>
-                <TableCell><Badge className={e.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}>{e.isActive ? 'Active' : 'Inactive'}</Badge></TableCell>
-                <TableCell><Button size="sm" variant="ghost" onClick={() => openEdit(e)}>Edit</Button></TableCell>
-              </TableRow>
-            ))}
+            {filtered.map((e) => {
+              const age = ageFromDob(e.dateOfBirth);
+              return (
+                <TableRow key={e.id} className={e.status !== 'ACTIVE' ? 'opacity-70' : ''}>
+                  <TableCell className="font-mono text-sm">{e.employeeNumber}</TableCell>
+                  <TableCell>{e.firstName} {e.lastName}<div className="text-[11px] text-muted-foreground">{e.department?.name ?? '—'}</div></TableCell>
+                  <TableCell className="text-sm">{e.gender ? e.gender[0] + e.gender.slice(1).toLowerCase() : '—'}</TableCell>
+                  <TableCell className="text-xs">
+                    {age === null ? '—' : age >= RETIREMENT_AGE
+                      ? <span className="text-red-600 font-medium">{age} · Retired</span>
+                      : <span>{age} · <span className="text-muted-foreground">{RETIREMENT_AGE - age} yr to go</span></span>}
+                  </TableCell>
+                  <TableCell><Badge variant="outline" className="text-[10px]">{e.isResident ? 'Resident' : 'Non-resident'}</Badge></TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{reliefSummary(e)}</TableCell>
+                  <TableCell className="text-right text-sm">{fmt(e.basicSalary)}</TableCell>
+                  <TableCell><Badge className={EMP_STATUS_CLASS[e.status]}>{e.status[0] + e.status.slice(1).toLowerCase()}</Badge></TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-1 justify-end">
+                      <EmployeeStatusControl organisationId={organisationId} employee={e} />
+                      <Button size="sm" variant="ghost" onClick={() => openEdit(e)}>Edit</Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </CardContent></Card>

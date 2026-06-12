@@ -11,6 +11,7 @@ export const upsertStatutoryConfigSchema = z.object({
   ssnitEmployerRate: z.coerce.number().min(0).max(1).optional(),
   tier2Rate: z.coerce.number().min(0).max(1).optional(),
   personalRelief: z.coerce.number().nonnegative().optional(),
+  nonResidentFlatRate: z.coerce.number().min(0).max(1).optional(),
   payeBands: z.array(z.object({
     min: z.coerce.number().nonnegative(),
     max: z.coerce.number().positive().nullable(),
@@ -47,10 +48,24 @@ export const createEmployeeSchema = z.object({
   overtimeFixedAmount: z.number().nonnegative().optional(),
   overtimeMultiplier: z.number().positive().optional(),
   isResident: z.boolean().optional(),
+  // Personal / relief attributes
+  gender: z.enum(['MALE', 'FEMALE', 'OTHER']).optional(),
+  dateOfBirth: z.string().regex(dateRegex).optional(),
+  isMarried: z.boolean().optional(),
+  isDisabled: z.boolean().optional(),
+  numberOfChildren: z.coerce.number().int().min(0).optional(),
+  agedDependants: z.coerce.number().int().min(0).optional(),
+  vehicleBenefit: z.coerce.number().nonnegative().optional(),
 });
 
 export const updateEmployeeSchema = createEmployeeSchema.partial().extend({
   isActive: z.boolean().optional(),
+});
+
+export const setEmployeeStatusSchema = z.object({
+  status: z.enum(['ACTIVE', 'SUSPENDED', 'RESIGNED', 'DISMISSED']),
+  reason: z.string().max(300).optional(),
+  endDate: z.string().regex(dateRegex).optional(),
 });
 
 // ─── Salary Components ────────────────────────────────────────────────────────
@@ -128,6 +143,7 @@ export const listPayrollRunsSchema = z.object({
 export type UpsertStatutoryConfigInput = z.infer<typeof upsertStatutoryConfigSchema>;
 export type CreateEmployeeInput = z.infer<typeof createEmployeeSchema>;
 export type UpdateEmployeeInput = z.infer<typeof updateEmployeeSchema>;
+export type SetEmployeeStatusInput = z.infer<typeof setEmployeeStatusSchema>;
 export type CreateSalaryComponentInput = z.infer<typeof createSalaryComponentSchema>;
 export type AssignComponentInput = z.infer<typeof assignComponentSchema>;
 export type CreateLoanInput = z.infer<typeof createLoanSchema>;

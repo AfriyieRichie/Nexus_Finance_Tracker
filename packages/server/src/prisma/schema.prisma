@@ -206,6 +206,19 @@ enum EmploymentType {
   CASUAL
 }
 
+enum EmployeeStatus {
+  ACTIVE
+  SUSPENDED
+  RESIGNED
+  DISMISSED
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
 enum PayFrequency {
   MONTHLY
   FORTNIGHTLY
@@ -1857,6 +1870,8 @@ model PayrollStatutoryConfig {
   payeBands         Json
   // Monthly personal relief (deducted before PAYE)
   personalRelief    Decimal  @default(0)      @db.Decimal(20, 4)
+  // Flat PAYE rate for non-resident employees (decimal, e.g. 0.25 = 25%)
+  nonResidentFlatRate Decimal @default(0.25)  @db.Decimal(6, 4)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -1897,6 +1912,17 @@ model Employee {
   overtimeMultiplier     Decimal?       @db.Decimal(5, 2)
   isResident             Boolean        @default(true)
   isActive               Boolean        @default(true)
+  status                 EmployeeStatus @default(ACTIVE)
+  statusReason           String?
+  // Personal / relief attributes
+  gender                 Gender?
+  dateOfBirth            DateTime?      @db.Date
+  isMarried              Boolean        @default(false)
+  isDisabled             Boolean        @default(false)
+  numberOfChildren       Int            @default(0)
+  agedDependants         Int            @default(0)
+  // Non-cash taxable benefit (e.g. vehicle), monthly amount
+  vehicleBenefit         Decimal?       @db.Decimal(20, 4)
   createdAt              DateTime       @default(now())
   updatedAt              DateTime       @updatedAt
 

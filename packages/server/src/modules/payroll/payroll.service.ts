@@ -20,6 +20,7 @@ export interface UpsertStatutoryConfigInput {
   tier2Rate?: number;
   payeBands?: PayeBand[];
   personalRelief?: number;
+  nonResidentFlatRate?: number;
 }
 
 export interface CreateEmployeeInput {
@@ -49,10 +50,23 @@ export interface CreateEmployeeInput {
   overtimeFixedAmount?: number;
   overtimeMultiplier?: number;
   isResident?: boolean;
+  gender?: 'MALE' | 'FEMALE' | 'OTHER';
+  dateOfBirth?: string;
+  isMarried?: boolean;
+  isDisabled?: boolean;
+  numberOfChildren?: number;
+  agedDependants?: number;
+  vehicleBenefit?: number;
 }
 
 export interface UpdateEmployeeInput extends Partial<CreateEmployeeInput> {
   isActive?: boolean;
+}
+
+export interface SetEmployeeStatusInput {
+  status: 'ACTIVE' | 'SUSPENDED' | 'RESIGNED' | 'DISMISSED';
+  reason?: string;
+  endDate?: string;
 }
 
 export interface CreateSalaryComponentInput {
@@ -151,6 +165,7 @@ async function getOrDefaultStatutoryConfig(organisationId: string, taxYear: numb
     tier2Rate:         cfg ? Number(cfg.tier2Rate)         : 0.05,
     payeBands:         cfg ? (cfg.payeBands as unknown as PayeBand[]) : DEFAULT_PAYE_BANDS,
     personalRelief:    cfg ? Number(cfg.personalRelief)    : 0,
+    nonResidentFlatRate: cfg ? Number(cfg.nonResidentFlatRate) : 0.25,
   };
 }
 
@@ -190,6 +205,7 @@ export async function upsertStatutoryConfig(organisationId: string, input: Upser
       ...(input.tier2Rate         !== undefined && { tier2Rate:         input.tier2Rate }),
       ...(input.payeBands         !== undefined && { payeBands:         input.payeBands as object }),
       ...(input.personalRelief    !== undefined && { personalRelief:    input.personalRelief }),
+      ...(input.nonResidentFlatRate !== undefined && { nonResidentFlatRate: input.nonResidentFlatRate }),
     },
     create: {
       organisationId,
@@ -199,6 +215,7 @@ export async function upsertStatutoryConfig(organisationId: string, input: Upser
       tier2Rate:         input.tier2Rate         ?? 0.05,
       payeBands:         (input.payeBands ?? DEFAULT_PAYE_BANDS) as object,
       personalRelief:    input.personalRelief    ?? 0,
+      nonResidentFlatRate: input.nonResidentFlatRate ?? 0.25,
     },
   });
 }
@@ -277,6 +294,13 @@ export async function createEmployee(organisationId: string, input: CreateEmploy
       overtimeFixedAmount:    input.overtimeFixedAmount,
       overtimeMultiplier:     input.overtimeMultiplier,
       isResident:             input.isResident ?? true,
+      gender:                 input.gender,
+      dateOfBirth:            input.dateOfBirth ? new Date(input.dateOfBirth) : undefined,
+      isMarried:              input.isMarried ?? false,
+      isDisabled:             input.isDisabled ?? false,
+      numberOfChildren:       input.numberOfChildren ?? 0,
+      agedDependants:         input.agedDependants ?? 0,
+      vehicleBenefit:         input.vehicleBenefit,
     },
     include: {
       department:           { select: { id: true, name: true } },
@@ -319,12 +343,37 @@ export async function updateEmployee(organisationId: string, id: string, input: 
       ...(input.overtimeMultiplier    !== undefined && { overtimeMultiplier:    input.overtimeMultiplier }),
       ...(input.isResident            !== undefined && { isResident:            input.isResident }),
       ...(input.isActive              !== undefined && { isActive:              input.isActive }),
+      ...(input.gender                !== undefined && { gender:                input.gender }),
+      ...(input.dateOfBirth           !== undefined && { dateOfBirth:           input.dateOfBirth ? new Date(input.dateOfBirth) : null }),
+      ...(input.isMarried             !== undefined && { isMarried:             input.isMarried }),
+      ...(input.isDisabled            !== undefined && { isDisabled:            input.isDisabled }),
+      ...(input.numberOfChildren      !== undefined && { numberOfChildren:      input.numberOfChildren }),
+      ...(input.agedDependants        !== undefined && { agedDependants:        input.agedDependants }),
+      ...(input.vehicleBenefit        !== undefined && { vehicleBenefit:        input.vehicleBenefit }),
     },
     include: {
       department:           { select: { id: true, name: true } },
       costCentre:           { select: { id: true, name: true } },
       salaryExpenseAccount: { select: { id: true, code: true, name: true } },
     },
+  });
+}
+
+// Change an employee's status. Employees are never deleted; payroll runs cease
+// for anyone not ACTIVE. isActive is kept in sync so existing filters still work.
+export async function setEmployeeStatus(organisationId: string, id: string, input: SetEmployeeStatusInput) {
+  const emp = await prisma.employee.findFirst({ where: { id, organisationId } });
+  if (!emp) throw new NotFoundError('Employee not found');
+  return prisma.employee.update({
+    where: { id },
+    data: {
+      status: input.status,
+      statusReason: input.reason ?? null,
+      isActive: input.status === 'ACTIVE',
+      ...(input.status !== 'ACTIVE' && input.endDate ? { endDate: new Date(input.endDate) } : {}),
+      ...(input.status === 'ACTIVE' ? { endDate: null } : {}),
+    },
+    include: { department: { select: { id: true, name: true } } },
   });
 }
 
@@ -710,7 +759,11 @@ export async function createPayrollRun(
     // Excess bonus and non-qualifying overtime are included in the PAYE base
     const payeGross     = round4(basic + allowances + otherEarnings + bonusInPaye + overtimeInPaye);
     const taxableIncome = round4(Math.max(0, payeGross - ssnitEmployee - tier3Deductible));
-    const payeAmount    = calculatePaye(taxableIncome, bands, statutory.personalRelief);
+    // Non-residents are taxed at a flat rate (configurable, applied prospectively
+    // from the statutory config) with no bands or reliefs; residents use the bands.
+    const payeAmount    = isResident
+      ? calculatePaye(taxableIncome, bands, statutory.personalRelief)
+      : round4(payeGross * statutory.nonResidentFlatRate);
 
     const totalEmployeeDeductions = round4(ssnitEmployee + tier3Employee + payeAmount + overtimeTax + bonusTax + otherDeductions);
     const netPay                  = round4(grossPay - totalEmployeeDeductions);
