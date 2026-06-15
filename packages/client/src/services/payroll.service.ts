@@ -413,4 +413,20 @@ export const reportBank         = (orgId: string, p: ReportParams) => reportGet<
 export const reportDepartment   = (orgId: string, p: ReportParams) => reportGet<PayrollReport>(orgId, 'department', p);
 export const reportEmployeeYtd  = (orgId: string, p: ReportParams) => reportGet<PayrollReport>(orgId, 'employee-ytd', p);
 export const reportLoans        = (orgId: string, p: ReportParams) => reportGet<PayrollReport>(orgId, 'loans', p);
+
+export interface PayeScheduleRow {
+  serNo: number; tin: string; name: string; position: string; residency: string;
+  basicSalary: number; secondaryEmployment: string; paidSsnit: string;
+  socialSecurityFund: number; thirdTier: number; cashAllowances: number;
+  bonusUpTo15: number; finalBonusTax: number; excessBonus: number; totalCashEmolument: number;
+  accommodationElement: number; vehicleElement: number; nonCashBenefit: number; totalAssessableIncome: number;
+  deductibleReliefs: number; totalReliefs: number; chargeableIncome: number; taxDeductible: number;
+  overtimeIncome: number; overtimeTax: number; totalTaxPayable: number;
+}
+export interface PayeSchedule {
+  employer: { name: string; tin: string; month: string; runNumber: string };
+  rows: PayeScheduleRow[];
+  totals: Record<string, number>;
+}
+export const reportPayeSchedule = (orgId: string, p: ReportParams) => reportGet<PayeSchedule>(orgId, 'paye-schedule', p);
 export const reportGlSummary    = (orgId: string, p: ReportParams) => reportGet<PayrollGlReport>(orgId, 'gl-summary', p);

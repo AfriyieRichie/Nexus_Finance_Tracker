@@ -51,6 +51,7 @@ payrollRouter.get('/reports/bank',              requireRole(REPORT_VIEWER),   ct
 payrollRouter.get('/reports/department',        requireRole(REPORT_VIEWER),   ctrl.reportDepartment);
 payrollRouter.get('/reports/employee-ytd',      requireRole(REPORT_VIEWER),   ctrl.reportEmployeeYtd);
 payrollRouter.get('/reports/loans',             requireRole(REPORT_VIEWER),   ctrl.reportLoans);
+payrollRouter.get('/reports/paye-schedule',     requireRole(REPORT_VIEWER),   ctrl.reportPayeSchedule);
 
 // ─── Legacy journal-based payroll ────────────────────────────────────────────
 payrollRouter.get('/',                          requireRole(REPORT_VIEWER),   ctrl.listPayrollEntries);

@@ -1,0 +1,6 @@
+-- GRA monthly PAYE schedule breakdown stored per payslip for accurate filing.
+ALTER TABLE payslips ADD COLUMN IF NOT EXISTS "accommodationBenefit" DECIMAL(20,4) NOT NULL DEFAULT 0;
+ALTER TABLE payslips ADD COLUMN IF NOT EXISTS "vehicleBenefit" DECIMAL(20,4) NOT NULL DEFAULT 0;
+ALTER TABLE payslips ADD COLUMN IF NOT EXISTS "nonCashBenefit" DECIMAL(20,4) NOT NULL DEFAULT 0;
+ALTER TABLE payslips ADD COLUMN IF NOT EXISTS "bonusExcess" DECIMAL(20,4) NOT NULL DEFAULT 0;
+ALTER TABLE payslips ADD COLUMN IF NOT EXISTS "deductibleReliefs" DECIMAL(20,4) NOT NULL DEFAULT 0;

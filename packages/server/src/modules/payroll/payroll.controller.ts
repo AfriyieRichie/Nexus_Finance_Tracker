@@ -229,3 +229,7 @@ export const reportEmployeeYtd = asyncHandler(async (req: Request, res: Response
 export const reportLoans = asyncHandler(async (req: Request, res: Response) => {
   return sendSuccess(res, await reports.getLoanReport(req.params.organisationId, reportFilters(req)));
 });
+
+export const reportPayeSchedule = asyncHandler(async (req: Request, res: Response) => {
+  return sendSuccess(res, await reports.getPayeSchedule(req.params.organisationId, req.query.runId as string));
+});

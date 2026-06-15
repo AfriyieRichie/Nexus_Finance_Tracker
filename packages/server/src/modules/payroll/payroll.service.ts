@@ -938,6 +938,12 @@ export async function createPayrollRun(
       otherDeductions,
       totalDeductions:  totalEmployeeDeductions,
       netPay,
+      // GRA PAYE schedule breakdown
+      accommodationBenefit,
+      vehicleBenefit,
+      nonCashBenefit:   0,
+      bonusExcess:      bonusInPaye,
+      deductibleReliefs: reliefApplied,
       ssnitEmployer,
       tier2Employer,
       tier3Employer,

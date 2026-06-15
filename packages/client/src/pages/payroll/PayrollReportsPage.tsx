@@ -114,6 +114,37 @@ const REPORTS: ReportDef[] = [
   { key: 'department', label: 'Department Cost Analysis', scope: 'either', columns: DEPARTMENT_COLS, fetch: payrollSvc.reportDepartment },
   { key: 'employee-ytd', label: 'Employee Earnings (YTD)', scope: 'year', columns: YTD_COLS, fetch: payrollSvc.reportEmployeeYtd },
   { key: 'loans', label: 'Loan Report', scope: 'year', columns: LOAN_COLS, fetch: payrollSvc.reportLoans },
+  { key: 'paye-schedule', label: 'GRA PAYE Schedule', scope: 'run', columns: [], fetch: payrollSvc.reportRegister },
+];
+
+// GRA monthly PAYE deductions schedule columns (official filing order).
+const PAYE_COLS: { key: keyof payrollSvc.PayeScheduleRow; label: string; money?: boolean }[] = [
+  { key: 'serNo', label: '#' },
+  { key: 'tin', label: 'TIN / GH Card' },
+  { key: 'name', label: 'Name' },
+  { key: 'position', label: 'Position' },
+  { key: 'residency', label: 'Residency' },
+  { key: 'basicSalary', label: 'Basic', money: true },
+  { key: 'secondaryEmployment', label: 'Sec. Empl.' },
+  { key: 'paidSsnit', label: 'SSNIT?' },
+  { key: 'socialSecurityFund', label: 'Social Security', money: true },
+  { key: 'thirdTier', label: 'Third Tier', money: true },
+  { key: 'cashAllowances', label: 'Cash Allow.', money: true },
+  { key: 'bonusUpTo15', label: 'Bonus ≤15%', money: true },
+  { key: 'finalBonusTax', label: 'Final Bonus Tax', money: true },
+  { key: 'excessBonus', label: 'Excess Bonus', money: true },
+  { key: 'totalCashEmolument', label: 'Total Cash Emol.', money: true },
+  { key: 'accommodationElement', label: 'Accom.', money: true },
+  { key: 'vehicleElement', label: 'Vehicle', money: true },
+  { key: 'nonCashBenefit', label: 'Non-Cash', money: true },
+  { key: 'totalAssessableIncome', label: 'Total Assessable', money: true },
+  { key: 'deductibleReliefs', label: 'Deductible Reliefs', money: true },
+  { key: 'totalReliefs', label: 'Total Reliefs', money: true },
+  { key: 'chargeableIncome', label: 'Chargeable Income', money: true },
+  { key: 'taxDeductible', label: 'Tax Deductible', money: true },
+  { key: 'overtimeIncome', label: 'Overtime Income', money: true },
+  { key: 'overtimeTax', label: 'Overtime Tax', money: true },
+  { key: 'totalTaxPayable', label: 'Total Tax to GRA', money: true },
 ];
 
 // ── CSV + print helpers (generic) ──────────────────────────────────────────────
@@ -165,6 +196,7 @@ export function PayrollReportsPage() {
 
   const effectiveScope: 'run' | 'year' = def.scope === 'either' ? scopeMode : def.scope;
   const isGl = def.key === 'gl';
+  const isPaye = def.key === 'paye-schedule';
 
   const { data: runsData } = useQuery({
     queryKey: ['payroll-runs', orgId],
@@ -188,13 +220,19 @@ export function PayrollReportsPage() {
   const report = useQuery({
     queryKey: ['payroll-report', orgId, reportKey, params],
     queryFn: () => def.fetch(orgId, params),
-    enabled: !!orgId && ready && !isGl,
+    enabled: !!orgId && ready && !isGl && !isPaye,
   });
 
   const gl = useQuery({
     queryKey: ['payroll-gl', orgId, runId],
     queryFn: () => payrollSvc.reportGlSummary(orgId, { runId }),
     enabled: !!orgId && isGl && !!runId,
+  });
+
+  const paye = useQuery({
+    queryKey: ['payroll-paye-schedule', orgId, runId],
+    queryFn: () => payrollSvc.reportPayeSchedule(orgId, { runId }),
+    enabled: !!orgId && isPaye && !!runId,
   });
 
   const subtitle = effectiveScope === 'run'
@@ -250,7 +288,7 @@ export function PayrollReportsPage() {
             </div>
           </>
         )}
-        {!isGl && (
+        {!isGl && !isPaye && (
           <div>
             <label className="text-[10px] text-muted-foreground block mb-1">Department</label>
             <Select value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} className="h-8 text-xs w-44">
@@ -260,7 +298,7 @@ export function PayrollReportsPage() {
           </div>
         )}
         <div className="ml-auto flex gap-2">
-          {!isGl && report.data && report.data.rows.length > 0 && (
+          {!isGl && !isPaye && report.data && report.data.rows.length > 0 && (
             <>
               <Button variant="outline" size="sm" onClick={() => exportCsv(`${def.key}-${subtitle}`, def.columns, report.data!.rows, report.data!.totals)}>
                 <Download size={14} /> Export
@@ -278,6 +316,8 @@ export function PayrollReportsPage() {
         <div className="py-16 text-center text-sm text-muted-foreground">Select a {effectiveScope === 'run' ? 'payroll run' : 'period'} to generate the report.</div>
       ) : isGl ? (
         <GlReportView data={gl.data} loading={gl.isLoading} subtitle={subtitle} />
+      ) : isPaye ? (
+        <PayeScheduleView data={paye.data} loading={paye.isLoading} />
       ) : report.isLoading ? (
         <div className="space-y-2">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-9 w-full" />)}</div>
       ) : !report.data || report.data.rows.length === 0 ? (
@@ -354,6 +394,69 @@ function GlReportView({ data, loading, subtitle }: { data?: payrollSvc.PayrollGl
           </TableRow>
         </TableBody>
       </Table>
+    </CardContent></Card>
+  );
+}
+
+function PayeScheduleView({ data, loading }: { data?: payrollSvc.PayeSchedule; loading: boolean }) {
+  if (loading) return <div className="space-y-2">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-9 w-full" />)}</div>;
+  if (!data) return <div className="py-16 text-center text-sm text-muted-foreground">No data — generate for a payroll run.</div>;
+
+  const cell = (r: payrollSvc.PayeScheduleRow, k: keyof payrollSvc.PayeScheduleRow, money?: boolean) =>
+    money ? fmt(r[k] as number) : String(r[k] ?? '');
+
+  const exportSchedule = () => {
+    const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const header = PAYE_COLS.map((c) => c.label);
+    const body = data.rows.map((r) => PAYE_COLS.map((c) => (c.money ? fmt(r[c.key] as number) : r[c.key] ?? '')));
+    const totalRow = PAYE_COLS.map((c, i) => (i === 0 ? 'TOTAL' : c.money && data.totals[c.key] != null ? fmt(data.totals[c.key]) : ''));
+    const meta = [['EMPLOYER', data.employer.name], ['TIN', data.employer.tin], ['MONTH', data.employer.month], []];
+    const csv = [...meta, header, ...body, totalRow].map((r) => r.map(esc).join(',')).join('\n');
+    const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' }));
+    const a = document.createElement('a'); a.href = url; a.download = `PAYE-schedule-${data.employer.month}.csv`; a.click(); URL.revokeObjectURL(url);
+  };
+
+  const printSchedule = () => {
+    const th = PAYE_COLS.map((c) => `<th style="border:1px solid #999;padding:3px 5px;text-align:${c.money ? 'right' : 'left'};">${c.label}</th>`).join('');
+    const trs = data.rows.map((r) => `<tr>${PAYE_COLS.map((c) => `<td style="border:1px solid #ccc;padding:3px 5px;${c.money ? 'text-align:right;' : ''}">${c.money ? fmt(r[c.key] as number) : String(r[c.key] ?? '')}</td>`).join('')}</tr>`).join('');
+    const totalRow = `<tr style="font-weight:bold;background:#f0f0f0;">${PAYE_COLS.map((c, i) => i === 0 ? '<td style="border:1px solid #999;padding:3px 5px;">TOTAL</td>' : `<td style="border:1px solid #999;padding:3px 5px;text-align:right;">${c.money && data.totals[c.key] != null ? fmt(data.totals[c.key]) : ''}</td>`).join('')}</tr>`;
+    const html = `<!doctype html><html><head><title>PAYE Schedule</title></head><body style="font-family:Arial,sans-serif;font-size:9px;padding:14px;">
+      <h3 style="text-align:center;margin:0 0 8px;">EMPLOYER'S MONTHLY TAX DEDUCTIONS SCHEDULE (P.A.Y.E.)</h3>
+      <p style="margin:2px 0;"><b>Employer:</b> ${data.employer.name} &nbsp;&nbsp; <b>TIN:</b> ${data.employer.tin} &nbsp;&nbsp; <b>For the month of:</b> ${data.employer.month}</p>
+      <table style="width:100%;border-collapse:collapse;margin-top:6px;"><thead><tr>${th}</tr></thead><tbody>${trs}${totalRow}</tbody></table></body></html>`;
+    const w = window.open('', '_blank');
+    if (w) { w.document.write(html); w.document.close(); w.focus(); setTimeout(() => w.print(), 300); }
+  };
+
+  return (
+    <Card><CardContent className="p-0">
+      <div className="flex items-center justify-between px-3 py-2 border-b flex-wrap gap-2">
+        <div className="text-xs">
+          <p className="font-semibold">EMPLOYER'S MONTHLY TAX DEDUCTIONS SCHEDULE (P.A.Y.E.)</p>
+          <p className="text-muted-foreground">{data.employer.name} · TIN {data.employer.tin} · Month {data.employer.month}</p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={exportSchedule}><Download size={14} /> Export</Button>
+          <Button variant="outline" size="sm" onClick={printSchedule}><Printer size={14} /> Print</Button>
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="text-[10px] whitespace-nowrap min-w-max">
+          <thead><tr className="bg-muted/50 border-b">
+            {PAYE_COLS.map((c) => <th key={c.key} className={`px-2 py-1.5 ${c.money ? 'text-right' : 'text-left'} font-medium`}>{c.label}</th>)}
+          </tr></thead>
+          <tbody>
+            {data.rows.map((r) => (
+              <tr key={r.serNo} className="border-b">
+                {PAYE_COLS.map((c) => <td key={c.key} className={`px-2 py-1 ${c.money ? 'text-right font-mono' : ''}`}>{cell(r, c.key, c.money)}</td>)}
+              </tr>
+            ))}
+            <tr className="font-semibold bg-muted/30 border-t-2">
+              {PAYE_COLS.map((c, i) => <td key={c.key} className={`px-2 py-1.5 ${c.money ? 'text-right font-mono' : ''}`}>{i === 0 ? 'Total' : c.money && data.totals[c.key] != null ? fmt(data.totals[c.key]) : ''}</td>)}
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </CardContent></Card>
   );
 }

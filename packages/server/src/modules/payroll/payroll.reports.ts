@@ -246,6 +246,95 @@ export async function getDepartmentCostAnalysis(organisationId: string, f: Repor
   return { meta: await scopeMeta(organisationId, f), rows, totals };
 }
 
+// ─── 8. GRA Monthly PAYE Deductions Schedule (filing format) ───────────────────
+
+export async function getPayeSchedule(organisationId: string, runId: string) {
+  const run = await prisma.payrollRun.findFirst({
+    where: { id: runId, organisationId },
+    select: { runNumber: true, description: true, paymentDate: true, status: true },
+  });
+  if (!run) throw new NotFoundError('Payroll run not found');
+  const org = await prisma.organisation.findUnique({
+    where: { id: organisationId }, select: { name: true, legalName: true, taxId: true },
+  });
+
+  const slips = await prisma.payslip.findMany({
+    where: { payrollRunId: runId, organisationId },
+    include: { employee: { select: {
+      employeeNumber: true, firstName: true, lastName: true, jobTitle: true,
+      tinNumber: true, nationalId: true, ssnitNumber: true, isResident: true, employmentType: true,
+    } } },
+    orderBy: { employee: { employeeNumber: 'asc' } },
+  });
+
+  const rows = slips.map((p, i) => {
+    const basic = num(p.basicSalary);
+    const ssnit = num(p.ssnitEmployee);
+    const tier3 = num(p.tier3Employee);
+    const cashAllowances = num(p.allowances) + num(p.otherEarnings);
+    const excessBonus = num(p.bonusExcess);
+    const bonusUpTo15 = num(p.bonuses) - excessBonus;
+    const finalBonusTax = num(p.bonusTax);
+    const totalCashEmolument = basic + cashAllowances + excessBonus;
+    const accom = num(p.accommodationBenefit);
+    const vehicle = num(p.vehicleBenefit);
+    const nonCash = num(p.nonCashBenefit);
+    const totalAssessable = totalCashEmolument + accom + vehicle + nonCash;
+    const deductibleReliefs = num(p.deductibleReliefs);
+    const totalReliefs = ssnit + tier3 + deductibleReliefs;
+    const chargeable = Math.max(0, totalAssessable - totalReliefs);
+    const taxDeductible = num(p.payeAmount);
+    const overtimeIncome = num(p.overtimePay);
+    const overtimeTax = num(p.overtimeTax);
+    return {
+      serNo: i + 1,
+      tin: p.employee.tinNumber || p.employee.nationalId || '—',
+      name: empName(p as unknown as PayslipRow),
+      position: p.employee.jobTitle || '—',
+      residency: `${p.employee.isResident === false ? 'Non-resident' : 'Resident'}-${p.employee.employmentType.replace('_', '-')}`,
+      basicSalary: basic,
+      secondaryEmployment: 'N',
+      paidSsnit: ssnit > 0 ? 'Y' : 'N',
+      socialSecurityFund: ssnit,
+      thirdTier: tier3,
+      cashAllowances,
+      bonusUpTo15,
+      finalBonusTax,
+      excessBonus,
+      totalCashEmolument,
+      accommodationElement: accom,
+      vehicleElement: vehicle,
+      nonCashBenefit: nonCash,
+      totalAssessableIncome: totalAssessable,
+      deductibleReliefs,
+      totalReliefs,
+      chargeableIncome: chargeable,
+      taxDeductible,
+      overtimeIncome,
+      overtimeTax,
+      totalTaxPayable: finalBonusTax + taxDeductible + overtimeTax,
+    };
+  });
+
+  const sum = (k: keyof (typeof rows)[number]) => rows.reduce((s, r) => s + (typeof r[k] === 'number' ? (r[k] as number) : 0), 0);
+  const totals = {
+    count: rows.length, basicSalary: sum('basicSalary'), socialSecurityFund: sum('socialSecurityFund'),
+    thirdTier: sum('thirdTier'), cashAllowances: sum('cashAllowances'), bonusUpTo15: sum('bonusUpTo15'),
+    finalBonusTax: sum('finalBonusTax'), excessBonus: sum('excessBonus'), totalCashEmolument: sum('totalCashEmolument'),
+    accommodationElement: sum('accommodationElement'), vehicleElement: sum('vehicleElement'), nonCashBenefit: sum('nonCashBenefit'),
+    totalAssessableIncome: sum('totalAssessableIncome'), deductibleReliefs: sum('deductibleReliefs'),
+    totalReliefs: sum('totalReliefs'), chargeableIncome: sum('chargeableIncome'), taxDeductible: sum('taxDeductible'),
+    overtimeIncome: sum('overtimeIncome'), overtimeTax: sum('overtimeTax'), totalTaxPayable: sum('totalTaxPayable'),
+  };
+
+  const d = run.paymentDate;
+  const month = `${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
+  return {
+    employer: { name: org?.legalName || org?.name || '—', tin: org?.taxId || '—', month, runNumber: run.runNumber },
+    rows, totals,
+  };
+}
+
 // ─── 7. Employee loans report ──────────────────────────────────────────────────
 
 export async function getLoanReport(organisationId: string, f: ReportFilters) {
