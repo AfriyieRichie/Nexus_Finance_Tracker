@@ -246,6 +246,39 @@ export async function getDepartmentCostAnalysis(organisationId: string, f: Repor
   return { meta: await scopeMeta(organisationId, f), rows, totals };
 }
 
+// ─── 7. Employee loans report ──────────────────────────────────────────────────
+
+export async function getLoanReport(organisationId: string, f: ReportFilters) {
+  const loans = await prisma.employeeLoan.findMany({
+    where: {
+      organisationId,
+      ...(f.employeeId ? { employeeId: f.employeeId } : {}),
+      ...(f.departmentId ? { employee: { departmentId: f.departmentId } } : {}),
+    },
+    include: { employee: { select: { employeeNumber: true, firstName: true, lastName: true, department: { select: { name: true } } } } },
+    orderBy: [{ status: 'asc' }, { startDate: 'desc' }],
+  });
+  const rows = loans.map((l) => {
+    const principal = num(l.principalAmount);
+    const balance = num(l.balance);
+    return {
+      employeeNumber: l.employee.employeeNumber,
+      name: `${l.employee.firstName} ${l.employee.lastName}`,
+      department: l.employee.department?.name ?? '—',
+      description: l.description,
+      startDate: l.startDate.toISOString().slice(0, 10),
+      principal,
+      repaid: Math.round((principal - balance) * 100) / 100,
+      balance,
+      instalment: num(l.instalmentAmount),
+      status: l.status,
+    };
+  });
+  const sum = (k: keyof (typeof rows)[number]) => rows.reduce((s, r) => s + (typeof r[k] === 'number' ? (r[k] as number) : 0), 0);
+  const totals = { count: rows.length, principal: sum('principal'), repaid: sum('repaid'), balance: sum('balance'), instalment: sum('instalment') };
+  return { meta: { type: 'period' as const, year: f.year, month: null }, rows, totals };
+}
+
 // ─── 6. Employee earnings (year-to-date, by employee) ──────────────────────────
 
 export async function getEmployeeYtd(organisationId: string, f: ReportFilters) {

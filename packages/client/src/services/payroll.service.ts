@@ -412,4 +412,5 @@ export const reportStatutory    = (orgId: string, p: ReportParams) => reportGet<
 export const reportBank         = (orgId: string, p: ReportParams) => reportGet<PayrollReport>(orgId, 'bank', p);
 export const reportDepartment   = (orgId: string, p: ReportParams) => reportGet<PayrollReport>(orgId, 'department', p);
 export const reportEmployeeYtd  = (orgId: string, p: ReportParams) => reportGet<PayrollReport>(orgId, 'employee-ytd', p);
+export const reportLoans        = (orgId: string, p: ReportParams) => reportGet<PayrollReport>(orgId, 'loans', p);
 export const reportGlSummary    = (orgId: string, p: ReportParams) => reportGet<PayrollGlReport>(orgId, 'gl-summary', p);

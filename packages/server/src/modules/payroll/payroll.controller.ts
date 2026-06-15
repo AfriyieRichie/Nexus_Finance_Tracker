@@ -225,3 +225,7 @@ export const reportDepartment = asyncHandler(async (req: Request, res: Response)
 export const reportEmployeeYtd = asyncHandler(async (req: Request, res: Response) => {
   return sendSuccess(res, await reports.getEmployeeYtd(req.params.organisationId, reportFilters(req)));
 });
+
+export const reportLoans = asyncHandler(async (req: Request, res: Response) => {
+  return sendSuccess(res, await reports.getLoanReport(req.params.organisationId, reportFilters(req)));
+});

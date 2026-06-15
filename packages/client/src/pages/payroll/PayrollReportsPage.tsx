@@ -93,6 +93,19 @@ const YTD_COLS: Column[] = [
   { key: 'employerCost', label: 'Employer Cost YTD', money: true },
 ];
 
+const LOAN_COLS: Column[] = [
+  { key: 'employeeNumber', label: 'Emp No' },
+  { key: 'name', label: 'Name' },
+  { key: 'department', label: 'Dept' },
+  { key: 'description', label: 'Loan' },
+  { key: 'startDate', label: 'Start' },
+  { key: 'principal', label: 'Principal', money: true },
+  { key: 'repaid', label: 'Repaid', money: true },
+  { key: 'balance', label: 'Balance', money: true },
+  { key: 'instalment', label: 'Instalment', money: true },
+  { key: 'status', label: 'Status' },
+];
+
 const REPORTS: ReportDef[] = [
   { key: 'register', label: 'Payroll Register', scope: 'either', columns: REGISTER_COLS, fetch: payrollSvc.reportRegister },
   { key: 'statutory', label: 'Statutory (PAYE & SSNIT)', scope: 'either', columns: STATUTORY_COLS, fetch: payrollSvc.reportStatutory },
@@ -100,6 +113,7 @@ const REPORTS: ReportDef[] = [
   { key: 'bank', label: 'Bank Disbursement', scope: 'run', columns: BANK_COLS, fetch: payrollSvc.reportBank },
   { key: 'department', label: 'Department Cost Analysis', scope: 'either', columns: DEPARTMENT_COLS, fetch: payrollSvc.reportDepartment },
   { key: 'employee-ytd', label: 'Employee Earnings (YTD)', scope: 'year', columns: YTD_COLS, fetch: payrollSvc.reportEmployeeYtd },
+  { key: 'loans', label: 'Loan Report', scope: 'year', columns: LOAN_COLS, fetch: payrollSvc.reportLoans },
 ];
 
 // ── CSV + print helpers (generic) ──────────────────────────────────────────────
