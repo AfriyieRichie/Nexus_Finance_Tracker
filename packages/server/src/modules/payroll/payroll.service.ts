@@ -63,6 +63,7 @@ export interface CreateEmployeeInput {
   accommodationCode?: 'AF' | 'AO' | 'FO' | 'SA' | null;
   vehicleCode?: 'FVD' | 'VF' | 'V' | 'F' | null;
   isNsp?: boolean;
+  activatedReliefs?: ('MARRIAGE' | 'CHILD_EDUCATION' | 'OLD_AGE' | 'AGED_DEPENDANT' | 'DISABILITY')[];
 }
 
 export interface UpdateEmployeeInput extends Partial<CreateEmployeeInput> {
@@ -359,6 +360,7 @@ export async function createEmployee(organisationId: string, input: CreateEmploy
       accommodationCode:      input.accommodationCode ?? null,
       vehicleCode:            input.vehicleCode ?? null,
       isNsp:                  input.isNsp ?? false,
+      activatedReliefs:       input.activatedReliefs ?? [],
     },
     include: {
       department:           { select: { id: true, name: true } },
@@ -452,6 +454,7 @@ export async function updateEmployee(organisationId: string, id: string, input: 
       ...(input.accommodationCode     !== undefined && { accommodationCode:     input.accommodationCode }),
       ...(input.vehicleCode           !== undefined && { vehicleCode:           input.vehicleCode }),
       ...(input.isNsp                 !== undefined && { isNsp:                 input.isNsp }),
+      ...(input.activatedReliefs      !== undefined && { activatedReliefs:      input.activatedReliefs }),
     },
     include: {
       department:           { select: { id: true, name: true } },
@@ -699,6 +702,7 @@ export async function createPayrollRun(
       isResident: true, overtimeType: true, overtimeFixedAmount: true, overtimeMultiplier: true,
       employmentType: true, accommodationCode: true, vehicleCode: true, isNsp: true,
       isMarried: true, isDisabled: true, numberOfChildren: true, agedDependants: true, dateOfBirth: true,
+      activatedReliefs: true,
       components: {
         where:   { isActive: true, effectiveFrom: { lt: paymentDateNextDay } },
         orderBy: { effectiveFrom: 'desc' },
@@ -882,17 +886,20 @@ export async function createPayrollRun(
         bonusTax    = round4(atRate * tr.bonusRate);
         bonusInPaye = round4(Math.max(0, bonuses - bonusThreshold));
       }
-      // Personal reliefs (annual → monthly), driven by employee attributes
+      // Personal reliefs (annual → monthly). A relief applies ONLY when the
+      // employee is eligible AND it has been activated (GRA-granted) for them —
+      // eligibility data alone never auto-applies a relief.
+      const active = new Set(emp.activatedReliefs ?? []);
       const age = ageFromDob(emp.dateOfBirth, paymentDate);
       let annualRelief = 0;
-      if (emp.isMarried) annualRelief += reliefCfg.marriageChild;
-      if (age !== null && age >= 60) annualRelief += reliefCfg.oldAge;
-      annualRelief += Math.min(emp.numberOfChildren, reliefCfg.childEducationMax) * reliefCfg.childEducation;
-      annualRelief += emp.agedDependants * reliefCfg.agedDependant;
+      if (emp.isMarried && active.has('MARRIAGE')) annualRelief += reliefCfg.marriageChild;
+      if (age !== null && age >= 60 && active.has('OLD_AGE')) annualRelief += reliefCfg.oldAge;
+      if (active.has('CHILD_EDUCATION')) annualRelief += Math.min(emp.numberOfChildren, reliefCfg.childEducationMax) * reliefCfg.childEducation;
+      if (active.has('AGED_DEPENDANT')) annualRelief += emp.agedDependants * reliefCfg.agedDependant;
 
       const payeGross        = round4(basic + allowances + otherEarnings + bonusInPaye + overtimeInPaye + taxableBenefits);
       const assessableIncome = round4(Math.max(0, payeGross - ssnitEmployee - tier3Deductible));
-      const disabilityRelief = emp.isDisabled ? round4(assessableIncome * reliefCfg.disabilityPct) : 0;
+      const disabilityRelief = (emp.isDisabled && active.has('DISABILITY')) ? round4(assessableIncome * reliefCfg.disabilityPct) : 0;
       reliefApplied          = round4(annualRelief / 12 + disabilityRelief + statutory.personalRelief);
       const taxableIncome    = round4(Math.max(0, assessableIncome - reliefApplied));
       payeAmount = calculatePaye(taxableIncome, bands, 0);

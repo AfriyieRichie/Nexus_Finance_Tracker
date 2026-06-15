@@ -1281,6 +1281,8 @@ function reliefSummary(e: Employee): string {
   if (e.isNsp) parts.push('NSP');
   if (e.vehicleCode) parts.push(`Vehicle (${e.vehicleCode})`);
   if (e.accommodationCode) parts.push(`Accom (${e.accommodationCode})`);
+  const active = (e.activatedReliefs ?? []).length;
+  if (active > 0) parts.push(`✓ ${active} relief${active === 1 ? '' : 's'} active`);
   return parts.length ? parts.join(' · ') : '—';
 }
 
@@ -1461,6 +1463,56 @@ function BulkImportEmployeesDialog({ organisationId }: { organisationId: string 
   );
 }
 
+const RELIEF_TYPES: { code: string; label: string; eligible: (e: Employee) => boolean; note: string }[] = [
+  { code: 'MARRIAGE', label: 'Marriage / Responsibility relief', eligible: (e) => e.isMarried, note: 'requires Married' },
+  { code: 'CHILD_EDUCATION', label: 'Child Education relief', eligible: (e) => e.numberOfChildren > 0, note: 'requires children' },
+  { code: 'OLD_AGE', label: 'Old Age relief (60+)', eligible: (e) => { const a = ageFromDob(e.dateOfBirth); return a !== null && a >= 60; }, note: 'requires age ≥ 60' },
+  { code: 'AGED_DEPENDANT', label: 'Aged Dependant relief', eligible: (e) => e.agedDependants > 0, note: 'requires aged dependants' },
+  { code: 'DISABILITY', label: 'Disability relief (25% of AI)', eligible: (e) => e.isDisabled, note: 'requires Disabled' },
+];
+
+function ActivateReliefsDialog({ organisationId, employee }: { organisationId: string; employee: Employee }) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set(employee.activatedReliefs ?? []));
+
+  const save = useMutation({
+    mutationFn: () => payrollSvc.updateEmployee(organisationId, employee.id, { activatedReliefs: [...selected] as Employee['activatedReliefs'] }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['payroll-employees', organisationId] }); setOpen(false); },
+  });
+
+  const toggle = (code: string) => setSelected((s) => { const n = new Set(s); if (n.has(code)) n.delete(code); else n.add(code); return n; });
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (v) setSelected(new Set(employee.activatedReliefs ?? [])); }}>
+      <DialogTrigger asChild>
+        <button className="text-xs text-primary hover:underline" title="Activate GRA-granted reliefs">Reliefs</button>
+      </DialogTrigger>
+      <DialogContent className="max-w-md">
+        <h2 className="text-lg font-semibold mb-1">Activate reliefs — {employee.firstName} {employee.lastName}</h2>
+        <p className="text-xs text-muted-foreground mb-3">Tick only the reliefs GRA has actually granted this employee. A relief affects PAYE only when activated here, even if the employee qualifies.</p>
+        <div className="space-y-2">
+          {RELIEF_TYPES.map((r) => {
+            const eligible = r.eligible(employee);
+            return (
+              <label key={r.code} className={`flex items-center gap-2 text-sm p-2 rounded border ${eligible ? 'cursor-pointer' : 'opacity-50'}`}>
+                <input type="checkbox" disabled={!eligible} checked={selected.has(r.code)} onChange={() => toggle(r.code)} />
+                <span className="flex-1">{r.label}</span>
+                {!eligible && <span className="text-[10px] text-muted-foreground">{r.note}</span>}
+              </label>
+            );
+          })}
+        </div>
+        {save.isError && <p className="text-xs text-destructive mt-2">Could not save. Please try again.</p>}
+        <div className="flex justify-end gap-2 pt-3">
+          <DialogClose asChild><Button variant="outline" size="sm">Cancel</Button></DialogClose>
+          <Button size="sm" disabled={save.isPending} onClick={() => save.mutate()}>{save.isPending ? 'Saving…' : 'Save activation'}</Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function EmployeesTab({ organisationId }: { organisationId: string }) {
   const navigate = useNavigate();
   const [statusFilter, setStatusFilter] = useState('');
@@ -1525,7 +1577,8 @@ function EmployeesTab({ organisationId }: { organisationId: string }) {
                   <TableCell className="text-right text-sm">{fmt(e.basicSalary)}</TableCell>
                   <TableCell><Badge className={EMP_STATUS_CLASS[e.status]}>{e.status[0] + e.status.slice(1).toLowerCase()}</Badge></TableCell>
                   <TableCell>
-                    <div className="flex items-center gap-1 justify-end">
+                    <div className="flex items-center gap-2 justify-end">
+                      <ActivateReliefsDialog organisationId={organisationId} employee={e} />
                       <EmployeeStatusControl organisationId={organisationId} employee={e} />
                       <Button size="sm" variant="ghost" onClick={() => openEdit(e)}>Edit</Button>
                     </div>

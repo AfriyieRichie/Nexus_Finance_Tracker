@@ -1929,6 +1929,10 @@ model Employee {
   isDisabled             Boolean        @default(false)
   numberOfChildren       Int            @default(0)
   agedDependants         Int            @default(0)
+  // Reliefs GRA has actually granted/activated for this employee (codes:
+  // MARRIAGE, CHILD_EDUCATION, OLD_AGE, AGED_DEPENDANT, DISABILITY). Eligibility
+  // alone (the attributes above) does NOT apply a relief — only activation does.
+  activatedReliefs       String[]       @default([])
   // Non-cash taxable benefit (e.g. vehicle), monthly amount (legacy — superseded by codes)
   vehicleBenefit         Decimal?       @db.Decimal(20, 4)
   // GRA benefit codes: accommodation AF/AO/FO/SA, vehicle FVD/VF/V/F (null = none)
