@@ -854,13 +854,6 @@ export function EmployeeDialog({ organisationId, emp, employees, onClose, fullPa
               <Input type="date" value={form.dateOfBirth} onChange={(e) => set('dateOfBirth', e.target.value)} />
               {form.dateOfBirth && <p className="text-xs text-muted-foreground mt-0.5">{ageInfo(form.dateOfBirth)}</p>}
             </div>
-            <div>
-              <label className="text-sm font-medium">Residency</label>
-              <Select value={form.isResident ? 'resident' : 'non'} onChange={(e) => set('isResident', e.target.value === 'resident')}>
-                <option value="resident">Resident</option>
-                <option value="non">Non-resident</option>
-              </Select>
-            </div>
 
             {/* Reliefs & dependants (feed PAYE reliefs / GRA returns) */}
             <div className="col-span-3 border-t pt-3 mt-1">
@@ -1033,7 +1026,7 @@ export function EmployeeDialog({ organisationId, emp, employees, onClose, fullPa
               <div>
                 <label htmlFor="isResident" className="text-sm font-medium cursor-pointer">Resident Employee</label>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Uncheck for non-resident employees — overtime is taxed at a flat 20% (GRA rule) rather than the standard PAYE bands.
+                  Uncheck for non-resident employees — taxed at a flat 25% on all employment income (GRA rule), with no graduated bands, tax-free threshold, or reliefs.
                 </p>
               </div>
             </div>
