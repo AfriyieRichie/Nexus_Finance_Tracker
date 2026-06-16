@@ -322,7 +322,9 @@ export const createPayrollRun = (
     notes?: string;
   },
 ) =>
-  api.post(`/organisations/${organisationId}/payroll/runs`, data).then((r) => r.data.data as PayrollRun);
+  // Heaviest call in the module (calculates + persists every payslip), so it gets
+  // a longer timeout than the global 30s default for large headcounts.
+  api.post(`/organisations/${organisationId}/payroll/runs`, data, { timeout: 60_000 }).then((r) => r.data.data as PayrollRun);
 
 export const deletePayrollRun = (organisationId: string, id: string) =>
   api.delete(`/organisations/${organisationId}/payroll/runs/${id}`);

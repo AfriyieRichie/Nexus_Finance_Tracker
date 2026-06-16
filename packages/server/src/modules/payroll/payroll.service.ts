@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Prisma, JournalType, EntryStatus, SalaryComponentType, PayrollRunStatus, PayslipStatus } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { ValidationError, NotFoundError, ForbiddenError, ConflictError } from '../../utils/errors';
@@ -760,8 +761,21 @@ export async function createPayrollRun(
     (input.overrides ?? []).map((o) => [o.employeeId, o]),
   );
 
-  type PayslipCreate = Parameters<typeof prisma.payslip.create>[0]['data'];
-  const payslipDataList: PayslipCreate[] = [];
+  // Fetch every active loan for the org in one query, grouped by employee —
+  // avoids a per-employee round-trip inside the loop (the cause of the timeout).
+  const allActiveLoans = await prisma.employeeLoan.findMany({
+    where: { organisationId, status: 'ACTIVE', startDate: { lte: paymentDate } },
+  });
+  const loansByEmployee = new Map<string, typeof allActiveLoans>();
+  for (const loan of allActiveLoans) {
+    const arr = loansByEmployee.get(loan.employeeId);
+    if (arr) arr.push(loan); else loansByEmployee.set(loan.employeeId, [loan]);
+  }
+
+  // Payslips and their lines are built in memory and inserted with two batched
+  // createMany calls (ids are pre-assigned so lines can reference their payslip).
+  const payslipDataList: (Prisma.PayslipCreateManyInput & { id: string })[] = [];
+  const payslipLineDataList: Prisma.PayslipLineCreateManyInput[] = [];
 
   let totalGross           = 0;
   let totalPaye            = 0;
@@ -828,10 +842,8 @@ export async function createPayrollRun(
       lines.push({ description: 'Bonus', type: SalaryComponentType.BONUS, amount: overrideBonuses, isEmployer: false, componentId: undefined });
     }
 
-    // Active loan repayments
-    const activeLoans = await prisma.employeeLoan.findMany({
-      where: { employeeId: emp.id, status: 'ACTIVE', startDate: { lte: paymentDate } },
-    });
+    // Active loan repayments (resolved from the pre-fetched map)
+    const activeLoans = loansByEmployee.get(emp.id) ?? [];
     for (const loan of activeLoans) {
       const instalment = round4(Math.min(Number(loan.instalmentAmount), Number(loan.balance)));
       if (instalment > 0) {
@@ -953,7 +965,9 @@ export async function createPayrollRun(
     const ytdSsnit   = round4(Number(ytd?.ssnitEmployee ?? 0) + ssnitEmployee);
     const ytdNetPay  = round4(Number(ytd?.netPay      ?? 0) + netPay);
 
+    const payslipId = randomUUID();
     payslipDataList.push({
+      id:               payslipId,
       payrollRunId:     '',        // set after run created
       employeeId:       emp.id,
       organisationId,
@@ -988,8 +1002,10 @@ export async function createPayrollRun(
       ytdNetPay,
       departmentId:     emp.departmentId,
       costCentreId:     emp.costCentreId,
-      lines:            { create: lines.map((l) => ({ description: l.description, type: l.type, amount: l.amount, isEmployer: l.isEmployer, componentId: l.componentId, loanId: l.loanId })) },
-    } as PayslipCreate);
+    });
+    for (const l of lines) {
+      payslipLineDataList.push({ payslipId, description: l.description, type: l.type, amount: l.amount, isEmployer: l.isEmployer, componentId: l.componentId, loanId: l.loanId });
+    }
 
     totalGross           = round4(totalGross           + grossPay);
     totalPaye            = round4(totalPaye            + payeAmount);
@@ -1035,17 +1051,17 @@ export async function createPayrollRun(
       },
     });
 
-    // Attach payrollRunId to each payslip and create them
-    for (const pd of payslipDataList) {
-      (pd as Record<string, unknown>).payrollRunId = created.id;
-      await tx.payslip.create({ data: pd });
-    }
+    // Attach the run id, then insert all payslips and their lines in two batches
+    // (one round-trip each) rather than a create-per-employee storm.
+    for (const pd of payslipDataList) pd.payrollRunId = created.id;
+    await tx.payslip.createMany({ data: payslipDataList });
+    await tx.payslipLine.createMany({ data: payslipLineDataList });
 
     return tx.payrollRun.findUnique({
       where:   { id: created.id },
       include: { payslips: { include: { employee: true, lines: true } }, period: true },
     });
-  });
+  }, { timeout: 30000 });
 
   auditLog({ organisationId, userId, action: 'PAYROLL_RUN_CREATED', module: 'PAYROLL', entityType: 'PAYROLL_RUN', entityId: run!.id, entityRef: run!.runNumber, description: `Payroll run ${run!.runNumber} created — ${run!.payslips.length} employees, net pay ${totalNetPay}`, after: { runNumber: run!.runNumber, totalGross, totalNetPay, employeeCount: run!.payslips.length } });
   return run!;
