@@ -4,6 +4,7 @@ import { ValidationError, NotFoundError, ForbiddenError, ConflictError } from '.
 import { buildPagination } from '../../utils/response';
 import { createJournalEntry, postJournalEntry } from '../journals/journal.service';
 import { auditLog } from '../audit-trail/audit.service';
+import { bulkEmployeeRowSchema } from './payroll.schemas';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -370,14 +371,10 @@ export async function createEmployee(organisationId: string, input: CreateEmploy
   });
 }
 
-export interface BulkEmployeeRow extends Omit<CreateEmployeeInput, 'employeeNumber'> {
-  employeeNumber?: string;
-  department?: string;
-}
-
-// Bulk-onboard employees from an import. Resolves department by name, auto-numbers
-// blank employee numbers, and reports per-row errors without aborting the batch.
-export async function bulkCreateEmployees(organisationId: string, rows: BulkEmployeeRow[]) {
+// Bulk-onboard employees from an import. Each row is validated individually
+// (so one bad row never aborts the batch), department is resolved by name, blank
+// employee numbers auto-generate, and every failure is reported per row.
+export async function bulkCreateEmployees(organisationId: string, rawRows: unknown[]) {
   const departments = await prisma.department.findMany({ where: { organisationId }, select: { id: true, name: true } });
   const deptByName = new Map(departments.map((d) => [d.name.trim().toLowerCase(), d.id]));
 
@@ -390,9 +387,16 @@ export async function bulkCreateEmployees(organisationId: string, rows: BulkEmpl
   const created: string[] = [];
   const errors: { row: number; employee: string; message: string }[] = [];
 
-  for (let i = 0; i < rows.length; i++) {
-    const { department, employeeNumber, ...rest } = rows[i];
-    const label = `${rest.firstName ?? ''} ${rest.lastName ?? ''}`.trim();
+  for (let i = 0; i < rawRows.length; i++) {
+    const raw = (rawRows[i] ?? {}) as Record<string, unknown>;
+    const label = `${(raw.firstName as string) ?? ''} ${(raw.lastName as string) ?? ''}`.trim();
+    const parsed = bulkEmployeeRowSchema.safeParse(raw);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      errors.push({ row: i + 2, employee: label, message: `${issue.path.join('.') || 'field'}: ${issue.message}` });
+      continue;
+    }
+    const { department, employeeNumber, ...rest } = parsed.data;
     try {
       let departmentId: string | undefined;
       if (department && department.trim()) {
@@ -405,10 +409,10 @@ export async function bulkCreateEmployees(organisationId: string, rows: BulkEmpl
       await createEmployee(organisationId, { ...rest, employeeNumber: number, departmentId });
       created.push(number);
     } catch (e) {
-      errors.push({ row: i + 2, employee: label, message: (e as Error).message }); // +2: header + 1-based
+      errors.push({ row: i + 2, employee: label, message: (e as Error).message });
     }
   }
-  return { created: created.length, total: rows.length, errors };
+  return { created: created.length, total: rawRows.length, errors };
 }
 
 export async function updateEmployee(organisationId: string, id: string, input: UpdateEmployeeInput) {

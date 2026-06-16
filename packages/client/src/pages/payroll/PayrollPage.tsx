@@ -1471,6 +1471,11 @@ function BulkImportEmployeesDialog({ organisationId }: { organisationId: string 
               {parseErrors.slice(0, 50).map((e, i) => <p key={i}>{e}</p>)}
             </div>
           )}
+          {mutation.isError && (
+            <p className="text-xs text-destructive bg-destructive/10 rounded p-2">
+              Import failed: {(mutation.error as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message ?? 'server error — please try again'}
+            </p>
+          )}
           {result && (
             <div className="text-xs rounded p-2 bg-muted/40 space-y-1">
               <p className="text-green-600 font-medium">Imported {result.created} of {result.total}.</p>

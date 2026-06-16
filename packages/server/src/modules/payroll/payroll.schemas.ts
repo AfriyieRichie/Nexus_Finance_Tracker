@@ -77,15 +77,19 @@ export const setEmployeeStatusSchema = z.object({
 
 // Bulk onboarding — department is given by NAME (resolved server-side); employee
 // number is optional (auto-generated when blank); UUID-only fields are excluded.
+// Email is lenient (contact info shouldn't block onboarding).
+export const bulkEmployeeRowSchema = createEmployeeSchema
+  .omit({ departmentId: true, costCentreId: true, salaryExpenseAccountId: true })
+  .extend({
+    employeeNumber: z.string().optional(),
+    department: z.string().optional(),
+    email: z.string().optional(),
+  });
+
+// The outer payload is parsed loosely so one bad row can't 400 the whole import;
+// each row is validated individually in the service and reported per row.
 export const bulkCreateEmployeesSchema = z.object({
-  employees: z.array(
-    createEmployeeSchema
-      .omit({ departmentId: true, costCentreId: true, salaryExpenseAccountId: true })
-      .extend({
-        employeeNumber: z.string().optional(),
-        department: z.string().optional(),
-      }),
-  ).min(1).max(2000),
+  employees: z.array(z.record(z.any())).min(1).max(2000),
 });
 
 // ─── Salary Components ────────────────────────────────────────────────────────
