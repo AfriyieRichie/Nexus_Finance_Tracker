@@ -1369,9 +1369,11 @@ function downloadEmployeeTemplate() {
 }
 
 function parseEmployeeCsv(text: string): { rows: Record<string, unknown>[]; errors: string[] } {
-  const lines = text.replace(/\r/g, '').split('\n').filter((l) => l.trim());
+  // Split on every line-ending variant (\r\n, \r-only/Mac, \n, or mixed) so rows
+  // aren't collapsed into one. Strip a leading BOM from the first header.
+  const lines = text.replace(/^﻿/, '').split(/\r\n|\r|\n/).filter((l) => l.trim());
   if (lines.length < 2) return { rows: [], errors: ['File has no data rows.'] };
-  const headers = parseCsvLine(lines[0]).map((h) => h.replace(/^"|"$/g, ''));
+  const headers = parseCsvLine(lines[0]).map((h) => h.replace(/^﻿/, '').replace(/^"|"$/g, '').trim());
   const colByHeader = new Map(IMPORT_COLUMNS.map((c) => [c.header.toLowerCase(), c]));
   const rows: Record<string, unknown>[] = [];
   const errors: string[] = [];
