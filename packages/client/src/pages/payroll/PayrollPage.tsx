@@ -1348,15 +1348,23 @@ const IMPORT_COLUMNS: ImportCol[] = [
   { header: 'tier3EmployerRate', field: 'tier3EmployerRate', type: 'number', example: '', note: 'decimal e.g. 0.05' },
 ];
 
-function parseCsvLine(line: string): string[] {
+function parseCsvLine(line: string, delim = ','): string[] {
   const out: string[] = []; let cur = ''; let q = false;
   for (let i = 0; i < line.length; i++) {
     const c = line[i];
     if (q) { if (c === '"' && line[i + 1] === '"') { cur += '"'; i++; } else if (c === '"') q = false; else cur += c; }
-    else { if (c === '"') q = true; else if (c === ',') { out.push(cur); cur = ''; } else cur += c; }
+    else { if (c === '"') q = true; else if (c === delim) { out.push(cur); cur = ''; } else cur += c; }
   }
   out.push(cur);
   return out.map((s) => s.trim());
+}
+
+// Pick the delimiter (comma / semicolon / tab) that the header splits into most
+// columns — Excel in some locales saves CSVs with ';'.
+function detectDelimiter(headerLine: string): string {
+  let best = ',', bestN = 0;
+  for (const d of [',', ';', '\t']) { const n = headerLine.split(d).length; if (n > bestN) { bestN = n; best = d; } }
+  return best;
 }
 
 function downloadEmployeeTemplate() {
@@ -1387,13 +1395,17 @@ function parseEmployeeCsv(text: string): { rows: Record<string, unknown>[]; erro
   // aren't collapsed into one. Strip a leading BOM from the first header.
   const lines = text.replace(/^﻿/, '').split(/\r\n|\r|\n/).filter((l) => l.trim());
   if (lines.length < 2) return { rows: [], errors: ['File has no data rows.'] };
-  const headers = parseCsvLine(lines[0]).map((h) => h.replace(/^﻿/, '').replace(/^"|"$/g, '').trim());
+  const delim = detectDelimiter(lines[0]);
+  const headers = parseCsvLine(lines[0], delim).map((h) => h.replace(/^﻿/, '').replace(/^"|"$/g, '').trim());
   const colByHeader = new Map(IMPORT_COLUMNS.map((c) => [c.header.toLowerCase(), c]));
+  if (!headers.some((h) => colByHeader.has(h.toLowerCase()))) {
+    return { rows: [], errors: ['Header row not recognised. Re-download the template and keep the column headers unchanged.'] };
+  }
   const rows: Record<string, unknown>[] = [];
   const errors: string[] = [];
 
   for (let i = 1; i < lines.length; i++) {
-    const vals = parseCsvLine(lines[i]);
+    const vals = parseCsvLine(lines[i], delim);
     const row: Record<string, unknown> = {};
     const rowErr: string[] = [];
     headers.forEach((h, idx) => {
@@ -1406,6 +1418,8 @@ function parseEmployeeCsv(text: string): { rows: Record<string, unknown>[]; erro
       else if (col.type === 'boolean') row[col.field] = /^(true|yes|y|1)$/i.test(raw);
       else row[col.field] = col.field === 'gender' || col.field === 'employmentType' || col.field === 'payFrequency' || col.field === 'accommodationCode' || col.field === 'vehicleCode' ? raw.toUpperCase() : raw;
     });
+    // Skip blank/trailing rows entirely (e.g. Excel's empty comma rows).
+    if (Object.keys(row).length === 0 && rowErr.length === 0) continue;
     for (const c of IMPORT_COLUMNS) if (c.required && (row[c.field] === undefined || row[c.field] === '')) rowErr.push(`${c.header} required`);
     if (rowErr.length) errors.push(`Row ${i + 1}: ${rowErr.join(', ')}`);
     else rows.push(row);
