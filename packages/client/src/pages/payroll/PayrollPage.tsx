@@ -1368,6 +1368,20 @@ function downloadEmployeeTemplate() {
   URL.revokeObjectURL(a.href);
 }
 
+// Accept ISO (YYYY-MM-DD) and DD-MM-YYYY / DD/MM/YYYY (and 2-digit years), and
+// normalise to ISO for the server. Returns the input unchanged if unrecognised.
+function normalizeDate(raw: string): string {
+  const s = raw.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  let m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+  if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2})$/);
+  if (m) { const yy = parseInt(m[3], 10); const yyyy = yy <= 30 ? 2000 + yy : 1900 + yy; return `${yyyy}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`; }
+  return s;
+}
+
+const DATE_FIELDS = new Set(['dateOfBirth', 'startDate', 'endDate']);
+
 function parseEmployeeCsv(text: string): { rows: Record<string, unknown>[]; errors: string[] } {
   // Split on every line-ending variant (\r\n, \r-only/Mac, \n, or mixed) so rows
   // aren't collapsed into one. Strip a leading BOM from the first header.
@@ -1387,7 +1401,8 @@ function parseEmployeeCsv(text: string): { rows: Record<string, unknown>[]; erro
       if (!col) return;
       const raw = (vals[idx] ?? '').trim();
       if (raw === '') return;
-      if (col.type === 'number') { const n = Number(raw); if (isNaN(n)) rowErr.push(`${col.header} not a number`); else row[col.field] = n; }
+      if (DATE_FIELDS.has(col.field)) { const d = normalizeDate(raw); if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) rowErr.push(`${col.header} must be YYYY-MM-DD or DD-MM-YYYY`); else row[col.field] = d; }
+      else if (col.type === 'number') { const n = Number(raw); if (isNaN(n)) rowErr.push(`${col.header} not a number`); else row[col.field] = n; }
       else if (col.type === 'boolean') row[col.field] = /^(true|yes|y|1)$/i.test(raw);
       else row[col.field] = col.field === 'gender' || col.field === 'employmentType' || col.field === 'payFrequency' || col.field === 'accommodationCode' || col.field === 'vehicleCode' ? raw.toUpperCase() : raw;
     });
