@@ -1,4 +1,4 @@
-import { JournalType, EntryStatus, SalaryComponentType, PayrollRunStatus, PayslipStatus } from '@prisma/client';
+import { Prisma, JournalType, EntryStatus, SalaryComponentType, PayrollRunStatus, PayslipStatus } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { ValidationError, NotFoundError, ForbiddenError, ConflictError } from '../../utils/errors';
 import { buildPagination } from '../../utils/response';
@@ -384,8 +384,8 @@ export async function bulkCreateEmployees(organisationId: string, rawRows: unkno
   for (const n of used) { const m = n.match(/(\d+)$/); if (m) maxSeq = Math.max(maxSeq, parseInt(m[1], 10)); }
   const genNumber = () => { maxSeq += 1; return `EMP-${String(maxSeq).padStart(4, '0')}`; };
 
-  const created: string[] = [];
   const errors: { row: number; employee: string; message: string }[] = [];
+  const toCreate: Prisma.EmployeeCreateManyInput[] = [];
 
   for (let i = 0; i < rawRows.length; i++) {
     const raw = (rawRows[i] ?? {}) as Record<string, unknown>;
@@ -396,23 +396,46 @@ export async function bulkCreateEmployees(organisationId: string, rawRows: unkno
       errors.push({ row: i + 2, employee: label, message: `${issue.path.join('.') || 'field'}: ${issue.message}` });
       continue;
     }
-    const { department, employeeNumber, ...rest } = parsed.data;
+    const { department, employeeNumber, ...r } = parsed.data;
+    let departmentId: string | undefined;
+    if (department && department.trim()) {
+      departmentId = deptByName.get(department.trim().toLowerCase());
+      if (!departmentId) { errors.push({ row: i + 2, employee: label, message: `Department "${department}" not found` }); continue; }
+    }
+    const number = (employeeNumber && employeeNumber.trim()) || genNumber();
+    if (used.has(number)) { errors.push({ row: i + 2, employee: label, message: `Employee number ${number} already exists` }); continue; }
+    used.add(number);
+    toCreate.push({
+      organisationId, employeeNumber: number,
+      firstName: r.firstName, lastName: r.lastName, email: r.email, phone: r.phone,
+      nationalId: r.nationalId, tinNumber: r.tinNumber, ssnitNumber: r.ssnitNumber,
+      employmentType: r.employmentType ?? 'FULL_TIME', payFrequency: r.payFrequency ?? 'MONTHLY',
+      startDate: new Date(r.startDate), endDate: r.endDate ? new Date(r.endDate) : null,
+      jobTitle: r.jobTitle, departmentId,
+      basicSalary: r.basicSalary,
+      bankName: r.bankName, bankAccountNumber: r.bankAccountNumber, bankBranch: r.bankBranch,
+      tier3EmployeeRate: r.tier3EmployeeRate, tier3EmployerRate: r.tier3EmployerRate,
+      overtimeType: r.overtimeType ?? 'NONE', overtimeFixedAmount: r.overtimeFixedAmount, overtimeMultiplier: r.overtimeMultiplier,
+      isResident: r.isResident ?? true,
+      gender: r.gender, dateOfBirth: r.dateOfBirth ? new Date(r.dateOfBirth) : null,
+      isMarried: r.isMarried ?? false, isDisabled: r.isDisabled ?? false,
+      numberOfChildren: r.numberOfChildren ?? 0, agedDependants: r.agedDependants ?? 0,
+      vehicleBenefit: r.vehicleBenefit, accommodationCode: r.accommodationCode ?? null,
+      vehicleCode: r.vehicleCode ?? null, isNsp: r.isNsp ?? false,
+    });
+  }
+
+  // Single batch insert — avoids a per-row round-trip storm (and the timeout it caused).
+  let created = 0;
+  if (toCreate.length > 0) {
     try {
-      let departmentId: string | undefined;
-      if (department && department.trim()) {
-        departmentId = deptByName.get(department.trim().toLowerCase());
-        if (!departmentId) throw new ValidationError(`Department "${department}" not found`);
-      }
-      const number = (employeeNumber && employeeNumber.trim()) || genNumber();
-      if (used.has(number)) throw new ValidationError(`Employee number ${number} already exists`);
-      used.add(number);
-      await createEmployee(organisationId, { ...rest, employeeNumber: number, departmentId });
-      created.push(number);
+      const res = await prisma.employee.createMany({ data: toCreate, skipDuplicates: true });
+      created = res.count;
     } catch (e) {
-      errors.push({ row: i + 2, employee: label, message: (e as Error).message });
+      errors.push({ row: 0, employee: '', message: `Batch insert failed: ${(e as Error).message}` });
     }
   }
-  return { created: created.length, total: rawRows.length, errors };
+  return { created, total: rawRows.length, errors };
 }
 
 export async function updateEmployee(organisationId: string, id: string, input: UpdateEmployeeInput) {
