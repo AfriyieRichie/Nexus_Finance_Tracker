@@ -707,6 +707,12 @@ export async function createPayrollRun(
   });
   if (!org) throw new NotFoundError('Organisation not found');
 
+  // Only a designated payroll preparer (or an org admin) may create a run.
+  const { preparers } = await getPayrollRoster(organisationId);
+  if (preparers.size > 0 && !preparers.has(userId) && !(await isPayrollOrgAdmin(organisationId, userId))) {
+    throw new ForbiddenError('Only a designated payroll preparer can create a run');
+  }
+
   const period = await prisma.accountingPeriod.findFirst({
     where: { id: input.periodId, organisationId },
   });
@@ -1079,14 +1085,50 @@ export async function deletePayrollRun(organisationId: string, id: string) {
   await prisma.payrollRun.delete({ where: { id } });
 }
 
-// ─── Three-Person Workflow ────────────────────────────────────────────────────
+// ─── Two-Person Workflow (Preparer + Approver) ────────────────────────────────
+// The active PAYROLL approval workflow doubles as the payroll duty roster:
+//   • first level (lowest levelNumber) → Preparers — may create & submit a run
+//   • the remaining level(s)           → Approvers — may approve, then pay/post
+// When no workflow (or no users) is configured, only the route role-guards and the
+// four-eyes separation below apply. Org admins bypass roster membership, but the
+// preparer can never approve or pay their own run (distinctness is always enforced).
+async function getPayrollRoster(organisationId: string) {
+  const wf = await prisma.approvalWorkflow.findFirst({
+    where:   { organisationId, entityType: 'PAYROLL', isActive: true },
+    include: { levels: { orderBy: { levelNumber: 'asc' }, include: { approvers: { select: { userId: true } } } } },
+  });
+  const preparers = new Set<string>();
+  const approvers = new Set<string>();
+  if (wf && wf.levels.length > 0) {
+    if (wf.levels.length === 1) {
+      // Only one level defined → treat it as the approver roster; preparers fall back to role guards.
+      for (const a of wf.levels[0].approvers) approvers.add(a.userId);
+    } else {
+      for (const a of wf.levels[0].approvers) preparers.add(a.userId);
+      for (const lvl of wf.levels.slice(1)) for (const a of lvl.approvers) approvers.add(a.userId);
+    }
+  }
+  return { preparers, approvers };
+}
+
+async function isPayrollOrgAdmin(organisationId: string, userId: string) {
+  const m = await prisma.organisationUser.findUnique({
+    where:  { organisationId_userId: { organisationId, userId } },
+    select: { role: true },
+  });
+  return m?.role === 'ORG_ADMIN' || m?.role === 'SUPER_ADMIN';
+}
 
 export async function submitPayrollRun(organisationId: string, id: string, userId: string) {
   const run = await prisma.payrollRun.findFirst({ where: { id, organisationId } });
   if (!run)                                  throw new NotFoundError('Payroll run not found');
   if (run.status !== PayrollRunStatus.DRAFT) throw new ValidationError('Only DRAFT runs can be submitted');
-  // No four-eyes check between creator and submitter — the payroll preparer creates and submits.
-  // Four-eyes applies at approval and payment stages below.
+  // The preparer creates and submits (no four-eyes between create & submit); four-eyes
+  // applies at approval and payment below.
+  const { preparers } = await getPayrollRoster(organisationId);
+  if (preparers.size > 0 && !preparers.has(userId) && !(await isPayrollOrgAdmin(organisationId, userId))) {
+    throw new ForbiddenError('Only a designated payroll preparer can submit this run');
+  }
 
   const submitted = await prisma.payrollRun.update({
     where: { id },
@@ -1100,7 +1142,12 @@ export async function approvePayrollRun(organisationId: string, id: string, user
   const run = await prisma.payrollRun.findFirst({ where: { id, organisationId } });
   if (!run)                                       throw new NotFoundError('Payroll run not found');
   if (run.status !== PayrollRunStatus.SUBMITTED)  throw new ValidationError('Only SUBMITTED runs can be approved');
-  if ([run.createdBy, run.submittedBy].includes(userId)) throw new ForbiddenError('The approver must differ from the creator and submitter');
+  // Four-eyes: the approver can never be the preparer who created/submitted the run.
+  if ([run.createdBy, run.submittedBy].includes(userId)) throw new ForbiddenError('The approver must differ from the preparer who created and submitted the run');
+  const { approvers } = await getPayrollRoster(organisationId);
+  if (approvers.size > 0 && !approvers.has(userId) && !(await isPayrollOrgAdmin(organisationId, userId))) {
+    throw new ForbiddenError('Only a designated payroll approver can approve this run');
+  }
 
   const approved = await prisma.payrollRun.update({
     where: { id },
@@ -1117,8 +1164,14 @@ export async function payPayrollRun(organisationId: string, id: string, userId: 
   });
   if (!run)                                      throw new NotFoundError('Payroll run not found');
   if (run.status !== PayrollRunStatus.APPROVED)  throw new ValidationError('Only APPROVED runs can be marked as paid');
-  if ([run.createdBy, run.submittedBy, run.approvedBy].includes(userId)) {
-    throw new ForbiddenError('The payer must differ from the creator, submitter, and approver');
+  // The approver also posts payment (a separate step). Four-eyes still holds: the
+  // preparer who created/submitted the run can never pay it.
+  if ([run.createdBy, run.submittedBy].includes(userId)) {
+    throw new ForbiddenError('The payer must differ from the preparer who created and submitted the run');
+  }
+  const { approvers } = await getPayrollRoster(organisationId);
+  if (approvers.size > 0 && !approvers.has(userId) && !(await isPayrollOrgAdmin(organisationId, userId))) {
+    throw new ForbiddenError('Only a designated payroll approver can post payment for this run');
   }
 
   const org = await prisma.organisation.findUnique({ where: { id: organisationId }, select: { baseCurrency: true } });

@@ -176,6 +176,12 @@ function WorkflowDetailDialog({ organisationId, workflowId, onClose }: { organis
               <Button size="sm" variant="outline" onClick={() => setShowAddLevel((v) => !v)}><Plus size={13} /> Add Level</Button>
             </div>
 
+            {workflow.entityType === 'PAYROLL' && (
+              <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-[11px] text-blue-800 leading-relaxed">
+                <span className="font-semibold">Payroll duty roster:</span> the <span className="font-semibold">first level</span> lists who may <span className="font-semibold">prepare</span> a run (create &amp; submit); the <span className="font-semibold">remaining level(s)</span> list who may <span className="font-semibold">approve</span> it (approve, then post payment). A preparer can never approve or pay their own run. Add two levels — e.g. “Preparer” then “Approver” — and assign the users to each.
+              </div>
+            )}
+
             {levels.length === 0 && !showAddLevel && (
               <div className="py-8 text-center border-2 border-dashed rounded-lg">
                 <p className="text-sm text-muted-foreground">No levels yet. Add at least one to activate this workflow.</p>
@@ -191,7 +197,14 @@ function WorkflowDetailDialog({ organisationId, workflowId, onClose }: { organis
                   <div className="flex items-center gap-3 px-4 py-3 bg-muted/30">
                     <div className="flex items-center justify-center w-7 h-7 rounded-full bg-primary/10 text-primary text-xs font-bold shrink-0">{level.levelNumber}</div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium">{level.name}</p>
+                      <p className="text-sm font-medium flex items-center gap-2">
+                        {level.name}
+                        {workflow.entityType === 'PAYROLL' && (
+                          <Badge variant="secondary" className="text-[9px] font-semibold">
+                            {levels.length > 1 && idx === 0 ? 'Preparer' : 'Approver'}
+                          </Badge>
+                        )}
+                      </p>
                       <p className="text-[10px] text-muted-foreground">
                         {APPROVAL_TYPES.find((t) => t.value === level.approvalType)?.label} · {level.approvers.length} approver{level.approvers.length !== 1 ? 's' : ''}
                         {level.escalationHours ? ` · escalates after ${level.escalationHours}h` : ''}
