@@ -8,6 +8,7 @@ import { useAuthStore } from '@/stores/auth.store';
 import * as appSvc from '@/services/approvals.service';
 import type { ApprovalRequest } from '@/services/approvals.service';
 import { getJournal } from '@/services/journals.service';
+import { getPayrollRun } from '@/services/payroll.service';
 import { listOrgUsers } from '@/services/users.service';
 import { Card, CardContent } from '@/components/ui/card';
 import { Attachments } from '@/components/ui/attachments';
@@ -315,6 +316,13 @@ function RequestDetailDialog({ organisationId, requestId, onClose }: { organisat
     enabled:  isJournal && !!request?.entityId,
   });
 
+  const isPayroll = request?.entityType === 'PAYROLL';
+  const { data: payrollRun, isLoading: payrollLoading } = useQuery({
+    queryKey: ['payroll-run', organisationId, request?.entityId],
+    queryFn:  () => getPayrollRun(organisationId, request!.entityId),
+    enabled:  isPayroll && !!request?.entityId,
+  });
+
   const { data: orgUsers } = useQuery({
     queryKey: ['org-users', organisationId],
     queryFn:  () => listOrgUsers(organisationId),
@@ -464,6 +472,26 @@ function RequestDetailDialog({ organisationId, requestId, onClose }: { organisat
 
               <div className={cn('text-xs px-3 py-1.5 rounded-md font-medium', Math.abs(totalDebit - totalCredit) < 0.0001 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700')}>
                 {Math.abs(totalDebit - totalCredit) < 0.0001 ? '✓ Entry is balanced' : `⚠ Unbalanced by ${Math.abs(totalDebit - totalCredit).toFixed(2)}`}
+              </div>
+            </div>
+          ) : null)}
+
+          {/* Payroll run detail */}
+          {isPayroll && (payrollLoading ? (
+            <div className="space-y-2">{[...Array(2)].map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}</div>
+          ) : payrollRun ? (
+            <div className="space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Payroll Run Detail</p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs bg-muted/30 rounded-lg p-3">
+                <div><span className="text-muted-foreground">Run</span><p className="font-mono font-semibold text-primary mt-0.5">{payrollRun.runNumber}</p></div>
+                <div><span className="text-muted-foreground">Period</span><p className="font-medium mt-0.5">{payrollRun.period?.name ?? '—'}</p></div>
+                <div><span className="text-muted-foreground">Payment Date</span><p className="font-medium mt-0.5">{new Date(payrollRun.paymentDate).toLocaleDateString()}</p></div>
+                <div><span className="text-muted-foreground">Employees</span><p className="font-medium mt-0.5">{payrollRun.payslips?.length ?? payrollRun._count?.payslips ?? '—'}</p></div>
+                <div><span className="text-muted-foreground">Gross Pay</span><p className="font-semibold mt-0.5">GHS {Number(payrollRun.totalGross).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p></div>
+                <div><span className="text-muted-foreground">Net Pay</span><p className="font-semibold mt-0.5">GHS {Number(payrollRun.totalNetPay).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p></div>
+                <div><span className="text-muted-foreground">Total PAYE</span><p className="font-medium mt-0.5">GHS {Number(payrollRun.totalPaye).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p></div>
+                <div><span className="text-muted-foreground">Employer Cost</span><p className="font-medium mt-0.5">GHS {Number(payrollRun.totalEmployerCost).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p></div>
+                <div className="col-span-2 sm:col-span-4"><span className="text-muted-foreground">Description</span><p className="font-medium mt-0.5">{payrollRun.description}</p></div>
               </div>
             </div>
           ) : null)}

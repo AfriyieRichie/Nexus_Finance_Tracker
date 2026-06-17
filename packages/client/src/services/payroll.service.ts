@@ -222,6 +222,22 @@ export interface PayrollRun {
   period?: { name: string; fiscalYear: { year: number } };
   payslips?: Payslip[];
   _count?: { payslips: number };
+  // Present when an approval workflow is configured for payroll (multi-level flow).
+  approval?: PayrollApproval | null;
+}
+
+export interface PayrollApproval {
+  requestId: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN' | 'ESCALATED';
+  currentLevel: number;
+  levels: { levelNumber: number; name: string }[];
+  decisions: {
+    levelNumber: number;
+    decision: 'APPROVED' | 'REJECTED' | 'DELEGATED';
+    decidedBy: string;
+    decidedAt: string;
+    comments: string | null;
+  }[];
 }
 
 // ── Employee Loan ─────────────────────────────────────────────────────────────

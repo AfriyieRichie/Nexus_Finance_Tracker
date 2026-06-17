@@ -4,6 +4,7 @@ import { prisma } from '../../config/database';
 import { ValidationError, NotFoundError, ForbiddenError, ConflictError } from '../../utils/errors';
 import { buildPagination } from '../../utils/response';
 import { createJournalEntry, postJournalEntry } from '../journals/journal.service';
+import { createPayrollApprovalRequest } from '../approvals/approval.service';
 import { auditLog } from '../audit-trail/audit.service';
 import { bulkEmployeeRowSchema } from './payroll.schemas';
 
@@ -693,7 +694,26 @@ export async function getPayrollRun(organisationId: string, id: string) {
     },
   });
   if (!run) throw new NotFoundError('Payroll run not found');
-  return run;
+
+  // Attach the latest payroll approval request (if a workflow is in use) so the UI
+  // can show multi-level progress instead of the direct approve button.
+  const req = await prisma.approvalRequest.findFirst({
+    where:   { entityType: 'PAYROLL', entityId: id, workflow: { organisationId } },
+    orderBy: { requestedAt: 'desc' },
+    include: {
+      workflow: { select: { levels: { orderBy: { levelNumber: 'asc' }, select: { levelNumber: true, name: true } } } },
+      decisions: { orderBy: { decidedAt: 'asc' }, select: { levelNumber: true, decision: true, decidedBy: true, decidedAt: true, comments: true } },
+    },
+  });
+  const approval = req && {
+    requestId:    req.id,
+    status:       req.status,
+    currentLevel: req.currentLevel,
+    levels:       req.workflow.levels,
+    decisions:    req.decisions,
+  };
+
+  return { ...run, approval: approval || null };
 }
 
 export async function createPayrollRun(
@@ -1099,6 +1119,7 @@ async function getPayrollRoster(organisationId: string) {
   });
   const preparers = new Set<string>();
   const approvers = new Set<string>();
+  const hasWorkflow = !!wf && wf.levels.length > 0;
   if (wf && wf.levels.length > 0) {
     if (wf.levels.length === 1) {
       // Only one level defined → treat it as the approver roster; preparers fall back to role guards.
@@ -1108,7 +1129,7 @@ async function getPayrollRoster(organisationId: string) {
       for (const lvl of wf.levels.slice(1)) for (const a of lvl.approvers) approvers.add(a.userId);
     }
   }
-  return { preparers, approvers };
+  return { preparers, approvers, hasWorkflow };
 }
 
 async function isPayrollOrgAdmin(organisationId: string, userId: string) {
@@ -1134,7 +1155,14 @@ export async function submitPayrollRun(organisationId: string, id: string, userI
     where: { id },
     data:  { status: PayrollRunStatus.SUBMITTED, submittedBy: userId, submittedAt: new Date() },
   });
-  auditLog({ organisationId, userId, action: 'PAYROLL_RUN_SUBMITTED', module: 'PAYROLL', entityType: 'PAYROLL_RUN', entityId: id, entityRef: run.runNumber, description: `Payroll run ${run.runNumber} submitted for approval` });
+
+  // If a PAYROLL approval workflow is configured, raise a multi-level approval
+  // request; approvers act on it via the Approvals page and the engine flips the
+  // run to APPROVED once the final level signs off. Otherwise the built-in
+  // two-person approve endpoint handles it.
+  const { hasWorkflow } = await createPayrollApprovalRequest(organisationId, id, userId);
+
+  auditLog({ organisationId, userId, action: 'PAYROLL_RUN_SUBMITTED', module: 'PAYROLL', entityType: 'PAYROLL_RUN', entityId: id, entityRef: run.runNumber, description: `Payroll run ${run.runNumber} submitted for approval${hasWorkflow ? ' (multi-level workflow)' : ''}` });
   return submitted;
 }
 
@@ -1144,6 +1172,17 @@ export async function approvePayrollRun(organisationId: string, id: string, user
   if (run.status !== PayrollRunStatus.SUBMITTED)  throw new ValidationError('Only SUBMITTED runs can be approved');
   // Four-eyes: the approver can never be the preparer who created/submitted the run.
   if ([run.createdBy, run.submittedBy].includes(userId)) throw new ForbiddenError('The approver must differ from the preparer who created and submitted the run');
+  // When a multi-level approval request is in flight, approval must go through the
+  // engine (every level signs off in turn) — block the direct one-shot endpoint.
+  // (Checked by live request, not just workflow existence, so a run submitted before
+  // a workflow was added can still be approved directly rather than dead-ending.)
+  const pendingRequest = await prisma.approvalRequest.findFirst({
+    where: { entityType: 'PAYROLL', entityId: id, status: 'PENDING', workflow: { organisationId } },
+    select: { id: true },
+  });
+  if (pendingRequest) {
+    throw new ForbiddenError('This run is approved through the payroll approval workflow — approve it from the Approvals page.');
+  }
   const { approvers } = await getPayrollRoster(organisationId);
   if (approvers.size > 0 && !approvers.has(userId) && !(await isPayrollOrgAdmin(organisationId, userId))) {
     throw new ForbiddenError('Only a designated payroll approver can approve this run');

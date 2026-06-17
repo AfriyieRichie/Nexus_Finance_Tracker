@@ -20,6 +20,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogTrigger, DialogClose } from '@/components/ui/dialog';
 import { Attachments } from '@/components/ui/attachments';
 import { Skeleton } from '@/components/ui/skeleton';
+import { cn } from '@/lib/utils';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -1884,6 +1885,7 @@ function CreateRunDialog({ organisationId, onClose }: { organisationId: string; 
 
 function RunDetail({ organisationId, run }: { organisationId: string; run: PayrollRun }) {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [workflowError, setWorkflowError] = useState<string | null>(null);
 
   const { data: detail } = useQuery({
@@ -1950,7 +1952,7 @@ function RunDetail({ organisationId, run }: { organisationId: string; run: Payro
             <Trash2 className="w-4 h-4 mr-1" />Delete Draft
           </Button>
         )}
-        {run.status === 'SUBMITTED' && (
+        {run.status === 'SUBMITTED' && detail && !detail.approval && (
           <Button size="sm" onClick={() => approve.mutate()} disabled={approve.isPending} className="bg-yellow-600 hover:bg-yellow-700 text-white">Approve</Button>
         )}
         {run.status === 'APPROVED' && (
@@ -1970,6 +1972,32 @@ function RunDetail({ organisationId, run }: { organisationId: string; run: Payro
           <span className="inline-flex items-center text-xs text-muted-foreground"><Lock className="w-3.5 h-3.5 mr-1" />Locked — payment file can no longer be regenerated</span>
         )}
       </div>
+
+      {detail?.approval && (run.status === 'SUBMITTED' || detail.approval.status === 'PENDING') && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-semibold text-amber-800">
+              Awaiting multi-level approval — Level {detail.approval.currentLevel} of {detail.approval.levels.length}
+            </p>
+            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => navigate('/approvals')}>Go to Approvals</Button>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {detail.approval.levels.map((lvl) => {
+              const done = detail.approval!.decisions.some((d) => d.levelNumber === lvl.levelNumber && d.decision === 'APPROVED');
+              const current = lvl.levelNumber === detail.approval!.currentLevel && detail.approval!.status === 'PENDING';
+              return (
+                <span key={lvl.levelNumber}
+                  className={cn('inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-medium border',
+                    done ? 'bg-green-100 text-green-800 border-green-200'
+                    : current ? 'bg-amber-100 text-amber-800 border-amber-300'
+                    : 'bg-muted text-muted-foreground border-border')}>
+                  {done && <Check className="w-3 h-3" />}L{lvl.levelNumber} {lvl.name}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {workflowError && (
         <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{workflowError}</p>

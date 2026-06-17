@@ -7,6 +7,7 @@ import {
   NotificationType,
   EntryStatus,
   InvoiceStatus,
+  PayrollRunStatus,
 } from '@prisma/client';
 import { auditLog } from '../audit-trail/audit.service';
 import { prisma } from '../../config/database';
@@ -544,6 +545,71 @@ export async function createMasterDataApprovalRequest(
   return { requestId: request.id, hasWorkflow: true };
 }
 
+// Raise a payroll-run approval request. The run's net pay is used for amount-based
+// level thresholds. Returns hasWorkflow=false when no active PAYROLL workflow exists,
+// in which case the caller keeps the built-in two-person (preparer/approver) flow.
+export async function createPayrollApprovalRequest(
+  organisationId: string,
+  runId: string,
+  requestedBy: string,
+): Promise<{ requestId: string; hasWorkflow: boolean }> {
+  const workflow = await prisma.approvalWorkflow.findFirst({
+    where:   { organisationId, entityType: ApprovalEntityType.PAYROLL, isActive: true },
+    include: { levels: { orderBy: { levelNumber: 'asc' } } },
+  });
+  if (!workflow || workflow.levels.length === 0) {
+    return { requestId: '', hasWorkflow: false };
+  }
+
+  const run = await prisma.payrollRun.findUnique({
+    where:  { id: runId },
+    select: { totalNetPay: true, runNumber: true },
+  });
+  const amount = Number(run?.totalNetPay ?? 0);
+
+  const firstLevel = workflow.levels.find((l) => {
+    const min = l.amountThresholdMin ? Number(l.amountThresholdMin) : 0;
+    const max = l.amountThresholdMax ? Number(l.amountThresholdMax) : Infinity;
+    return amount >= min && amount <= max;
+  }) ?? workflow.levels[0];
+
+  const escalationHours = workflow.levels
+    .filter((l) => l.escalationHours != null)
+    .map((l) => l.escalationHours!)
+    .sort((a, b) => a - b)[0];
+  const slaDeadline = escalationHours ? new Date(Date.now() + escalationHours * 3_600_000) : null;
+
+  const request = await prisma.approvalRequest.create({
+    data: {
+      workflowId:   workflow.id,
+      entityType:   ApprovalEntityType.PAYROLL,
+      entityId:     runId,
+      requestedBy,
+      currentLevel: firstLevel.levelNumber,
+      status:       ApprovalRequestStatus.PENDING,
+      slaDeadline,
+    },
+  });
+
+  const level1 = await prisma.approvalLevel.findFirst({
+    where:   { workflowId: workflow.id, levelNumber: firstLevel.levelNumber },
+    include: { approvers: { select: { userId: true } } },
+  });
+  if (level1) {
+    await notify(
+      level1.approvers.map((a) => a.userId),
+      organisationId,
+      NotificationType.APPROVAL_REQUESTED,
+      'Payroll Approval Required',
+      `Payroll run ${run?.runNumber ?? ''} has been submitted for your approval.`,
+      request.id,
+      'APPROVAL_REQUEST',
+    );
+  }
+
+  return { requestId: request.id, hasWorkflow: true };
+}
+
 // ─── Decision Engine ──────────────────────────────────────────────────────────
 
 export async function decide(
@@ -667,6 +733,14 @@ async function handleRejection(
     await prisma.purchaseOrder.updateMany({ where: { id: request.entityId }, data: { status: 'DRAFT' } });
   }
 
+  // Payroll run rejected → back to DRAFT so the preparer can correct and resubmit.
+  if (request.entityType === ApprovalEntityType.PAYROLL) {
+    await prisma.payrollRun.updateMany({
+      where: { id: request.entityId },
+      data:  { status: PayrollRunStatus.DRAFT, submittedBy: null, submittedAt: null },
+    });
+  }
+
   await notify(
     [request.requestedBy],
     organisationId,
@@ -725,6 +799,7 @@ async function dispatchApprovalComplete(
   entityId: string,
   changeType?: string | null,
   payload?: Prisma.JsonValue | null,
+  decidedBy?: string,
 ) {
   switch (entityType) {
     case ApprovalEntityType.JOURNAL_ENTRY:
@@ -748,6 +823,14 @@ async function dispatchApprovalComplete(
       break;
     case ApprovalEntityType.PURCHASE_ORDER:
       await prisma.purchaseOrder.updateMany({ where: { id: entityId }, data: { status: 'APPROVED' } });
+      break;
+    case ApprovalEntityType.PAYROLL:
+      // Final level approved → the run is cleared for payment. The approver then
+      // performs the separate Mark Paid & Post GL step.
+      await prisma.payrollRun.updateMany({
+        where: { id: entityId },
+        data:  { status: PayrollRunStatus.APPROVED, approvedBy: decidedBy ?? null, approvedAt: new Date() },
+      });
       break;
     case ApprovalEntityType.SUPPLIER: {
       // CREATE: activate the pending record. UPDATE: apply the staged change only.
@@ -773,7 +856,7 @@ async function dispatchApprovalComplete(
       break;
     }
     default:
-      // PAYMENT, PURCHASE_ORDER, SALES_INVOICE, EXPENSE_CLAIM, PAYROLL, BANK_TRANSFER:
+      // PAYMENT, SALES_INVOICE, EXPENSE_CLAIM, BANK_TRANSFER:
       // approval is tracked at the ApprovalRequest level only.
       break;
   }
@@ -906,7 +989,7 @@ async function checkLevelSatisfied(
   });
 
   // Dispatch: update entity status based on type
-  await dispatchApprovalComplete(request.entityType, request.entityId, request.changeType, request.payload);
+  await dispatchApprovalComplete(request.entityType, request.entityId, request.changeType, request.payload, userId);
 
   await notify(
     [request.requestedBy],
@@ -992,6 +1075,14 @@ export async function withdrawRequest(
     await prisma.supplierInvoice.updateMany({
       where: { id: request.entityId },
       data:  { status: InvoiceStatus.DRAFT },
+    });
+  }
+
+  // Withdrawn payroll request → back to DRAFT so it can be corrected and resubmitted.
+  if (request.entityType === ApprovalEntityType.PAYROLL) {
+    await prisma.payrollRun.updateMany({
+      where: { id: request.entityId },
+      data:  { status: PayrollRunStatus.DRAFT, submittedBy: null, submittedAt: null },
     });
   }
 
