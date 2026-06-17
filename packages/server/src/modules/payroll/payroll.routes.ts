@@ -23,6 +23,7 @@ payrollRouter.patch('/salary-components/:id',   requireRole(FINANCE_MANAGER), ct
 payrollRouter.get('/employees',                 requireRole(REPORT_VIEWER),   ctrl.listEmployees);
 payrollRouter.post('/employees',                requireRole(FINANCE_MANAGER), ctrl.createEmployee);
 payrollRouter.post('/employees/bulk',           requireRole(FINANCE_MANAGER), ctrl.bulkCreateEmployees);
+payrollRouter.post('/pay-elements/bulk',        requireRole(FINANCE_MANAGER), ctrl.bulkAssignComponents);
 payrollRouter.get('/employees/:id',             requireRole(REPORT_VIEWER),   ctrl.getEmployee);
 payrollRouter.patch('/employees/:id',           requireRole(FINANCE_MANAGER), ctrl.updateEmployee);
 payrollRouter.patch('/employees/:id/status',    requireRole(FINANCE_MANAGER), ctrl.setEmployeeStatus);

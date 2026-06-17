@@ -6,7 +6,7 @@ import { buildPagination } from '../../utils/response';
 import { createJournalEntry, postJournalEntry } from '../journals/journal.service';
 import { createPayrollApprovalRequest } from '../approvals/approval.service';
 import { auditLog } from '../audit-trail/audit.service';
-import { bulkEmployeeRowSchema } from './payroll.schemas';
+import { bulkEmployeeRowSchema, bulkComponentRowSchema } from './payroll.schemas';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -388,6 +388,8 @@ export async function bulkCreateEmployees(organisationId: string, rawRows: unkno
 
   const errors: { row: number; employee: string; message: string }[] = [];
   const toCreate: Prisma.EmployeeCreateManyInput[] = [];
+  // Inline standing pay elements captured per row, applied after the employees exist.
+  const inlineElements: { employeeNumber: string; effectiveFrom: Date; cashAllowance?: number; fixedMonthlyBonus?: number }[] = [];
 
   for (let i = 0; i < rawRows.length; i++) {
     const raw = (rawRows[i] ?? {}) as Record<string, unknown>;
@@ -398,7 +400,7 @@ export async function bulkCreateEmployees(organisationId: string, rawRows: unkno
       errors.push({ row: i + 2, employee: label, message: `${issue.path.join('.') || 'field'}: ${issue.message}` });
       continue;
     }
-    const { department, employeeNumber, ...r } = parsed.data;
+    const { department, employeeNumber, cashAllowance, fixedMonthlyBonus, ...r } = parsed.data;
     let departmentId: string | undefined;
     if (department && department.trim()) {
       departmentId = deptByName.get(department.trim().toLowerCase());
@@ -407,6 +409,9 @@ export async function bulkCreateEmployees(organisationId: string, rawRows: unkno
     const number = (employeeNumber && employeeNumber.trim()) || genNumber();
     if (used.has(number)) { errors.push({ row: i + 2, employee: label, message: `Employee number ${number} already exists` }); continue; }
     used.add(number);
+    if ((cashAllowance ?? 0) > 0 || (fixedMonthlyBonus ?? 0) > 0) {
+      inlineElements.push({ employeeNumber: number, effectiveFrom: new Date(r.startDate), cashAllowance, fixedMonthlyBonus });
+    }
     toCreate.push({
       organisationId, employeeNumber: number,
       firstName: r.firstName, lastName: r.lastName, email: r.email, phone: r.phone,
@@ -436,6 +441,83 @@ export async function bulkCreateEmployees(organisationId: string, rawRows: unkno
     } catch (e) {
       errors.push({ row: 0, employee: '', message: `Batch insert failed: ${(e as Error).message}` });
     }
+  }
+
+  // Apply inline standing pay elements. Validation already rejected duplicate numbers,
+  // so the rows below resolve to the employees just created.
+  if (inlineElements.length > 0) {
+    const numbers = inlineElements.map((e) => e.employeeNumber);
+    const emps = await prisma.employee.findMany({ where: { organisationId, employeeNumber: { in: numbers } }, select: { id: true, employeeNumber: true } });
+    const idByNumber = new Map(emps.map((e) => [e.employeeNumber, e.id]));
+    let allowId: string | undefined; let bonusId: string | undefined;
+    const ecData: Prisma.EmployeeComponentCreateManyInput[] = [];
+    for (const el of inlineElements) {
+      const empId = idByNumber.get(el.employeeNumber);
+      if (!empId) continue;
+      if ((el.cashAllowance ?? 0) > 0) {
+        allowId ??= await ensureSalaryComponent(organisationId, 'CASH_ALLOW', 'Cash Allowance', SalaryComponentType.ALLOWANCE, true);
+        ecData.push({ employeeId: empId, componentId: allowId, amount: el.cashAllowance, effectiveFrom: el.effectiveFrom });
+      }
+      if ((el.fixedMonthlyBonus ?? 0) > 0) {
+        bonusId ??= await ensureSalaryComponent(organisationId, 'FIXED_BONUS', 'Fixed Monthly Bonus', SalaryComponentType.BONUS, true);
+        ecData.push({ employeeId: empId, componentId: bonusId, amount: el.fixedMonthlyBonus, effectiveFrom: el.effectiveFrom });
+      }
+    }
+    if (ecData.length > 0) {
+      try { await prisma.employeeComponent.createMany({ data: ecData }); }
+      catch (e) { errors.push({ row: 0, employee: '', message: `Pay-element insert failed: ${(e as Error).message}` }); }
+    }
+  }
+
+  return { created, total: rawRows.length, errors };
+}
+
+// Find-or-create a per-org salary component by code (used for the inline-import
+// convenience components so the user doesn't have to pre-create them).
+async function ensureSalaryComponent(
+  organisationId: string,
+  code: string,
+  name: string,
+  type: SalaryComponentType,
+  isTaxable: boolean,
+): Promise<string> {
+  const existing = await prisma.salaryComponent.findUnique({
+    where: { organisationId_code: { organisationId, code } },
+    select: { id: true },
+  });
+  if (existing) return existing.id;
+  const c = await prisma.salaryComponent.create({ data: { organisationId, code, name, type, isTaxable } });
+  return c.id;
+}
+
+// Bulk-assign recurring pay elements (salary components) to employees by number +
+// component code. Each row is validated individually and reported per row.
+export async function bulkAssignComponents(organisationId: string, rawRows: unknown[]) {
+  const employees = await prisma.employee.findMany({ where: { organisationId }, select: { id: true, employeeNumber: true } });
+  const empByNumber = new Map(employees.map((e) => [e.employeeNumber.toLowerCase(), e.id]));
+  const components = await prisma.salaryComponent.findMany({ where: { organisationId, isActive: true }, select: { id: true, code: true } });
+  const compByCode = new Map(components.map((c) => [c.code.toLowerCase(), c.id]));
+
+  const errors: { row: number; message: string }[] = [];
+  const toCreate: Prisma.EmployeeComponentCreateManyInput[] = [];
+  for (let i = 0; i < rawRows.length; i++) {
+    const parsed = bulkComponentRowSchema.safeParse(rawRows[i] ?? {});
+    if (!parsed.success) { errors.push({ row: i + 2, message: parsed.error.issues[0].message }); continue; }
+    const r = parsed.data;
+    const employeeId = empByNumber.get(r.employeeNumber.trim().toLowerCase());
+    if (!employeeId) { errors.push({ row: i + 2, message: `Employee "${r.employeeNumber}" not found` }); continue; }
+    const componentId = compByCode.get(r.componentCode.trim().toLowerCase());
+    if (!componentId) { errors.push({ row: i + 2, message: `Component code "${r.componentCode}" not found` }); continue; }
+    const hasAmount = r.amount != null && r.amount > 0;
+    const hasRate = r.rate != null && r.rate > 0;
+    if (hasAmount === hasRate) { errors.push({ row: i + 2, message: 'Provide either amount or rate (exactly one)' }); continue; }
+    toCreate.push({ employeeId, componentId, amount: hasAmount ? r.amount : null, rate: hasRate ? r.rate : null, effectiveFrom: new Date(r.effectiveFrom) });
+  }
+
+  let created = 0;
+  if (toCreate.length > 0) {
+    try { const res = await prisma.employeeComponent.createMany({ data: toCreate }); created = res.count; }
+    catch (e) { errors.push({ row: 0, message: `Batch insert failed: ${(e as Error).message}` }); }
   }
   return { created, total: rawRows.length, errors };
 }

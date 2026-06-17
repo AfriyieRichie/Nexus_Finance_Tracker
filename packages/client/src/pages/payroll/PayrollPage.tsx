@@ -1347,6 +1347,9 @@ const IMPORT_COLUMNS: ImportCol[] = [
   { header: 'isNsp', field: 'isNsp', type: 'boolean', example: 'false' },
   { header: 'tier3EmployeeRate', field: 'tier3EmployeeRate', type: 'number', example: '', note: 'decimal e.g. 0.05' },
   { header: 'tier3EmployerRate', field: 'tier3EmployerRate', type: 'number', example: '', note: 'decimal e.g. 0.05' },
+  // Inline standing pay elements (optional convenience).
+  { header: 'cashAllowance', field: 'cashAllowance', type: 'number', example: '', note: 'monthly GHS, taxable (full PAYE)' },
+  { header: 'fixedMonthlyBonus', field: 'fixedMonthlyBonus', type: 'number', example: '', note: 'monthly GHS, taxed as bonus (5%/excess)' },
 ];
 
 function parseCsvLine(line: string, delim = ','): string[] {
@@ -1428,6 +1431,183 @@ function parseEmployeeCsv(text: string): { rows: Record<string, unknown>[]; erro
   return { rows, errors };
 }
 
+// ─── Per-run overtime & bonus import ───────────────────────────────────────────
+// A "pay-run input" file: variable overtime and one-off bonus for this run only.
+// overtimeMode = AMOUNT (flat GHS, → overtimePay) or HOURS (→ overtimeHours, valued
+// by the employee's configured hourly rate × multiplier).
+
+const OT_BONUS_HEADERS = ['employeeNumber', 'overtimeMode', 'overtimeValue', 'bonus'];
+
+function downloadOtBonusTemplate(emps: { employeeNumber: string; overtimeType: OvertimeType }[]) {
+  const header = OT_BONUS_HEADERS.join(',');
+  // Pre-fill one row per active employee with the right mode so the user just edits values.
+  const rows = emps.map((e) => `${e.employeeNumber},${e.overtimeType === 'RATE_BASED' ? 'HOURS' : 'AMOUNT'},0,0`);
+  const blob = new Blob(['﻿' + header + '\n' + rows.join('\n') + '\n'], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = 'overtime-bonus-input.csv'; a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+interface OtBonusRow { employeeNumber: string; overtimeMode: 'AMOUNT' | 'HOURS'; overtimeValue: number; bonus: number }
+
+function parseOtBonusCsv(text: string): { rows: OtBonusRow[]; errors: string[] } {
+  const lines = text.replace(/^﻿/, '').split(/\r\n|\r|\n/).filter((l) => l.trim());
+  if (lines.length < 2) return { rows: [], errors: ['File has no data rows.'] };
+  const delim = detectDelimiter(lines[0]);
+  const headers = parseCsvLine(lines[0], delim).map((h) => h.replace(/^﻿/, '').toLowerCase());
+  const iNum = headers.indexOf('employeenumber');
+  const iMode = headers.indexOf('overtimemode');
+  const iVal = headers.indexOf('overtimevalue');
+  const iBonus = headers.indexOf('bonus');
+  if (iNum < 0) return { rows: [], errors: ['Header row not recognised. Keep the headers: employeeNumber, overtimeMode, overtimeValue, bonus.'] };
+  const rows: OtBonusRow[] = []; const errors: string[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const v = parseCsvLine(lines[i], delim);
+    const num = (v[iNum] ?? '').trim();
+    if (!num) continue;
+    const mode = (iMode >= 0 ? v[iMode] ?? '' : '').trim().toUpperCase();
+    const valRaw = (iVal >= 0 ? v[iVal] ?? '' : '').trim();
+    const bonusRaw = (iBonus >= 0 ? v[iBonus] ?? '' : '').trim();
+    const overtimeValue = valRaw === '' ? 0 : Number(valRaw);
+    const bonus = bonusRaw === '' ? 0 : Number(bonusRaw);
+    if (valRaw && isNaN(overtimeValue)) { errors.push(`Row ${i + 1}: overtimeValue not a number`); continue; }
+    if (bonusRaw && isNaN(bonus)) { errors.push(`Row ${i + 1}: bonus not a number`); continue; }
+    if (mode && mode !== 'AMOUNT' && mode !== 'HOURS') { errors.push(`Row ${i + 1}: overtimeMode must be AMOUNT or HOURS`); continue; }
+    if (overtimeValue <= 0 && bonus <= 0) continue; // nothing to apply
+    rows.push({ employeeNumber: num, overtimeMode: mode === 'HOURS' ? 'HOURS' : 'AMOUNT', overtimeValue, bonus });
+  }
+  return { rows, errors };
+}
+
+// ─── Bulk pay-element (component) import ───────────────────────────────────────
+const PAY_ELEMENT_HEADERS = ['employeeNumber', 'componentCode', 'amount', 'rate', 'effectiveFrom'];
+
+function downloadPayElementsTemplate(codes: string[]) {
+  const header = PAY_ELEMENT_HEADERS.join(',');
+  const code = codes[0] ?? 'TRANSPORT';
+  const example = `IEP-0002,${code},400,,${new Date().toISOString().split('T')[0]}`;
+  const blob = new Blob(['﻿' + header + '\n' + example + '\n'], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = 'pay-elements-import.csv'; a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function parsePayElementsCsv(text: string): { rows: Record<string, unknown>[]; errors: string[] } {
+  const lines = text.replace(/^﻿/, '').split(/\r\n|\r|\n/).filter((l) => l.trim());
+  if (lines.length < 2) return { rows: [], errors: ['File has no data rows.'] };
+  const delim = detectDelimiter(lines[0]);
+  const headers = parseCsvLine(lines[0], delim).map((h) => h.replace(/^﻿/, '').toLowerCase());
+  const iNum = headers.indexOf('employeenumber');
+  const iCode = headers.indexOf('componentcode');
+  const iAmt = headers.indexOf('amount');
+  const iRate = headers.indexOf('rate');
+  const iEff = headers.indexOf('effectivefrom');
+  if (iNum < 0 || iCode < 0) return { rows: [], errors: ['Header row not recognised. Keep the headers: employeeNumber, componentCode, amount, rate, effectiveFrom.'] };
+  const rows: Record<string, unknown>[] = []; const errors: string[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const v = parseCsvLine(lines[i], delim);
+    const employeeNumber = (v[iNum] ?? '').trim();
+    const componentCode = (v[iCode] ?? '').trim();
+    if (!employeeNumber && !componentCode) continue;
+    const rowErr: string[] = [];
+    if (!employeeNumber) rowErr.push('employeeNumber required');
+    if (!componentCode) rowErr.push('componentCode required');
+    const amtRaw = (iAmt >= 0 ? v[iAmt] ?? '' : '').trim();
+    const rateRaw = (iRate >= 0 ? v[iRate] ?? '' : '').trim();
+    const effRaw = (iEff >= 0 ? v[iEff] ?? '' : '').trim();
+    const eff = effRaw ? normalizeDate(effRaw) : '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(eff)) rowErr.push('effectiveFrom must be YYYY-MM-DD or DD-MM-YYYY');
+    if (amtRaw && isNaN(Number(amtRaw))) rowErr.push('amount not a number');
+    if (rateRaw && isNaN(Number(rateRaw))) rowErr.push('rate not a number');
+    const hasAmt = amtRaw !== '' && Number(amtRaw) > 0;
+    const hasRate = rateRaw !== '' && Number(rateRaw) > 0;
+    if (hasAmt === hasRate) rowErr.push('provide either amount or rate (exactly one)');
+    if (rowErr.length) { errors.push(`Row ${i + 1}: ${rowErr.join(', ')}`); continue; }
+    rows.push({ employeeNumber, componentCode, amount: hasAmt ? Number(amtRaw) : undefined, rate: hasRate ? Number(rateRaw) : undefined, effectiveFrom: eff });
+  }
+  return { rows, errors };
+}
+
+function BulkImportPayElementsDialog({ organisationId }: { organisationId: string }) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState<Record<string, unknown>[]>([]);
+  const [parseErrors, setParseErrors] = useState<string[]>([]);
+  const [fileName, setFileName] = useState('');
+
+  const { data: components = [] } = useQuery({
+    queryKey: ['salary-components', organisationId, 'active'],
+    queryFn:  () => payrollSvc.listSalaryComponents(organisationId, true),
+    enabled:  open,
+  });
+
+  const reset = () => { setRows([]); setParseErrors([]); setFileName(''); };
+  const onFile = (file: File) => {
+    setFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (e) => { const { rows: r, errors } = parsePayElementsCsv(e.target?.result as string); setRows(r); setParseErrors(errors); };
+    reader.readAsText(file);
+  };
+
+  const mutation = useMutation({
+    mutationFn: () => payrollSvc.bulkAssignComponents(organisationId, rows),
+    onSuccess: (res) => {
+      void qc.invalidateQueries({ queryKey: ['payroll-employees', organisationId] });
+      if (res.errors.length === 0) { setOpen(false); reset(); }
+    },
+  });
+  const result = mutation.data;
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) { reset(); mutation.reset(); } }}>
+      <DialogTrigger asChild><Button size="sm" variant="outline"><Upload size={14} className="mr-1" /> Import pay elements</Button></DialogTrigger>
+      <DialogContent className="max-w-xl">
+        <h2 className="text-lg font-semibold mb-1">Bulk import pay elements</h2>
+        <p className="text-xs text-muted-foreground mb-3">Assign recurring components (allowances, recurring deductions, etc.) to employees by number + component code. One row per assignment — an employee can have many. Use either an amount or a rate (rate is a fraction of basic, e.g. 0.15).</p>
+        <div className="space-y-3">
+          <Button size="sm" variant="outline" onClick={() => downloadPayElementsTemplate(components.map((c) => c.code))}><Download size={14} className="mr-1" /> Download CSV template</Button>
+          {components.length > 0 && (
+            <p className="text-[11px] text-muted-foreground">Available codes: {components.map((c) => c.code).join(', ')}</p>
+          )}
+          <input type="file" accept=".csv" className="text-xs block w-full border rounded p-2 cursor-pointer"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); }} />
+
+          {fileName && (
+            <p className="text-xs">{rows.length + parseErrors.length} rows · <span className="text-green-600 font-medium">{rows.length} ready</span>{parseErrors.length > 0 && <> · <span className="text-destructive font-medium">{parseErrors.length} with errors</span></>}</p>
+          )}
+          {parseErrors.length > 0 && (
+            <div className="text-xs text-destructive bg-destructive/10 rounded p-2 max-h-28 overflow-y-auto space-y-0.5">
+              {parseErrors.slice(0, 50).map((e, i) => <p key={i}>{e}</p>)}
+            </div>
+          )}
+          {mutation.isError && (
+            <p className="text-xs text-destructive bg-destructive/10 rounded p-2">
+              Import failed: {(mutation.error as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message ?? 'server error — please try again'}
+            </p>
+          )}
+          {result && (
+            <div className="text-xs rounded p-2 bg-muted/40 space-y-1">
+              <p className="text-green-600 font-medium">Assigned {result.created} of {result.total}.</p>
+              {result.errors.length > 0 && (
+                <div className="text-destructive max-h-28 overflow-y-auto space-y-0.5">
+                  {result.errors.map((e, i) => <p key={i}>Row {e.row}: {e.message}</p>)}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-1">
+            <DialogClose asChild><Button variant="outline" size="sm">Close</Button></DialogClose>
+            <Button size="sm" disabled={rows.length === 0 || mutation.isPending} onClick={() => mutation.mutate()}>
+              {mutation.isPending ? 'Importing…' : `Import ${rows.length} elements`}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function BulkImportEmployeesDialog({ organisationId }: { organisationId: string }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -1458,7 +1638,7 @@ function BulkImportEmployeesDialog({ organisationId }: { organisationId: string 
       <DialogTrigger asChild><Button size="sm" variant="outline"><Upload size={14} className="mr-1" /> Bulk import</Button></DialogTrigger>
       <DialogContent className="max-w-xl">
         <h2 className="text-lg font-semibold mb-1">Bulk import employees</h2>
-        <p className="text-xs text-muted-foreground mb-3">Download the template, fill a row per employee, then upload. Department is matched by name; blank employee numbers auto-generate.</p>
+        <p className="text-xs text-muted-foreground mb-3">Download the template, fill a row per employee, then upload. Department is matched by name; blank employee numbers auto-generate. Optional <strong>cashAllowance</strong> (taxable, full PAYE) and <strong>fixedMonthlyBonus</strong> (taxed as a bonus — 5%/excess) columns create standing pay elements. For multiple/other components per employee, use “Import pay elements”.</p>
         <div className="space-y-3">
           <Button size="sm" variant="outline" onClick={downloadEmployeeTemplate}><Download size={14} className="mr-1" /> Download CSV template</Button>
           <input type="file" accept=".csv" className="text-xs block w-full border rounded p-2 cursor-pointer"
@@ -1582,6 +1762,7 @@ function EmployeesTab({ organisationId }: { organisationId: string }) {
         </div>
         <div className="flex gap-2">
           <BulkImportEmployeesDialog organisationId={organisationId} />
+          <BulkImportPayElementsDialog organisationId={organisationId} />
           <Button size="sm" onClick={openCreate}><Users className="w-4 h-4 mr-1" />Add Employee</Button>
         </div>
       </div>
@@ -1726,6 +1907,47 @@ function CreateRunDialog({ organisationId, onClose }: { organisationId: string; 
     setOverrides((prev) => ({ ...prev, [empId]: { ...(prev[empId] ?? { overtimePay: '', overtimeHours: '', bonuses: '' }), [k]: v } }));
 
   const [runError, setRunError] = useState<string | null>(null);
+  const [otImportMsg, setOtImportMsg] = useState<string[] | null>(null);
+
+  function handleOtBonusFile(file: File) {
+    setOtImportMsg(null);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const { rows, errors } = parseOtBonusCsv(String(reader.result ?? ''));
+      const byNumber = new Map(employees.map((e) => [e.employeeNumber.toLowerCase(), e]));
+      let matched = 0; const unmatched: string[] = []; const warnings: string[] = [];
+      const next: Record<string, Override> = { ...overrides };
+      for (const r of rows) {
+        const emp = byNumber.get(r.employeeNumber.toLowerCase());
+        if (!emp) { unmatched.push(r.employeeNumber); continue; }
+        const cur: Override = { ...(next[emp.id] ?? { overtimePay: '', overtimeHours: '', bonuses: '' }) };
+        const isRateBased = emp.overtimeType === 'RATE_BASED';
+        if (r.overtimeValue > 0) {
+          if (r.overtimeMode === 'HOURS') {
+            if (!isRateBased) warnings.push(`${r.employeeNumber}: HOURS given but employee isn't rate-based — overtime ignored`);
+            cur.overtimeHours = String(r.overtimeValue);
+          } else {
+            if (isRateBased) warnings.push(`${r.employeeNumber}: AMOUNT given but employee is rate-based — overtime ignored`);
+            cur.overtimePay = String(r.overtimeValue);
+          }
+        }
+        if (r.bonus > 0) cur.bonuses = String(r.bonus);
+        next[emp.id] = cur; matched++;
+      }
+      setOverrides(next);
+      const summary = [`${matched} matched`];
+      if (unmatched.length) summary.push(`${unmatched.length} unmatched`);
+      if (warnings.length) summary.push(`${warnings.length} warning${warnings.length > 1 ? 's' : ''}`);
+      if (errors.length) summary.push(`${errors.length} error${errors.length > 1 ? 's' : ''}`);
+      setOtImportMsg([
+        summary.join(' · '),
+        ...unmatched.slice(0, 6).map((u) => `Unmatched employee #: ${u}`),
+        ...warnings.slice(0, 6),
+        ...errors.slice(0, 6),
+      ]);
+    };
+    reader.readAsText(file);
+  }
 
   const create = useMutation({
     mutationFn: () => {
@@ -1801,7 +2023,25 @@ function CreateRunDialog({ organisationId, onClose }: { organisationId: string; 
       {/* Per-employee adjustments */}
       {employees.length > 0 && (
         <div className="pt-2">
-          <p className="text-xs text-gray-500 font-semibold mb-2">Per-Employee Adjustments (optional)</p>
+          <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+            <p className="text-xs text-gray-500 font-semibold">Per-Employee Adjustments (optional)</p>
+            <div className="flex items-center gap-1.5">
+              <Button type="button" size="sm" variant="outline" className="h-7 text-xs"
+                onClick={() => downloadOtBonusTemplate(employees)}>
+                <Download className="w-3.5 h-3.5 mr-1" />Template
+              </Button>
+              <label className="inline-flex items-center h-7 px-2.5 text-xs rounded-md border cursor-pointer hover:bg-accent">
+                <Upload className="w-3.5 h-3.5 mr-1" />Import OT &amp; Bonus
+                <input type="file" accept=".csv,text/csv" className="hidden"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) handleOtBonusFile(f); e.target.value = ''; }} />
+              </label>
+            </div>
+          </div>
+          {otImportMsg && (
+            <div className="mb-2 text-xs bg-blue-50 border border-blue-200 text-blue-800 rounded px-2.5 py-2 space-y-0.5">
+              {otImportMsg.map((line, i) => <p key={i} className={i === 0 ? 'font-semibold' : ''}>{line}</p>)}
+            </div>
+          )}
           <div className="border rounded-md overflow-hidden text-sm">
             <div className="grid grid-cols-[1fr_auto_auto_auto] gap-0 bg-muted/60 px-3 py-2 text-xs font-semibold text-muted-foreground">
               <span>Employee</span>

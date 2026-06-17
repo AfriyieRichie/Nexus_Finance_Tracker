@@ -84,12 +84,30 @@ export const bulkEmployeeRowSchema = createEmployeeSchema
     employeeNumber: z.string().optional(),
     department: z.string().optional(),
     email: z.string().optional(),
+    // Inline standing pay elements (convenience). cashAllowance → a taxable
+    // Cash Allowance component; fixedMonthlyBonus → a recurring Bonus component
+    // (taxed via the concessional bonus engine, stacking with per-run bonuses).
+    cashAllowance: z.coerce.number().nonnegative().optional(),
+    fixedMonthlyBonus: z.coerce.number().nonnegative().optional(),
   });
 
 // The outer payload is parsed loosely so one bad row can't 400 the whole import;
 // each row is validated individually in the service and reported per row.
 export const bulkCreateEmployeesSchema = z.object({
   employees: z.array(z.record(z.any())).min(1).max(2000),
+});
+
+// ─── Bulk Pay-Element (component) assignment ──────────────────────────────────
+export const bulkComponentRowSchema = z.object({
+  employeeNumber: z.string().min(1),
+  componentCode:  z.string().min(1),
+  amount:         z.coerce.number().nonnegative().optional(),
+  rate:           z.coerce.number().min(0).max(10).optional(),
+  effectiveFrom:  z.string().regex(dateRegex),
+});
+
+export const bulkAssignComponentsSchema = z.object({
+  assignments: z.array(z.record(z.any())).min(1).max(5000),
 });
 
 // ─── Salary Components ────────────────────────────────────────────────────────

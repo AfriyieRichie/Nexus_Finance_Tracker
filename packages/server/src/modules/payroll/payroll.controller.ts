@@ -8,6 +8,7 @@ import {
   updateEmployeeSchema,
   setEmployeeStatusSchema,
   bulkCreateEmployeesSchema,
+  bulkAssignComponentsSchema,
   createSalaryComponentSchema,
   updateSalaryComponentSchema,
   assignComponentSchema,
@@ -65,6 +66,12 @@ export const bulkCreateEmployees = asyncHandler(async (req: Request, res: Respon
   const input = bulkCreateEmployeesSchema.parse(req.body);
   const result = await svc.bulkCreateEmployees(req.params.organisationId, input.employees);
   return sendSuccess(res, result, `${result.created} of ${result.total} employees imported`);
+});
+
+export const bulkAssignComponents = asyncHandler(async (req: Request, res: Response) => {
+  const input = bulkAssignComponentsSchema.parse(req.body);
+  const result = await svc.bulkAssignComponents(req.params.organisationId, input.assignments);
+  return sendSuccess(res, result, `${result.created} of ${result.total} pay elements assigned`);
 });
 
 export const assignComponent = asyncHandler(async (req: Request, res: Response) => {

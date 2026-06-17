@@ -295,6 +295,15 @@ export interface BulkImportResult {
 export const bulkCreateEmployees = (organisationId: string, employees: Record<string, unknown>[]) =>
   api.post(`/organisations/${organisationId}/payroll/employees/bulk`, { employees }).then((r) => r.data.data as BulkImportResult);
 
+export interface BulkAssignResult {
+  created: number;
+  total: number;
+  errors: { row: number; message: string }[];
+}
+
+export const bulkAssignComponents = (organisationId: string, assignments: Record<string, unknown>[]) =>
+  api.post(`/organisations/${organisationId}/payroll/pay-elements/bulk`, { assignments }).then((r) => r.data.data as BulkAssignResult);
+
 export const assignComponent = (organisationId: string, employeeId: string, data: { componentId: string; amount?: number; rate?: number; effectiveFrom: string; effectiveTo?: string }) =>
   api.post(`/organisations/${organisationId}/payroll/employees/${employeeId}/components`, data).then((r) => r.data.data as EmployeeComponent);
 
