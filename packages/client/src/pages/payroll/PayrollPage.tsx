@@ -1854,6 +1854,7 @@ function ActivateReliefsDialog({ organisationId, employee }: { organisationId: s
 function EmployeesTab({ organisationId }: { organisationId: string }) {
   const navigate = useNavigate();
   const [statusFilter, setStatusFilter] = useState('');
+  const [search, setSearch] = useState('');
 
   const { data: employees = [], isLoading } = useQuery({
     queryKey: ['payroll-employees', organisationId],
@@ -1865,13 +1866,23 @@ function EmployeesTab({ organisationId }: { organisationId: string }) {
 
   if (isLoading) return <Skeleton className="h-40" />;
 
-  const filtered = employees.filter((e) => !statusFilter || e.status === statusFilter);
+  const q = search.trim().toLowerCase();
+  const filtered = employees.filter((e) =>
+    (!statusFilter || e.status === statusFilter) &&
+    (!q || `${e.firstName} ${e.lastName}`.toLowerCase().includes(q) || e.employeeNumber.toLowerCase().includes(q)),
+  );
   const activeCount = employees.filter((e) => e.status === 'ACTIVE').length;
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search name or number…"
+            className="h-8 text-xs w-56"
+          />
           <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="h-8 text-xs w-40">
             <option value="">All ({employees.length})</option>
             <option value="ACTIVE">Active ({activeCount})</option>
@@ -2039,6 +2050,7 @@ function CreateRunDialog({ organisationId, onClose }: { organisationId: string; 
 
   const [runError, setRunError] = useState<string | null>(null);
   const [otImportMsg, setOtImportMsg] = useState<string[] | null>(null);
+  const [empSearch, setEmpSearch] = useState('');
 
   function handleOtBonusFile(file: File) {
     setOtImportMsg(null);
@@ -2191,6 +2203,12 @@ function CreateRunDialog({ organisationId, onClose }: { organisationId: string; 
               {otImportMsg.map((line, i) => <p key={i} className={i === 0 ? 'font-semibold' : ''}>{line}</p>)}
             </div>
           )}
+          <Input
+            value={empSearch}
+            onChange={(e) => setEmpSearch(e.target.value)}
+            placeholder="Search employee by name or number…"
+            className="h-8 text-xs mb-2"
+          />
           <div className="border rounded-md overflow-hidden text-sm">
             <div className="grid grid-cols-[1fr_auto_auto_auto] gap-0 bg-muted/60 px-3 py-2 text-xs font-semibold text-muted-foreground">
               <span>Employee</span>
@@ -2198,7 +2216,10 @@ function CreateRunDialog({ organisationId, onClose }: { organisationId: string; 
               <span className="w-28 text-center">Bonus (GHS)</span>
               <span className="w-16 text-center">OT Type</span>
             </div>
-            {employees.map((e) => {
+            {employees.filter((e) => {
+              const s = empSearch.trim().toLowerCase();
+              return !s || `${e.firstName} ${e.lastName}`.toLowerCase().includes(s) || e.employeeNumber.toLowerCase().includes(s);
+            }).map((e) => {
               const ov = overrides[e.id] ?? { overtimePay: '', overtimeHours: '', bonuses: '' };
               const isFixed     = e.overtimeType === 'FIXED';
               const isRateBased = e.overtimeType === 'RATE_BASED';
@@ -2276,6 +2297,7 @@ function RunDetail({ organisationId, run }: { organisationId: string; run: Payro
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [workflowError, setWorkflowError] = useState<string | null>(null);
+  const [slipSearch, setSlipSearch] = useState('');
 
   const { data: detail } = useQuery({
     queryKey: ['payroll-run', organisationId, run.id],
@@ -2308,7 +2330,14 @@ function RunDetail({ organisationId, run }: { organisationId: string; run: Payro
     } catch { /* handled by axios */ }
   }
 
-  const payslips = detail?.payslips ?? [];
+  const allPayslips = detail?.payslips ?? [];
+  const slipQuery = slipSearch.trim().toLowerCase();
+  const payslips = slipQuery
+    ? allPayslips.filter((s) => {
+        const name = s.employee ? `${s.employee.firstName} ${s.employee.lastName}`.toLowerCase() : '';
+        return name.includes(slipQuery) || (s.employee?.employeeNumber ?? '').toLowerCase().includes(slipQuery);
+      })
+    : allPayslips;
 
   return (
     <div className="space-y-4 mt-4">
@@ -2392,9 +2421,17 @@ function RunDetail({ organisationId, run }: { organisationId: string; run: Payro
         <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{workflowError}</p>
       )}
 
-      {payslips.length > 0 && (
+      {allPayslips.length > 0 && (
         <div>
-          <h3 className="font-medium text-sm text-gray-700 mb-2">Employee Payslips</h3>
+          <div className="flex items-center justify-between mb-2 gap-2">
+            <h3 className="font-medium text-sm text-gray-700">Employee Payslips ({allPayslips.length})</h3>
+            <Input
+              value={slipSearch}
+              onChange={(e) => setSlipSearch(e.target.value)}
+              placeholder="Search name or number…"
+              className="h-8 text-xs w-56"
+            />
+          </div>
           <Card><CardContent className="p-0">
             <Table>
               <TableHeader><TableRow>
@@ -2405,6 +2442,9 @@ function RunDetail({ organisationId, run }: { organisationId: string; run: Payro
                 <TableHead className="text-right">Employer Cost</TableHead>
               </TableRow></TableHeader>
               <TableBody>
+                {payslips.length === 0 && (
+                  <TableRow><TableCell colSpan={8} className="text-center text-gray-400 py-6">No payslip matches “{slipSearch}”.</TableCell></TableRow>
+                )}
                 {payslips.map((s) => <PayslipRow key={s.id} slip={s} />)}
               </TableBody>
             </Table>
