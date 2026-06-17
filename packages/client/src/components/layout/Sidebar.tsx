@@ -285,7 +285,7 @@ export function Sidebar() {
                     />
                   </button>
                   {isOpen && (
-                    <ul className="space-y-0.5 mt-0.5">
+                    <ul className="space-y-0.5 mt-0.5 ml-3 pl-2 border-l border-border/60">
                       {group.items.map((item) => (
                         <li key={item.to}>
                           <NavLink
