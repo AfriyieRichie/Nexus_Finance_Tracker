@@ -286,23 +286,37 @@ export const updateEmployee = (organisationId: string, id: string, data: Partial
 export const setEmployeeStatus = (organisationId: string, id: string, data: { status: EmployeeStatus; reason?: string; endDate?: string }) =>
   api.patch(`/organisations/${organisationId}/payroll/employees/${id}/status`, data).then((r) => r.data.data as Employee);
 
+export interface EmployeePreviewRow {
+  row: number; employeeNumber: string; name: string; department: string | null;
+  basicSalary: number; cashAllowance?: number; fixedMonthlyBonus?: number;
+}
 export interface BulkImportResult {
+  dryRun: boolean;
   created: number;
+  wouldCreate: number;
   total: number;
   errors: { row: number; employee: string; message: string }[];
+  preview: EmployeePreviewRow[];
 }
 
-export const bulkCreateEmployees = (organisationId: string, employees: Record<string, unknown>[]) =>
-  api.post(`/organisations/${organisationId}/payroll/employees/bulk`, { employees }).then((r) => r.data.data as BulkImportResult);
+export const bulkCreateEmployees = (organisationId: string, employees: Record<string, unknown>[], dryRun = false) =>
+  api.post(`/organisations/${organisationId}/payroll/employees/bulk`, { employees, dryRun }).then((r) => r.data.data as BulkImportResult);
 
+export interface PayElementPreviewRow {
+  row: number; employeeNumber: string; componentCode: string;
+  amount: number | null; rate: number | null; effectiveFrom: string;
+}
 export interface BulkAssignResult {
+  dryRun: boolean;
   created: number;
+  wouldCreate: number;
   total: number;
   errors: { row: number; message: string }[];
+  preview: PayElementPreviewRow[];
 }
 
-export const bulkAssignComponents = (organisationId: string, assignments: Record<string, unknown>[]) =>
-  api.post(`/organisations/${organisationId}/payroll/pay-elements/bulk`, { assignments }).then((r) => r.data.data as BulkAssignResult);
+export const bulkAssignComponents = (organisationId: string, assignments: Record<string, unknown>[], dryRun = false) =>
+  api.post(`/organisations/${organisationId}/payroll/pay-elements/bulk`, { assignments, dryRun }).then((r) => r.data.data as BulkAssignResult);
 
 export const assignComponent = (organisationId: string, employeeId: string, data: { componentId: string; amount?: number; rate?: number; effectiveFrom: string; effectiveTo?: string }) =>
   api.post(`/organisations/${organisationId}/payroll/employees/${employeeId}/components`, data).then((r) => r.data.data as EmployeeComponent);

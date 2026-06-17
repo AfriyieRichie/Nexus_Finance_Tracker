@@ -64,14 +64,16 @@ export const setEmployeeStatus = asyncHandler(async (req: Request, res: Response
 
 export const bulkCreateEmployees = asyncHandler(async (req: Request, res: Response) => {
   const input = bulkCreateEmployeesSchema.parse(req.body);
-  const result = await svc.bulkCreateEmployees(req.params.organisationId, input.employees);
-  return sendSuccess(res, result, `${result.created} of ${result.total} employees imported`);
+  const result = await svc.bulkCreateEmployees(req.params.organisationId, input.employees, input.dryRun ?? false);
+  const msg = result.dryRun ? `${result.wouldCreate} of ${result.total} ready to import` : `${result.created} of ${result.total} employees imported`;
+  return sendSuccess(res, result, msg);
 });
 
 export const bulkAssignComponents = asyncHandler(async (req: Request, res: Response) => {
   const input = bulkAssignComponentsSchema.parse(req.body);
-  const result = await svc.bulkAssignComponents(req.params.organisationId, input.assignments);
-  return sendSuccess(res, result, `${result.created} of ${result.total} pay elements assigned`);
+  const result = await svc.bulkAssignComponents(req.params.organisationId, input.assignments, input.dryRun ?? false);
+  const msg = result.dryRun ? `${result.wouldCreate} of ${result.total} ready to assign` : `${result.created} of ${result.total} pay elements assigned`;
+  return sendSuccess(res, result, msg);
 });
 
 export const assignComponent = asyncHandler(async (req: Request, res: Response) => {

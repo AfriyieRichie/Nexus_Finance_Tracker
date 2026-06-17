@@ -1541,27 +1541,31 @@ function BulkImportPayElementsDialog({ organisationId }: { organisationId: strin
     enabled:  open,
   });
 
-  const reset = () => { setRows([]); setParseErrors([]); setFileName(''); };
+  const reset = () => { setRows([]); setParseErrors([]); setFileName(''); previewMut.reset(); mutation.reset(); };
   const onFile = (file: File) => {
     setFileName(file.name);
+    previewMut.reset(); mutation.reset();
     const reader = new FileReader();
     reader.onload = (e) => { const { rows: r, errors } = parsePayElementsCsv(e.target?.result as string); setRows(r); setParseErrors(errors); };
     reader.readAsText(file);
   };
 
+  // Dry run: validate employee numbers and component codes against the DB without writing.
+  const previewMut = useMutation({ mutationFn: () => payrollSvc.bulkAssignComponents(organisationId, rows, true) });
   const mutation = useMutation({
-    mutationFn: () => payrollSvc.bulkAssignComponents(organisationId, rows),
+    mutationFn: () => payrollSvc.bulkAssignComponents(organisationId, rows, false),
     onSuccess: (res) => {
       void qc.invalidateQueries({ queryKey: ['payroll-employees', organisationId] });
       if (res.errors.length === 0) { setOpen(false); reset(); }
     },
   });
+  const preview = previewMut.data;
   const result = mutation.data;
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) { reset(); mutation.reset(); } }}>
+    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) reset(); }}>
       <DialogTrigger asChild><Button size="sm" variant="outline"><Upload size={14} className="mr-1" /> Import pay elements</Button></DialogTrigger>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="max-w-2xl">
         <h2 className="text-lg font-semibold mb-1">Bulk import pay elements</h2>
         <p className="text-xs text-muted-foreground mb-3">Assign recurring components (allowances, recurring deductions, etc.) to employees by number + component code. One row per assignment — an employee can have many. Use either an amount or a rate (rate is a fraction of basic, e.g. 0.15).</p>
         <div className="space-y-3">
@@ -1570,7 +1574,7 @@ function BulkImportPayElementsDialog({ organisationId }: { organisationId: strin
             <p className="text-[11px] text-muted-foreground">Available codes: {components.map((c) => c.code).join(', ')}</p>
           )}
           <input type="file" accept=".csv" className="text-xs block w-full border rounded p-2 cursor-pointer"
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); }} />
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = ''; }} />
 
           {fileName && (
             <p className="text-xs">{rows.length + parseErrors.length} rows · <span className="text-green-600 font-medium">{rows.length} ready</span>{parseErrors.length > 0 && <> · <span className="text-destructive font-medium">{parseErrors.length} with errors</span></>}</p>
@@ -1580,6 +1584,43 @@ function BulkImportPayElementsDialog({ organisationId }: { organisationId: strin
               {parseErrors.slice(0, 50).map((e, i) => <p key={i}>{e}</p>)}
             </div>
           )}
+
+          {/* Dry-run preview */}
+          {preview && !result && (
+            <div className="text-xs rounded border bg-muted/30 p-2 space-y-1.5">
+              <p className="font-medium">
+                <span className="text-green-600">{preview.wouldCreate} will be assigned</span>
+                {preview.errors.length > 0 && <> · <span className="text-destructive">{preview.errors.length} row{preview.errors.length > 1 ? 's' : ''} with errors (skipped)</span></>}
+              </p>
+              {preview.errors.length > 0 && (
+                <div className="text-destructive max-h-24 overflow-y-auto space-y-0.5">
+                  {preview.errors.slice(0, 50).map((e, i) => <p key={i}>Row {e.row}: {e.message}</p>)}
+                </div>
+              )}
+              {preview.preview.length > 0 && (
+                <div className="max-h-40 overflow-y-auto border rounded">
+                  <table className="w-full">
+                    <thead className="bg-muted/50 sticky top-0"><tr className="text-left text-muted-foreground">
+                      <th className="px-2 py-1 font-medium">Emp #</th><th className="px-2 py-1 font-medium">Component</th>
+                      <th className="px-2 py-1 font-medium text-right">Amount</th><th className="px-2 py-1 font-medium text-right">Rate</th>
+                      <th className="px-2 py-1 font-medium">From</th>
+                    </tr></thead>
+                    <tbody>
+                      {preview.preview.slice(0, 200).map((p) => (
+                        <tr key={p.row} className="border-t">
+                          <td className="px-2 py-1 font-mono">{p.employeeNumber}</td><td className="px-2 py-1 font-mono">{p.componentCode}</td>
+                          <td className="px-2 py-1 text-right">{p.amount != null ? fmt(p.amount) : '—'}</td>
+                          <td className="px-2 py-1 text-right">{p.rate != null ? `${(p.rate * 100).toFixed(1)}%` : '—'}</td>
+                          <td className="px-2 py-1">{p.effectiveFrom}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
           {mutation.isError && (
             <p className="text-xs text-destructive bg-destructive/10 rounded p-2">
               Import failed: {(mutation.error as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message ?? 'server error — please try again'}
@@ -1598,8 +1639,11 @@ function BulkImportPayElementsDialog({ organisationId }: { organisationId: strin
 
           <div className="flex justify-end gap-2 pt-1">
             <DialogClose asChild><Button variant="outline" size="sm">Close</Button></DialogClose>
-            <Button size="sm" disabled={rows.length === 0 || mutation.isPending} onClick={() => mutation.mutate()}>
-              {mutation.isPending ? 'Importing…' : `Import ${rows.length} elements`}
+            <Button size="sm" variant="outline" disabled={rows.length === 0 || previewMut.isPending} onClick={() => previewMut.mutate()}>
+              {previewMut.isPending ? 'Validating…' : 'Preview & validate'}
+            </Button>
+            <Button size="sm" disabled={!preview || preview.wouldCreate === 0 || mutation.isPending} onClick={() => mutation.mutate()}>
+              {mutation.isPending ? 'Importing…' : `Import ${preview?.wouldCreate ?? rows.length}`}
             </Button>
           </div>
         </div>
@@ -1615,34 +1659,38 @@ function BulkImportEmployeesDialog({ organisationId }: { organisationId: string 
   const [parseErrors, setParseErrors] = useState<string[]>([]);
   const [fileName, setFileName] = useState('');
 
-  const reset = () => { setRows([]); setParseErrors([]); setFileName(''); };
+  const reset = () => { setRows([]); setParseErrors([]); setFileName(''); previewMut.reset(); mutation.reset(); };
 
   const onFile = (file: File) => {
     setFileName(file.name);
+    previewMut.reset(); mutation.reset();
     const reader = new FileReader();
     reader.onload = (e) => { const { rows: r, errors } = parseEmployeeCsv(e.target?.result as string); setRows(r); setParseErrors(errors); };
     reader.readAsText(file);
   };
 
+  // Dry run: validate against the DB (departments, duplicate numbers) without writing.
+  const previewMut = useMutation({ mutationFn: () => payrollSvc.bulkCreateEmployees(organisationId, rows, true) });
   const mutation = useMutation({
-    mutationFn: () => payrollSvc.bulkCreateEmployees(organisationId, rows),
+    mutationFn: () => payrollSvc.bulkCreateEmployees(organisationId, rows, false),
     onSuccess: (res) => {
       void qc.invalidateQueries({ queryKey: ['payroll-employees', organisationId] });
       if (res.errors.length === 0) { setOpen(false); reset(); }
     },
   });
+  const preview = previewMut.data;
   const result = mutation.data;
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) { reset(); mutation.reset(); } }}>
+    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) reset(); }}>
       <DialogTrigger asChild><Button size="sm" variant="outline"><Upload size={14} className="mr-1" /> Bulk import</Button></DialogTrigger>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="max-w-2xl">
         <h2 className="text-lg font-semibold mb-1">Bulk import employees</h2>
         <p className="text-xs text-muted-foreground mb-3">Download the template, fill a row per employee, then upload. Department is matched by name; blank employee numbers auto-generate. Optional <strong>cashAllowance</strong> (taxable, full PAYE) and <strong>fixedMonthlyBonus</strong> (taxed as a bonus — 5%/excess) columns create standing pay elements. For multiple/other components per employee, use “Import pay elements”.</p>
         <div className="space-y-3">
           <Button size="sm" variant="outline" onClick={downloadEmployeeTemplate}><Download size={14} className="mr-1" /> Download CSV template</Button>
           <input type="file" accept=".csv" className="text-xs block w-full border rounded p-2 cursor-pointer"
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); }} />
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = ''; }} />
 
           {fileName && (
             <p className="text-xs">{rows.length + parseErrors.length} rows · <span className="text-green-600 font-medium">{rows.length} ready</span>{parseErrors.length > 0 && <> · <span className="text-destructive font-medium">{parseErrors.length} with errors</span></>}</p>
@@ -1652,6 +1700,43 @@ function BulkImportEmployeesDialog({ organisationId }: { organisationId: string 
               {parseErrors.slice(0, 50).map((e, i) => <p key={i}>{e}</p>)}
             </div>
           )}
+
+          {/* Dry-run preview */}
+          {preview && !result && (
+            <div className="text-xs rounded border bg-muted/30 p-2 space-y-1.5">
+              <p className="font-medium">
+                <span className="text-green-600">{preview.wouldCreate} will be created</span>
+                {preview.errors.length > 0 && <> · <span className="text-destructive">{preview.errors.length} row{preview.errors.length > 1 ? 's' : ''} with errors (skipped)</span></>}
+              </p>
+              {preview.errors.length > 0 && (
+                <div className="text-destructive max-h-24 overflow-y-auto space-y-0.5">
+                  {preview.errors.slice(0, 50).map((e, i) => <p key={i}>Row {e.row} ({e.employee}): {e.message}</p>)}
+                </div>
+              )}
+              {preview.preview.length > 0 && (
+                <div className="max-h-40 overflow-y-auto border rounded">
+                  <table className="w-full">
+                    <thead className="bg-muted/50 sticky top-0"><tr className="text-left text-muted-foreground">
+                      <th className="px-2 py-1 font-medium">Emp #</th><th className="px-2 py-1 font-medium">Name</th>
+                      <th className="px-2 py-1 font-medium">Dept</th><th className="px-2 py-1 font-medium text-right">Basic</th>
+                      <th className="px-2 py-1 font-medium text-right">Allow.</th><th className="px-2 py-1 font-medium text-right">Bonus</th>
+                    </tr></thead>
+                    <tbody>
+                      {preview.preview.slice(0, 200).map((p) => (
+                        <tr key={p.row} className="border-t">
+                          <td className="px-2 py-1 font-mono">{p.employeeNumber}</td><td className="px-2 py-1">{p.name}</td>
+                          <td className="px-2 py-1">{p.department ?? '—'}</td><td className="px-2 py-1 text-right">{fmt(p.basicSalary)}</td>
+                          <td className="px-2 py-1 text-right">{p.cashAllowance ? fmt(p.cashAllowance) : '—'}</td>
+                          <td className="px-2 py-1 text-right">{p.fixedMonthlyBonus ? fmt(p.fixedMonthlyBonus) : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
           {mutation.isError && (
             <p className="text-xs text-destructive bg-destructive/10 rounded p-2">
               Import failed: {(mutation.error as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message ?? 'server error — please try again'}
@@ -1670,8 +1755,11 @@ function BulkImportEmployeesDialog({ organisationId }: { organisationId: string 
 
           <div className="flex justify-end gap-2 pt-1">
             <DialogClose asChild><Button variant="outline" size="sm">Close</Button></DialogClose>
-            <Button size="sm" disabled={rows.length === 0 || mutation.isPending} onClick={() => mutation.mutate()}>
-              {mutation.isPending ? 'Importing…' : `Import ${rows.length} employees`}
+            <Button size="sm" variant="outline" disabled={rows.length === 0 || previewMut.isPending} onClick={() => previewMut.mutate()}>
+              {previewMut.isPending ? 'Validating…' : 'Preview & validate'}
+            </Button>
+            <Button size="sm" disabled={!preview || preview.wouldCreate === 0 || mutation.isPending} onClick={() => mutation.mutate()}>
+              {mutation.isPending ? 'Importing…' : `Import ${preview?.wouldCreate ?? rows.length}`}
             </Button>
           </div>
         </div>

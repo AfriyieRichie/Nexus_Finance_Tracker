@@ -95,6 +95,7 @@ export const bulkEmployeeRowSchema = createEmployeeSchema
 // each row is validated individually in the service and reported per row.
 export const bulkCreateEmployeesSchema = z.object({
   employees: z.array(z.record(z.any())).min(1).max(2000),
+  dryRun: z.boolean().optional(),
 });
 
 // ─── Bulk Pay-Element (component) assignment ──────────────────────────────────
@@ -108,6 +109,7 @@ export const bulkComponentRowSchema = z.object({
 
 export const bulkAssignComponentsSchema = z.object({
   assignments: z.array(z.record(z.any())).min(1).max(5000),
+  dryRun: z.boolean().optional(),
 });
 
 // ─── Salary Components ────────────────────────────────────────────────────────
