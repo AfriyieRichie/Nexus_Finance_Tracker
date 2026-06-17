@@ -349,14 +349,14 @@ function SalaryComponentsTab({ organisationId }: { organisationId: string }) {
   });
   const allAccountOptions: AccountOption[] = toAccountOptions(accountsData?.accounts ?? []);
 
-  const defaultForm = { code: '', name: '', type: 'ALLOWANCE' as SalaryComponentType, isTaxable: true, glAccountId: '', description: '' };
+  const defaultForm = { code: '', name: '', type: 'ALLOWANCE' as SalaryComponentType, isTaxable: true, isVariable: false, glAccountId: '', description: '' };
   const [form, setForm] = useState(defaultForm);
   const set = (k: string, v: string | boolean) => setForm((f) => ({ ...f, [k]: v }));
 
   function openCreate() { setEditComp(null); setForm(defaultForm); setOpen(true); }
   function openEdit(c: SalaryComponent) {
     setEditComp(c);
-    setForm({ code: c.code, name: c.name, type: c.type, isTaxable: c.isTaxable, glAccountId: c.glAccountId ?? '', description: c.description ?? '' });
+    setForm({ code: c.code, name: c.name, type: c.type, isTaxable: c.isTaxable, isVariable: c.isVariable, glAccountId: c.glAccountId ?? '', description: c.description ?? '' });
     setOpen(true);
   }
 
@@ -383,17 +383,19 @@ function SalaryComponentsTab({ organisationId }: { organisationId: string }) {
         <Table>
           <TableHeader><TableRow>
             <TableHead>Code</TableHead><TableHead>Name</TableHead><TableHead>Type</TableHead>
+            <TableHead>Frequency</TableHead>
             <TableHead>Taxable</TableHead><TableHead>GL Account</TableHead><TableHead>Status</TableHead><TableHead />
           </TableRow></TableHeader>
           <TableBody>
             {components.length === 0 && (
-              <TableRow><TableCell colSpan={7} className="text-center text-gray-400 py-6">No salary components defined</TableCell></TableRow>
+              <TableRow><TableCell colSpan={8} className="text-center text-gray-400 py-6">No salary components defined</TableCell></TableRow>
             )}
             {components.map((c) => (
               <TableRow key={c.id} className={!c.isActive ? 'opacity-50' : ''}>
                 <TableCell className="font-mono text-sm">{c.code}</TableCell>
                 <TableCell>{c.name}</TableCell>
                 <TableCell><Badge variant="outline">{COMP_TYPE_LABELS[c.type]}</Badge></TableCell>
+                <TableCell><Badge variant={c.isVariable ? 'secondary' : 'outline'} className="text-[10px]">{c.isVariable ? 'Variable' : 'Fixed'}</Badge></TableCell>
                 <TableCell>{c.isTaxable ? <CheckCircle className="w-4 h-4 text-green-600" /> : <XCircle className="w-4 h-4 text-gray-400" />}</TableCell>
                 <TableCell className="text-sm text-gray-500">{c.glAccount ? `${c.glAccount.code} ${c.glAccount.name}` : '—'}</TableCell>
                 <TableCell><Badge className={c.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}>{c.isActive ? 'Active' : 'Inactive'}</Badge></TableCell>
@@ -424,6 +426,14 @@ function SalaryComponentsTab({ organisationId }: { organisationId: string }) {
             <div className="flex items-center gap-2">
               <input type="checkbox" id="taxable" checked={form.isTaxable} onChange={(e) => set('isTaxable', e.target.checked)} />
               <label htmlFor="taxable" className="text-sm font-medium">Taxable</label>
+            </div>
+            <div>
+              <label className="text-sm font-medium">Frequency</label>
+              <Select value={form.isVariable ? 'VARIABLE' : 'FIXED'} onChange={(e) => set('isVariable', e.target.value === 'VARIABLE')}>
+                <option value="FIXED">Fixed — standing element, assigned to employees, runs every period</option>
+                <option value="VARIABLE">Variable — entered each run via the pay-run import</option>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-0.5">Variable elements appear as columns in the payroll-run import template (alongside overtime &amp; bonus).</p>
             </div>
             <div>
               <label className="text-sm font-medium">GL Account (optional)</label>
@@ -1438,19 +1448,28 @@ function parseEmployeeCsv(text: string): { rows: Record<string, unknown>[]; erro
 
 const OT_BONUS_HEADERS = ['employeeNumber', 'overtimeMode', 'overtimeValue', 'bonus'];
 
-function downloadOtBonusTemplate(emps: { employeeNumber: string; overtimeType: OvertimeType }[]) {
-  const header = OT_BONUS_HEADERS.join(',');
+// Variable pay elements become extra columns (one per component code) appended after
+// the fixed overtime/bonus columns. The template is generated from the live list, so
+// a newly-configured variable element automatically shows up here.
+type VarComp = { id: string; code: string };
+
+function downloadOtBonusTemplate(emps: { employeeNumber: string; overtimeType: OvertimeType }[], variableComps: VarComp[]) {
+  const header = [...OT_BONUS_HEADERS, ...variableComps.map((c) => c.code)].join(',');
+  const extraZeros = variableComps.map(() => '0').join(variableComps.length ? ',' : '');
   // Pre-fill one row per active employee with the right mode so the user just edits values.
-  const rows = emps.map((e) => `${e.employeeNumber},${e.overtimeType === 'RATE_BASED' ? 'HOURS' : 'AMOUNT'},0,0`);
+  const rows = emps.map((e) => {
+    const base = `${e.employeeNumber},${e.overtimeType === 'RATE_BASED' ? 'HOURS' : 'AMOUNT'},0,0`;
+    return variableComps.length ? `${base},${extraZeros}` : base;
+  });
   const blob = new Blob(['﻿' + header + '\n' + rows.join('\n') + '\n'], { type: 'text/csv;charset=utf-8;' });
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob); a.download = 'overtime-bonus-input.csv'; a.click();
+  a.href = URL.createObjectURL(blob); a.download = 'payrun-input.csv'; a.click();
   URL.revokeObjectURL(a.href);
 }
 
-interface OtBonusRow { employeeNumber: string; overtimeMode: 'AMOUNT' | 'HOURS'; overtimeValue: number; bonus: number }
+interface OtBonusRow { employeeNumber: string; overtimeMode: 'AMOUNT' | 'HOURS'; overtimeValue: number; bonus: number; components: { componentId: string; amount: number }[] }
 
-function parseOtBonusCsv(text: string): { rows: OtBonusRow[]; errors: string[] } {
+function parseOtBonusCsv(text: string, variableComps: VarComp[]): { rows: OtBonusRow[]; errors: string[] } {
   const lines = text.replace(/^﻿/, '').split(/\r\n|\r|\n/).filter((l) => l.trim());
   if (lines.length < 2) return { rows: [], errors: ['File has no data rows.'] };
   const delim = detectDelimiter(lines[0]);
@@ -1460,6 +1479,10 @@ function parseOtBonusCsv(text: string): { rows: OtBonusRow[]; errors: string[] }
   const iVal = headers.indexOf('overtimevalue');
   const iBonus = headers.indexOf('bonus');
   if (iNum < 0) return { rows: [], errors: ['Header row not recognised. Keep the headers: employeeNumber, overtimeMode, overtimeValue, bonus.'] };
+  // Map variable-component columns by header code.
+  const compCols = variableComps
+    .map((c) => ({ componentId: c.id, idx: headers.indexOf(c.code.toLowerCase()) }))
+    .filter((c) => c.idx >= 0);
   const rows: OtBonusRow[] = []; const errors: string[] = [];
   for (let i = 1; i < lines.length; i++) {
     const v = parseCsvLine(lines[i], delim);
@@ -1473,8 +1496,18 @@ function parseOtBonusCsv(text: string): { rows: OtBonusRow[]; errors: string[] }
     if (valRaw && isNaN(overtimeValue)) { errors.push(`Row ${i + 1}: overtimeValue not a number`); continue; }
     if (bonusRaw && isNaN(bonus)) { errors.push(`Row ${i + 1}: bonus not a number`); continue; }
     if (mode && mode !== 'AMOUNT' && mode !== 'HOURS') { errors.push(`Row ${i + 1}: overtimeMode must be AMOUNT or HOURS`); continue; }
-    if (overtimeValue <= 0 && bonus <= 0) continue; // nothing to apply
-    rows.push({ employeeNumber: num, overtimeMode: mode === 'HOURS' ? 'HOURS' : 'AMOUNT', overtimeValue, bonus });
+    const components: { componentId: string; amount: number }[] = [];
+    let compErr = false;
+    for (const c of compCols) {
+      const raw = (v[c.idx] ?? '').trim();
+      if (raw === '') continue;
+      const amt = Number(raw);
+      if (isNaN(amt)) { errors.push(`Row ${i + 1}: ${headers[c.idx]} not a number`); compErr = true; break; }
+      if (amt > 0) components.push({ componentId: c.componentId, amount: amt });
+    }
+    if (compErr) continue;
+    if (overtimeValue <= 0 && bonus <= 0 && components.length === 0) continue; // nothing to apply
+    rows.push({ employeeNumber: num, overtimeMode: mode === 'HOURS' ? 'HOURS' : 'AMOUNT', overtimeValue, bonus, components });
   }
   return { rows, errors };
 }
@@ -1971,10 +2004,17 @@ function CreateRunDialog({ organisationId, onClose }: { organisationId: string; 
   const { data: periodsData = [] } = useQuery({ queryKey: ['periods', organisationId], queryFn: () => listPeriods(organisationId) });
   const { data: accountsData }     = useQuery({ queryKey: ['accounts', organisationId, 'posting'], queryFn: () => listAccounts(organisationId, { pageSize: 300, isControlAccount: false, postingOnly: true }) });
   const { data: employees = [] }   = useQuery({ queryKey: ['payroll-employees', organisationId], queryFn: () => payrollSvc.listEmployees(organisationId, true) });
+  const { data: allComponents = [] } = useQuery({ queryKey: ['salary-components', organisationId, 'active'], queryFn: () => payrollSvc.listSalaryComponents(organisationId, true) });
 
   const allAccounts = accountsData?.accounts ?? [];
   const liabilityOptions: AccountOption[] = toAccountOptions(allAccounts.filter((a) => a.class === 'LIABILITY'));
   const openPeriods = periodsData.filter((p) => p.status === 'OPEN');
+
+  // Variable pay elements → extra columns in the per-run import (overtime/bonus stay separate).
+  const VARIABLE_TYPES = new Set(['ALLOWANCE', 'BONUS', 'COMMISSION', 'OTHER_EARNING', 'EMPLOYEE_DEDUCTION']);
+  const variableComps: VarComp[] = allComponents
+    .filter((c) => c.isVariable && VARIABLE_TYPES.has(c.type))
+    .map((c) => ({ id: c.id, code: c.code }));
 
   const [form, setForm] = useState({
     periodId:               '',
@@ -1994,6 +2034,9 @@ function CreateRunDialog({ organisationId, onClose }: { organisationId: string; 
   const setOv = (empId: string, k: keyof Override, v: string) =>
     setOverrides((prev) => ({ ...prev, [empId]: { ...(prev[empId] ?? { overtimePay: '', overtimeHours: '', bonuses: '' }), [k]: v } }));
 
+  // Variable pay-element amounts from the import: empId → componentId → amount.
+  const [compOverrides, setCompOverrides] = useState<Record<string, Record<string, number>>>({});
+
   const [runError, setRunError] = useState<string | null>(null);
   const [otImportMsg, setOtImportMsg] = useState<string[] | null>(null);
 
@@ -2001,10 +2044,11 @@ function CreateRunDialog({ organisationId, onClose }: { organisationId: string; 
     setOtImportMsg(null);
     const reader = new FileReader();
     reader.onload = () => {
-      const { rows, errors } = parseOtBonusCsv(String(reader.result ?? ''));
+      const { rows, errors } = parseOtBonusCsv(String(reader.result ?? ''), variableComps);
       const byNumber = new Map(employees.map((e) => [e.employeeNumber.toLowerCase(), e]));
-      let matched = 0; const unmatched: string[] = []; const warnings: string[] = [];
+      let matched = 0; const unmatched: string[] = []; const warnings: string[] = []; let elementCount = 0;
       const next: Record<string, Override> = { ...overrides };
+      const nextComp: Record<string, Record<string, number>> = { ...compOverrides };
       for (const r of rows) {
         const emp = byNumber.get(r.employeeNumber.toLowerCase());
         if (!emp) { unmatched.push(r.employeeNumber); continue; }
@@ -2020,10 +2064,18 @@ function CreateRunDialog({ organisationId, onClose }: { organisationId: string; 
           }
         }
         if (r.bonus > 0) cur.bonuses = String(r.bonus);
-        next[emp.id] = cur; matched++;
+        next[emp.id] = cur;
+        if (r.components.length > 0) {
+          const map = { ...(nextComp[emp.id] ?? {}) };
+          for (const c of r.components) { map[c.componentId] = c.amount; elementCount++; }
+          nextComp[emp.id] = map;
+        }
+        matched++;
       }
       setOverrides(next);
+      setCompOverrides(nextComp);
       const summary = [`${matched} matched`];
+      if (elementCount) summary.push(`${elementCount} variable element value${elementCount > 1 ? 's' : ''}`);
       if (unmatched.length) summary.push(`${unmatched.length} unmatched`);
       if (warnings.length) summary.push(`${warnings.length} warning${warnings.length > 1 ? 's' : ''}`);
       if (errors.length) summary.push(`${errors.length} error${errors.length > 1 ? 's' : ''}`);
@@ -2043,14 +2095,18 @@ function CreateRunDialog({ organisationId, onClose }: { organisationId: string; 
         .map((e) => {
           const ov = overrides[e.id];
           const isRateBased = e.overtimeType === 'RATE_BASED';
+          const components = Object.entries(compOverrides[e.id] ?? {})
+            .filter(([, amt]) => amt > 0)
+            .map(([componentId, amount]) => ({ componentId, amount }));
           return {
             employeeId:    e.id,
             overtimePay:   (!isRateBased && ov?.overtimePay)   ? Number(ov.overtimePay)   : undefined,
             overtimeHours: (isRateBased  && ov?.overtimeHours) ? Number(ov.overtimeHours) : undefined,
             bonuses:       ov?.bonuses ? Number(ov.bonuses) : undefined,
+            components:    components.length > 0 ? components : undefined,
           };
         })
-        .filter((o) => o.overtimePay !== undefined || o.overtimeHours !== undefined || o.bonuses !== undefined);
+        .filter((o) => o.overtimePay !== undefined || o.overtimeHours !== undefined || o.bonuses !== undefined || o.components !== undefined);
 
       return payrollSvc.createPayrollRun(organisationId, { ...form, overrides: builtOverrides });
     },
@@ -2112,14 +2168,19 @@ function CreateRunDialog({ organisationId, onClose }: { organisationId: string; 
       {employees.length > 0 && (
         <div className="pt-2">
           <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
-            <p className="text-xs text-gray-500 font-semibold">Per-Employee Adjustments (optional)</p>
+            <div>
+              <p className="text-xs text-gray-500 font-semibold">Per-Employee Adjustments (optional)</p>
+              {variableComps.length > 0 && (
+                <p className="text-[10px] text-muted-foreground">Variable element columns: {variableComps.map((c) => c.code).join(', ')}</p>
+              )}
+            </div>
             <div className="flex items-center gap-1.5">
               <Button type="button" size="sm" variant="outline" className="h-7 text-xs"
-                onClick={() => downloadOtBonusTemplate(employees)}>
+                onClick={() => downloadOtBonusTemplate(employees, variableComps)}>
                 <Download className="w-3.5 h-3.5 mr-1" />Template
               </Button>
               <label className="inline-flex items-center h-7 px-2.5 text-xs rounded-md border cursor-pointer hover:bg-accent">
-                <Upload className="w-3.5 h-3.5 mr-1" />Import OT &amp; Bonus
+                <Upload className="w-3.5 h-3.5 mr-1" />Import pay-run input
                 <input type="file" accept=".csv,text/csv" className="hidden"
                   onChange={(e) => { const f = e.target.files?.[0]; if (f) handleOtBonusFile(f); e.target.value = ''; }} />
               </label>

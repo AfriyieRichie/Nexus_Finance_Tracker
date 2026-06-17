@@ -120,6 +120,7 @@ export interface SalaryComponent {
   name: string;
   type: SalaryComponentType;
   isTaxable: boolean;
+  isVariable: boolean;
   glAccountId: string | null;
   description: string | null;
   isActive: boolean;
@@ -329,7 +330,7 @@ export const listSalaryComponents = (organisationId: string, isActive?: boolean)
   api.get(`/organisations/${organisationId}/payroll/salary-components`, { params: isActive !== undefined ? { isActive } : undefined })
     .then((r) => r.data.data as SalaryComponent[]);
 
-export const createSalaryComponent = (organisationId: string, data: { code: string; name: string; type: SalaryComponentType; isTaxable?: boolean; glAccountId?: string; description?: string }) =>
+export const createSalaryComponent = (organisationId: string, data: { code: string; name: string; type: SalaryComponentType; isTaxable?: boolean; isVariable?: boolean; glAccountId?: string; description?: string }) =>
   api.post(`/organisations/${organisationId}/payroll/salary-components`, data).then((r) => r.data.data as SalaryComponent);
 
 export const updateSalaryComponent = (organisationId: string, id: string, data: Partial<SalaryComponent>) =>
@@ -357,7 +358,7 @@ export const createPayrollRun = (
     pensionPayableAccountId: string;
     isSupplementary?: boolean;
     parentRunId?: string;
-    overrides?: { employeeId: string; overtimePay?: number; overtimeHours?: number; bonuses?: number }[];
+    overrides?: { employeeId: string; overtimePay?: number; overtimeHours?: number; bonuses?: number; components?: { componentId: string; amount: number }[] }[];
     notes?: string;
   },
 ) =>

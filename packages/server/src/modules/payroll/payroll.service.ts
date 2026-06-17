@@ -84,6 +84,7 @@ export interface CreateSalaryComponentInput {
   name: string;
   type: SalaryComponentType;
   isTaxable?: boolean;
+  isVariable?: boolean;
   glAccountId?: string;
   description?: string;
 }
@@ -101,6 +102,7 @@ export interface PayslipOverride {
   overtimePay?: number;   // flat amount override — bypasses overtimeType
   overtimeHours?: number; // used when employee overtimeType === RATE_BASED
   bonuses?: number;
+  components?: { componentId: string; amount: number }[]; // variable pay elements this run
 }
 
 export interface CreatePayrollRunInput {
@@ -725,6 +727,7 @@ export async function createSalaryComponent(organisationId: string, input: Creat
       name:        input.name,
       type:        input.type,
       isTaxable:   input.isTaxable ?? true,
+      isVariable:  input.isVariable ?? false,
       glAccountId: input.glAccountId,
       description: input.description,
     },
@@ -746,6 +749,7 @@ export async function updateSalaryComponent(
       ...(input.name        !== undefined && { name:        input.name }),
       ...(input.type        !== undefined && { type:        input.type }),
       ...(input.isTaxable   !== undefined && { isTaxable:   input.isTaxable }),
+      ...(input.isVariable  !== undefined && { isVariable:  input.isVariable }),
       ...(input.glAccountId !== undefined && { glAccountId: input.glAccountId }),
       ...(input.description !== undefined && { description: input.description }),
       ...(input.isActive    !== undefined && { isActive:    input.isActive }),
@@ -896,6 +900,10 @@ export async function createPayrollRun(
     if (arr) arr.push(loan); else loansByEmployee.set(loan.employeeId, [loan]);
   }
 
+  // Metadata for variable pay elements entered per run (componentId → type/name).
+  const compMeta = await prisma.salaryComponent.findMany({ where: { organisationId }, select: { id: true, name: true, type: true } });
+  const compById = new Map(compMeta.map((c) => [c.id, c]));
+
   // Payslips and their lines are built in memory and inserted with two batched
   // createMany calls (ids are pre-assigned so lines can reference their payslip).
   const payslipDataList: (Prisma.PayslipCreateManyInput & { id: string })[] = [];
@@ -964,6 +972,27 @@ export async function createPayrollRun(
     if (overrideBonuses > 0) {
       bonuses = round4(bonuses + overrideBonuses);
       lines.push({ description: 'Bonus', type: SalaryComponentType.BONUS, amount: overrideBonuses, isEmployer: false, componentId: undefined });
+    }
+
+    // Run-level variable pay elements (Sales Commission, reimbursement, etc.) entered
+    // for this run via the import. Each adds to its type's bucket like a recurring one.
+    for (const co of override?.components ?? []) {
+      const meta = compById.get(co.componentId);
+      const amt = round4(co.amount ?? 0);
+      if (!meta || amt <= 0) continue;
+      if (meta.type === SalaryComponentType.BONUS) {
+        bonuses = round4(bonuses + amt);
+        lines.push({ description: meta.name, type: meta.type, amount: amt, isEmployer: false, componentId: meta.id });
+      } else if (meta.type === SalaryComponentType.ALLOWANCE) {
+        allowances = round4(allowances + amt);
+        lines.push({ description: meta.name, type: meta.type, amount: amt, isEmployer: false, componentId: meta.id });
+      } else if (meta.type === SalaryComponentType.OTHER_EARNING || meta.type === SalaryComponentType.COMMISSION) {
+        otherEarnings = round4(otherEarnings + amt);
+        lines.push({ description: meta.name, type: meta.type, amount: amt, isEmployer: false, componentId: meta.id });
+      } else if (meta.type === SalaryComponentType.EMPLOYEE_DEDUCTION) {
+        otherDeductions = round4(otherDeductions + amt);
+        lines.push({ description: meta.name, type: meta.type, amount: amt, isEmployer: false, componentId: meta.id });
+      }
     }
 
     // Active loan repayments (resolved from the pre-fetched map)

@@ -1963,6 +1963,9 @@ model SalaryComponent {
   name           String
   type           SalaryComponentType
   isTaxable      Boolean             @default(true)
+  // Fixed = standing (assigned to employees, flows every run); Variable = entered
+  // per run via the pay-run import (overtime/bonus + one column per variable element).
+  isVariable     Boolean             @default(false)
   glAccountId    String?
   description    String?
   isActive       Boolean             @default(true)

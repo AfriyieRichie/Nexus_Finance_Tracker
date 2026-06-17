@@ -122,6 +122,7 @@ export const createSalaryComponentSchema = z.object({
     'OTHER_EARNING', 'EMPLOYEE_DEDUCTION', 'EMPLOYER_CONTRIBUTION',
   ]),
   isTaxable: z.boolean().optional(),
+  isVariable: z.boolean().optional(),
   glAccountId: z.string().uuid().optional(),
   description: z.string().optional(),
 });
@@ -174,6 +175,11 @@ export const createPayrollRunSchema = z.object({
     overtimePay: z.number().nonnegative().optional(),
     overtimeHours: z.number().nonnegative().optional(),
     bonuses: z.number().nonnegative().optional(),
+    // Variable pay elements entered for this run (componentId → amount).
+    components: z.array(z.object({
+      componentId: z.string().uuid(),
+      amount: z.number().nonnegative(),
+    })).optional(),
   })).optional(),
 });
 
