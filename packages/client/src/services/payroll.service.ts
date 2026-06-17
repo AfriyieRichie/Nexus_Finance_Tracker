@@ -399,7 +399,7 @@ export const updateLoan = (
   organisationId: string,
   employeeId: string,
   loanId: string,
-  data: { status?: LoanStatus; instalmentAmount?: number; balance?: number },
+  data: { status?: LoanStatus; instalmentAmount?: number; balance?: number; glAccountId?: string },
 ) =>
   api.patch(`/organisations/${organisationId}/payroll/employees/${employeeId}/loans/${loanId}`, data).then((r) => r.data.data as EmployeeLoan);
 

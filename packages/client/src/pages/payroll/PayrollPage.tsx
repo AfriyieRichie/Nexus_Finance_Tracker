@@ -643,6 +643,12 @@ export function EmployeeDialog({ organisationId, emp, employees, onClose, fullPa
     onSuccess: () => void refetchLoans(),
   });
 
+  const setLoanGl = useMutation({
+    mutationFn: ({ loanId, glAccountId }: { loanId: string; glAccountId: string }) =>
+      payrollSvc.updateLoan(organisationId, effectiveEmpId!, loanId, { glAccountId }),
+    onSuccess: () => void refetchLoans(),
+  });
+
   // ── Mutations ──────────────────────────────────────────────────────────────
   const save = useMutation({
     mutationFn: () => {
@@ -1212,13 +1218,14 @@ export function EmployeeDialog({ organisationId, emp, employees, onClose, fullPa
                   <TableHead className="text-right">Balance</TableHead>
                   <TableHead className="text-right">Instalment</TableHead>
                   <TableHead>Start Date</TableHead>
+                  <TableHead>GL Account (receivable)</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead />
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loans.length === 0 && (
-                  <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-8">No loans recorded</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">No loans recorded</TableCell></TableRow>
                 )}
                 {loans.map((loan) => {
                   const pct = Math.round((1 - Number(loan.balance) / Number(loan.principalAmount)) * 100);
@@ -1235,6 +1242,15 @@ export function EmployeeDialog({ organisationId, emp, employees, onClose, fullPa
                       <TableCell className="text-right font-mono text-sm font-semibold">{Number(loan.balance) > 0 ? `GHS ${fmt(loan.balance)}` : <span className="text-green-600">Cleared</span>}</TableCell>
                       <TableCell className="text-right font-mono text-sm">GHS {fmt(loan.instalmentAmount)}</TableCell>
                       <TableCell className="text-sm">{loan.startDate.split('T')[0]}</TableCell>
+                      <TableCell className="w-56">
+                        <AccountSelect
+                          value={loan.glAccountId ?? ''}
+                          onChange={(id) => { if (id && id !== loan.glAccountId) setLoanGl.mutate({ loanId: loan.id, glAccountId: id }); }}
+                          accounts={assetAccountOptions}
+                          placeholder="— set receivable —"
+                        />
+                        {!loan.glAccountId && <p className="text-[10px] text-amber-600 mt-0.5">Required to post the payroll GL</p>}
+                      </TableCell>
                       <TableCell><Badge className={LOAN_STATUS_COLORS[loan.status] ?? ''}>{loan.status}</Badge></TableCell>
                       <TableCell>
                         {loan.status === 'ACTIVE' && (

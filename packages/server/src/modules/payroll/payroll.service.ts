@@ -136,6 +136,7 @@ export interface UpdateLoanInput {
   status?: 'ACTIVE' | 'COMPLETED' | 'CANCELLED' | 'SUSPENDED';
   instalmentAmount?: number;
   balance?: number;
+  glAccountId?: string;
 }
 
 // ─── Ghana 2024 Default PAYE Bands (monthly GHS) ─────────────────────────────
@@ -696,6 +697,7 @@ export async function updateLoan(organisationId: string, id: string, input: Upda
       ...(input.status            !== undefined && { status:            input.status }),
       ...(input.instalmentAmount  !== undefined && { instalmentAmount:  input.instalmentAmount }),
       ...(input.balance           !== undefined && { balance:           input.balance }),
+      ...(input.glAccountId       !== undefined && { glAccountId:       input.glAccountId }),
     },
     include: { glAccount: { select: { id: true, code: true, name: true } } },
   });

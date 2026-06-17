@@ -155,6 +155,7 @@ export const updateLoanSchema = z.object({
   status: z.enum(['ACTIVE', 'COMPLETED', 'CANCELLED', 'SUSPENDED']).optional(),
   instalmentAmount: z.number().positive().optional(),
   balance: z.number().nonnegative().optional(),
+  glAccountId: z.string().uuid().optional(),
 });
 
 // ─── Payroll Runs ─────────────────────────────────────────────────────────────
