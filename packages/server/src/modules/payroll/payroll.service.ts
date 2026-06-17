@@ -1352,13 +1352,45 @@ export async function payPayrollRun(organisationId: string, id: string, userId: 
   for (const line of loanRepaymentLines) {
     if (line.loanId) loanTotals.set(line.loanId, (loanTotals.get(line.loanId) ?? 0) + Number(line.amount));
   }
-  // Group loan repayments by GL account
+  // Group loan repayments by GL account. A loan with no GL account can't be credited,
+  // which would leave the journal unbalanced — surface it instead of silently posting.
   const loanGlGroups = new Map<string, number>();
+  const loansMissingGl: string[] = [];
   for (const [loanId, repaid] of loanTotals.entries()) {
-    const loan = await prisma.employeeLoan.findUnique({ where: { id: loanId }, select: { glAccountId: true } });
+    const loan = await prisma.employeeLoan.findUnique({ where: { id: loanId }, select: { glAccountId: true, description: true } });
     if (loan?.glAccountId) {
       loanGlGroups.set(loan.glAccountId, round4((loanGlGroups.get(loan.glAccountId) ?? 0) + repaid));
+    } else if (repaid > 0) {
+      loansMissingGl.push(loan?.description ?? loanId);
     }
+  }
+
+  // Non-loan employee deductions (welfare dues, union dues, other deduction components)
+  // must also be credited to a payable account, or the journal won't balance. Group
+  // them by the deduction component's GL account.
+  const deductionLines = await prisma.payslipLine.findMany({
+    where:  { payslip: { payrollRunId: id }, loanId: null, componentId: { not: null }, type: SalaryComponentType.EMPLOYEE_DEDUCTION },
+    select: { amount: true, component: { select: { code: true, name: true, glAccountId: true } } },
+  });
+  const deductionGlGroups = new Map<string, number>();
+  const deductionsMissingGl = new Set<string>();
+  for (const dl of deductionLines) {
+    const comp = dl.component;
+    if (!comp) continue;
+    if (comp.glAccountId) {
+      deductionGlGroups.set(comp.glAccountId, round4((deductionGlGroups.get(comp.glAccountId) ?? 0) + Number(dl.amount)));
+    } else {
+      deductionsMissingGl.add(`${comp.name} (${comp.code})`);
+    }
+  }
+
+  // Block posting (with a clear, actionable message) when a withheld amount has nowhere
+  // to be credited — this is the cause of "journal not balanced" by the deduction total.
+  if (deductionsMissingGl.size > 0 || loansMissingGl.length > 0) {
+    const parts: string[] = [];
+    if (deductionsMissingGl.size > 0) parts.push(`deduction component(s) ${[...deductionsMissingGl].join(', ')} — set a liability GL account in Payroll → Salary Components`);
+    if (loansMissingGl.length > 0) parts.push(`loan(s) ${loansMissingGl.join(', ')} — set a GL account on the loan`);
+    throw new ValidationError(`Cannot post: these withheld amounts have no GL account to credit, which unbalances the journal — ${parts.join('; ')}.`);
   }
 
   // Aggregate overtime tax + bonus tax from payslips (all remitted to GRA alongside PAYE)
@@ -1409,6 +1441,10 @@ export async function payPayrollRun(organisationId: string, id: string, userId: 
   // CR Employee Loans Receivable (one line per GL account)
   for (const [glAccountId, amount] of loanGlGroups.entries()) {
     lines.push({ accountId: glAccountId, description: 'Loan repayment recovery', debitAmount: 0, creditAmount: amount, currency, exchangeRate: 1 });
+  }
+  // CR Other deduction payables (welfare/union/other deductions, by component GL account)
+  for (const [glAccountId, amount] of deductionGlGroups.entries()) {
+    lines.push({ accountId: glAccountId, description: 'Employee deductions payable', debitAmount: 0, creditAmount: amount, currency, exchangeRate: 1 });
   }
   // CR Wages payable (net pay)
   lines.push({ accountId: run.wagesPayableAccountId, description: 'Net wages payable', debitAmount: 0, creditAmount: Number(run.totalNetPay), currency, exchangeRate: 1 });
