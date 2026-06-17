@@ -617,7 +617,7 @@ export function EmployeeDialog({ organisationId, emp, employees, onClose, fullPa
   const assetAccountOptions: AccountOption[] = toAccountOptions(
     (assetAccountsData?.accounts ?? []).filter((a) => a.class === 'ASSET'),
   );
-  const defaultLoanForm = { description: '', principalAmount: '', instalmentAmount: '', startDate: today, glAccountId: '' };
+  const defaultLoanForm = { description: '', principalAmount: '', instalmentAmount: '', startDate: today, glAccountId: '', disbursedFromAccountId: '' };
   const [loanForm, setLoanForm] = useState(defaultLoanForm);
   const setL = (k: string, v: string) => setLoanForm((f) => ({ ...f, [k]: v }));
 
@@ -630,6 +630,7 @@ export function EmployeeDialog({ organisationId, emp, employees, onClose, fullPa
       instalmentAmount: Number(loanForm.instalmentAmount),
       startDate:        loanForm.startDate,
       glAccountId:      loanForm.glAccountId || undefined,
+      disbursedFromAccountId: loanForm.disbursedFromAccountId || undefined,
     }),
     onSuccess: () => { void refetchLoans(); setAddingLoan(false); setLoanForm(defaultLoanForm); setLoanError(null); },
     onError: (err: unknown) => {
@@ -1191,10 +1192,17 @@ export function EmployeeDialog({ organisationId, emp, employees, onClose, fullPa
                     <Input type="date" value={loanForm.startDate} onChange={(e) => setL('startDate', e.target.value)} />
                   </div>
                   <div>
-                    <label className="text-xs font-medium">GL Account (Loans to Employees)</label>
+                    <label className="text-xs font-medium">GL Account — Loans Receivable (asset)</label>
                     <AccountSelect value={loanForm.glAccountId} onChange={(id) => setL('glAccountId', id)} accounts={assetAccountOptions} placeholder="— optional —" />
                   </div>
+                  <div>
+                    <label className="text-xs font-medium">Disburse from — Bank / Cash</label>
+                    <AccountSelect value={loanForm.disbursedFromAccountId} onChange={(id) => setL('disbursedFromAccountId', id)} accounts={assetAccountOptions} placeholder="— don't post —" />
+                  </div>
                 </div>
+                {loanForm.disbursedFromAccountId
+                  ? <p className="text-[11px] text-blue-700 bg-blue-50 border border-blue-200 rounded px-2 py-1">On create, the disbursement posts automatically: <strong>DR Loans Receivable</strong> / <strong>CR Bank/Cash</strong> for GHS {loanForm.principalAmount || '0'}. Requires the receivable account above and an open period on the start date.</p>
+                  : <p className="text-[11px] text-muted-foreground">Pick a <strong>Disburse from</strong> account to auto-post the disbursement (DR receivable / CR bank). Leave blank if you booked it elsewhere.</p>}
                 {loanForm.principalAmount && loanForm.instalmentAmount && Number(loanForm.instalmentAmount) > 0 && (
                   <p className="text-xs text-muted-foreground">
                     Estimated repayment: {Math.ceil(Number(loanForm.principalAmount) / Number(loanForm.instalmentAmount))} months

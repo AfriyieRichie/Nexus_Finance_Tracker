@@ -149,6 +149,7 @@ export const createLoanSchema = z.object({
   instalmentAmount: z.number().positive(),
   startDate: z.string().regex(dateRegex),
   glAccountId: z.string().uuid().optional(),
+  disbursedFromAccountId: z.string().uuid().optional(),
 });
 
 export const updateLoanSchema = z.object({

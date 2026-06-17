@@ -391,7 +391,7 @@ export const listLoans = (organisationId: string, employeeId: string) =>
 export const createLoan = (
   organisationId: string,
   employeeId: string,
-  data: { description: string; principalAmount: number; instalmentAmount: number; startDate: string; glAccountId?: string },
+  data: { description: string; principalAmount: number; instalmentAmount: number; startDate: string; glAccountId?: string; disbursedFromAccountId?: string },
 ) =>
   api.post(`/organisations/${organisationId}/payroll/employees/${employeeId}/loans`, data).then((r) => r.data.data as EmployeeLoan);
 

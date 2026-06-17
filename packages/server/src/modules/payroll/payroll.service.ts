@@ -130,6 +130,7 @@ export interface CreateLoanInput {
   instalmentAmount: number;
   startDate: string;
   glAccountId?: string;
+  disbursedFromAccountId?: string; // bank/cash account credited when auto-posting disbursement
 }
 
 export interface UpdateLoanInput {
@@ -670,7 +671,22 @@ export async function createLoan(
   if (input.instalmentAmount <= 0) throw new ValidationError('Instalment amount must be positive');
   if (input.instalmentAmount > input.principalAmount) throw new ValidationError('Instalment cannot exceed principal');
 
-  return prisma.employeeLoan.create({
+  // Auto-post the disbursement (DR loan receivable / CR bank) when a funding account
+  // is given. Validate everything up-front so we don't create a loan we can't post.
+  const autoPost = !!input.disbursedFromAccountId;
+  let periodId: string | undefined;
+  if (autoPost) {
+    if (!input.glAccountId) throw new ValidationError('Set the loan’s receivable GL account to auto-post the disbursement');
+    const date = new Date(input.startDate + 'T00:00:00Z');
+    const period = await prisma.accountingPeriod.findFirst({
+      where: { organisationId, status: 'OPEN', startDate: { lte: date }, endDate: { gte: date } },
+      select: { id: true },
+    });
+    if (!period) throw new ValidationError(`No OPEN accounting period contains the disbursement date ${input.startDate}. Open the period (or change the start date) and try again.`);
+    periodId = period.id;
+  }
+
+  const loan = await prisma.employeeLoan.create({
     data: {
       organisationId,
       employeeId,
@@ -685,6 +701,32 @@ export async function createLoan(
     },
     include: { glAccount: { select: { id: true, code: true, name: true } } },
   });
+
+  if (autoPost && periodId) {
+    const org = await prisma.organisation.findUnique({ where: { id: organisationId }, select: { baseCurrency: true } });
+    const currency = org?.baseCurrency ?? 'GHS';
+    const je = await createJournalEntry(
+      organisationId,
+      {
+        type:        JournalType.CASH_PAYMENT,
+        description: `Loan disbursement: ${input.description} — ${emp.firstName} ${emp.lastName}`,
+        reference:   `LOAN:${loan.id}`,
+        entryDate:   input.startDate,
+        periodId,
+        currency,
+        exchangeRate: 1,
+        lines: [
+          { accountId: input.glAccountId!,             description: 'Loan receivable',  debitAmount: input.principalAmount, creditAmount: 0,                   currency, exchangeRate: 1 },
+          { accountId: input.disbursedFromAccountId!,  description: 'Loan disbursed',   debitAmount: 0,                     creditAmount: input.principalAmount, currency, exchangeRate: 1 },
+        ],
+      },
+      userId,
+    );
+    await prisma.journalEntry.update({ where: { id: je.id }, data: { status: EntryStatus.APPROVED, approvedBy: userId, approvedAt: new Date() } });
+    await postJournalEntry(organisationId, je.id, userId);
+  }
+
+  return loan;
 }
 
 export async function updateLoan(organisationId: string, id: string, input: UpdateLoanInput) {
