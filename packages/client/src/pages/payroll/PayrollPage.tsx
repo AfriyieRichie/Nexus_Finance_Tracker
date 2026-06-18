@@ -31,6 +31,31 @@ function fmt(n: string | number | null | undefined, dp = 2) {
 
 const RETIREMENT_AGE = 60; // Ghana statutory retirement age
 
+// ── Reducing-balance loan amortization (matches the server's computeLoanEmi) ──
+function emiOf(principal: number, annualRate: number, termMonths: number): number {
+  if (!termMonths || termMonths <= 0 || !principal) return 0;
+  const r = annualRate / 12;
+  if (r <= 0) return principal / termMonths;
+  const f = Math.pow(1 + r, termMonths);
+  return (principal * r * f) / (f - 1);
+}
+function buildAmortization(principal: number, annualRate: number, termMonths: number) {
+  const emi = emiOf(principal, annualRate, termMonths);
+  const r = annualRate / 12;
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const rows: { period: number; payment: number; interest: number; principal: number; balance: number }[] = [];
+  let bal = principal;
+  for (let i = 1; i <= termMonths && bal > 0; i++) {
+    const interest = r <= 0 ? 0 : r2(bal * r);
+    let principalPart = r2(emi - interest);
+    if (i === termMonths || principalPart > bal) principalPart = r2(bal);
+    bal = r2(bal - principalPart);
+    rows.push({ period: i, payment: r2(principalPart + interest), interest, principal: principalPart, balance: Math.max(0, bal) });
+  }
+  const totalInterest = r2(rows.reduce((s, x) => s + x.interest, 0));
+  return { emi, rows, totalInterest };
+}
+
 const DEFAULT_RELIEFS = { marriageChild: 1200, oldAge: 1500, childEducation: 600, childEducationMax: 3, agedDependant: 1000, disabilityPct: 0.25 };
 const DEFAULT_BENEFITS = {
   accommodation: { AF: 0.10, AO: 0.075, FO: 0.025, SA: 0.025 } as Record<string, number>,
@@ -617,9 +642,19 @@ export function EmployeeDialog({ organisationId, emp, employees, onClose, fullPa
   const assetAccountOptions: AccountOption[] = toAccountOptions(
     (assetAccountsData?.accounts ?? []).filter((a) => a.class === 'ASSET'),
   );
-  const defaultLoanForm = { description: '', principalAmount: '', instalmentAmount: '', startDate: today, glAccountId: '', disbursedFromAccountId: '' };
+  const incomeAccountOptions: AccountOption[] = toAccountOptions(
+    (assetAccountsData?.accounts ?? []).filter((a) => a.class === 'REVENUE'),
+  );
+  const defaultLoanForm = { description: '', principalAmount: '', startDate: today, glAccountId: '', disbursedFromAccountId: '', interestRate: '', termMonths: '', interestIncomeAccountId: '' };
   const [loanForm, setLoanForm] = useState(defaultLoanForm);
+  const [interestBearing, setInterestBearing] = useState(false);
   const setL = (k: string, v: string) => setLoanForm((f) => ({ ...f, [k]: v }));
+
+  // Live EMI + amortization preview for the New Loan form.
+  const loanPrincipalNum = Number(loanForm.principalAmount) || 0;
+  const loanRateFrac = interestBearing && loanForm.interestRate ? Number(loanForm.interestRate) / 100 : 0;
+  const loanTermNum = Number(loanForm.termMonths) || 0;
+  const loanAmort = loanPrincipalNum > 0 && loanTermNum > 0 ? buildAmortization(loanPrincipalNum, loanRateFrac, loanTermNum) : null;
 
   const [loanError, setLoanError] = useState<string | null>(null);
 
@@ -627,12 +662,14 @@ export function EmployeeDialog({ organisationId, emp, employees, onClose, fullPa
     mutationFn: () => payrollSvc.createLoan(organisationId, effectiveEmpId!, {
       description:      loanForm.description,
       principalAmount:  Number(loanForm.principalAmount),
-      instalmentAmount: Number(loanForm.instalmentAmount),
       startDate:        loanForm.startDate,
       glAccountId:      loanForm.glAccountId || undefined,
       disbursedFromAccountId: loanForm.disbursedFromAccountId || undefined,
+      termMonths:       Number(loanForm.termMonths),
+      interestRate:     interestBearing && loanForm.interestRate ? Number(loanForm.interestRate) / 100 : 0,
+      interestIncomeAccountId: interestBearing ? (loanForm.interestIncomeAccountId || undefined) : undefined,
     }),
-    onSuccess: () => { void refetchLoans(); setAddingLoan(false); setLoanForm(defaultLoanForm); setLoanError(null); },
+    onSuccess: () => { void refetchLoans(); setAddingLoan(false); setLoanForm(defaultLoanForm); setInterestBearing(false); setLoanError(null); },
     onError: (err: unknown) => {
       setLoanError((err as { response?: { data?: { error?: { message?: string }; message?: string } } })?.response?.data?.error?.message ?? (err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? (err as Error)?.message ?? 'Failed to create loan');
     },
@@ -648,6 +685,15 @@ export function EmployeeDialog({ organisationId, emp, employees, onClose, fullPa
     mutationFn: ({ loanId, glAccountId }: { loanId: string; glAccountId: string }) =>
       payrollSvc.updateLoan(organisationId, effectiveEmpId!, loanId, { glAccountId }),
     onSuccess: () => void refetchLoans(),
+  });
+
+  // Re-amortize the remaining balance over a new term (loan restructuring).
+  const [adjustLoan, setAdjustLoan] = useState<EmployeeLoan | null>(null);
+  const [adjustTerm, setAdjustTerm] = useState('');
+  const reamortize = useMutation({
+    mutationFn: ({ loanId, instalmentAmount, termMonths }: { loanId: string; instalmentAmount: number; termMonths: number }) =>
+      payrollSvc.updateLoan(organisationId, effectiveEmpId!, loanId, { instalmentAmount, termMonths }),
+    onSuccess: () => { void refetchLoans(); setAdjustLoan(null); setAdjustTerm(''); },
   });
 
   // ── Mutations ──────────────────────────────────────────────────────────────
@@ -1184,13 +1230,29 @@ export function EmployeeDialog({ organisationId, emp, employees, onClose, fullPa
                     <Input type="number" value={loanForm.principalAmount} onChange={(e) => setL('principalAmount', e.target.value)} placeholder="0.00" />
                   </div>
                   <div>
-                    <label className="text-xs font-medium">Monthly Instalment (GHS) <span className="text-destructive">*</span></label>
-                    <Input type="number" value={loanForm.instalmentAmount} onChange={(e) => setL('instalmentAmount', e.target.value)} placeholder="0.00" />
+                    <label className="text-xs font-medium">Term — number of payroll periods (months) <span className="text-destructive">*</span></label>
+                    <Input type="number" value={loanForm.termMonths} onChange={(e) => setL('termMonths', e.target.value)} placeholder="e.g. 6" />
                   </div>
                   <div>
                     <label className="text-xs font-medium">Repayment Start Date <span className="text-destructive">*</span></label>
                     <Input type="date" value={loanForm.startDate} onChange={(e) => setL('startDate', e.target.value)} />
                   </div>
+                  <div className="flex items-end gap-2 pb-1">
+                    <input type="checkbox" id="interestBearing" checked={interestBearing} onChange={(e) => setInterestBearing(e.target.checked)} />
+                    <label htmlFor="interestBearing" className="text-xs font-medium">Interest-bearing loan</label>
+                  </div>
+                  {interestBearing && (
+                    <>
+                      <div>
+                        <label className="text-xs font-medium">Interest Rate (% per annum) <span className="text-destructive">*</span></label>
+                        <Input type="number" step="0.1" value={loanForm.interestRate} onChange={(e) => setL('interestRate', e.target.value)} placeholder="e.g. 12" />
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium">Interest Income account (revenue) <span className="text-destructive">*</span></label>
+                        <AccountSelect value={loanForm.interestIncomeAccountId} onChange={(id) => setL('interestIncomeAccountId', id)} accounts={incomeAccountOptions} placeholder="— select —" />
+                      </div>
+                    </>
+                  )}
                   <div>
                     <label className="text-xs font-medium">GL Account — Loans Receivable (asset)</label>
                     <AccountSelect value={loanForm.glAccountId} onChange={(id) => setL('glAccountId', id)} accounts={assetAccountOptions} placeholder="— optional —" />
@@ -1200,18 +1262,42 @@ export function EmployeeDialog({ organisationId, emp, employees, onClose, fullPa
                     <AccountSelect value={loanForm.disbursedFromAccountId} onChange={(id) => setL('disbursedFromAccountId', id)} accounts={assetAccountOptions} placeholder="— don't post —" />
                   </div>
                 </div>
+
+                {/* Live EMI + amortization preview */}
+                {loanAmort && (
+                  <div className="rounded-md border bg-background p-2.5 space-y-2">
+                    <div className="flex items-center justify-between flex-wrap gap-1">
+                      <p className="text-sm font-semibold">Equal payment (EMI): <span className="text-primary">GHS {fmt(loanAmort.emi)}</span> / month × {loanTermNum}</p>
+                      <p className="text-xs text-muted-foreground">{interestBearing ? <>Total interest ≈ GHS {fmt(loanAmort.totalInterest)} · Total repayable GHS {fmt(loanPrincipalNum + loanAmort.totalInterest)}</> : 'Interest-free'}</p>
+                    </div>
+                    <div className="max-h-44 overflow-y-auto border rounded">
+                      <table className="w-full text-[11px]">
+                        <thead className="bg-muted/50 sticky top-0"><tr className="text-left text-muted-foreground">
+                          <th className="px-2 py-1 font-medium">#</th><th className="px-2 py-1 font-medium text-right">Payment</th>
+                          <th className="px-2 py-1 font-medium text-right">Interest</th><th className="px-2 py-1 font-medium text-right">Principal</th>
+                          <th className="px-2 py-1 font-medium text-right">Balance</th>
+                        </tr></thead>
+                        <tbody>
+                          {loanAmort.rows.map((row) => (
+                            <tr key={row.period} className="border-t">
+                              <td className="px-2 py-1">{row.period}</td><td className="px-2 py-1 text-right">{fmt(row.payment)}</td>
+                              <td className="px-2 py-1 text-right">{fmt(row.interest)}</td><td className="px-2 py-1 text-right">{fmt(row.principal)}</td>
+                              <td className="px-2 py-1 text-right">{fmt(row.balance)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
                 {loanForm.disbursedFromAccountId
                   ? <p className="text-[11px] text-blue-700 bg-blue-50 border border-blue-200 rounded px-2 py-1">On create, the disbursement posts automatically: <strong>DR Loans Receivable</strong> / <strong>CR Bank/Cash</strong> for GHS {loanForm.principalAmount || '0'}. Requires the receivable account above and an open period on the start date.</p>
                   : <p className="text-[11px] text-muted-foreground">Pick a <strong>Disburse from</strong> account to auto-post the disbursement (DR receivable / CR bank). Leave blank if you booked it elsewhere.</p>}
-                {loanForm.principalAmount && loanForm.instalmentAmount && Number(loanForm.instalmentAmount) > 0 && (
-                  <p className="text-xs text-muted-foreground">
-                    Estimated repayment: {Math.ceil(Number(loanForm.principalAmount) / Number(loanForm.instalmentAmount))} months
-                  </p>
-                )}
                 {loanError && <p className="text-xs text-destructive bg-destructive/10 rounded px-2 py-1">{loanError}</p>}
                 <div className="flex gap-2 justify-end">
-                  <Button variant="outline" size="sm" onClick={() => { setAddingLoan(false); setLoanForm(defaultLoanForm); setLoanError(null); }}>Cancel</Button>
-                  <Button size="sm" disabled={!loanForm.description || !loanForm.principalAmount || !loanForm.instalmentAmount || createLoan.isPending} onClick={() => { setLoanError(null); createLoan.mutate(); }}>
+                  <Button variant="outline" size="sm" onClick={() => { setAddingLoan(false); setLoanForm(defaultLoanForm); setInterestBearing(false); setLoanError(null); }}>Cancel</Button>
+                  <Button size="sm" disabled={!loanForm.description || !loanPrincipalNum || !loanTermNum || (interestBearing && (!loanForm.interestRate || !loanForm.interestIncomeAccountId)) || createLoan.isPending} onClick={() => { setLoanError(null); createLoan.mutate(); }}>
                     {createLoan.isPending ? 'Creating…' : 'Create Loan'}
                   </Button>
                 </div>
@@ -1244,7 +1330,9 @@ export function EmployeeDialog({ organisationId, emp, employees, onClose, fullPa
                         <div className="w-32 bg-gray-200 rounded-full h-1.5 mt-1">
                           <div className="bg-green-500 h-1.5 rounded-full" style={{ width: `${pct}%` }} />
                         </div>
-                        <div className="text-xs text-muted-foreground mt-0.5">{pct}% repaid</div>
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          {pct}% repaid · {loan.termMonths ? `${loan.termMonths} mo` : '—'} · {Number(loan.interestRate) > 0 ? `${(Number(loan.interestRate) * 100).toFixed(1)}% p.a.` : 'interest-free'}
+                        </div>
                       </TableCell>
                       <TableCell className="text-right font-mono text-sm">GHS {fmt(loan.principalAmount)}</TableCell>
                       <TableCell className="text-right font-mono text-sm font-semibold">{Number(loan.balance) > 0 ? `GHS ${fmt(loan.balance)}` : <span className="text-green-600">Cleared</span>}</TableCell>
@@ -1261,14 +1349,17 @@ export function EmployeeDialog({ organisationId, emp, employees, onClose, fullPa
                       </TableCell>
                       <TableCell><Badge className={LOAN_STATUS_COLORS[loan.status] ?? ''}>{loan.status}</Badge></TableCell>
                       <TableCell>
+                        {loan.status === 'ACTIVE' && Number(loan.balance) > 0 && (
+                          <Button variant="ghost" size="sm" onClick={() => { setAdjustLoan(loan); setAdjustTerm(''); }}>Adjust</Button>
+                        )}
                         {loan.status === 'ACTIVE' && (
-                          <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => updateLoanStatus.mutate({ loanId: loan.id, status: 'CANCELLED' })}>Cancel</Button>
+                          <Button variant="ghost" size="sm" onClick={() => updateLoanStatus.mutate({ loanId: loan.id, status: 'SUSPENDED' })}>Suspend</Button>
                         )}
                         {loan.status === 'SUSPENDED' && (
                           <Button variant="ghost" size="sm" onClick={() => updateLoanStatus.mutate({ loanId: loan.id, status: 'ACTIVE' })}>Resume</Button>
                         )}
                         {loan.status === 'ACTIVE' && (
-                          <Button variant="ghost" size="sm" onClick={() => updateLoanStatus.mutate({ loanId: loan.id, status: 'SUSPENDED' })}>Suspend</Button>
+                          <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => updateLoanStatus.mutate({ loanId: loan.id, status: 'CANCELLED' })}>Cancel</Button>
                         )}
                       </TableCell>
                     </TableRow>
@@ -1276,6 +1367,37 @@ export function EmployeeDialog({ organisationId, emp, employees, onClose, fullPa
                 })}
               </TableBody>
             </Table>
+
+            {/* Adjust (re-amortize) dialog */}
+            <Dialog open={!!adjustLoan} onOpenChange={(v) => { if (!v) { setAdjustLoan(null); setAdjustTerm(''); } }}>
+              <DialogContent className="max-w-md">
+                <h2 className="text-lg font-semibold mb-1">Adjust loan — re-amortize</h2>
+                {adjustLoan && (() => {
+                  const bal = Number(adjustLoan.balance);
+                  const rate = Number(adjustLoan.interestRate);
+                  const newTerm = Number(adjustTerm) || 0;
+                  const newEmi = newTerm > 0 ? emiOf(bal, rate, newTerm) : 0;
+                  return (
+                    <div className="space-y-3">
+                      <p className="text-xs text-muted-foreground">Spread the <strong>remaining balance</strong> of GHS {fmt(bal)} over a new number of periods. {rate > 0 ? `Interest continues at ${(rate * 100).toFixed(1)}% p.a. on the reducing balance.` : 'Interest-free.'}</p>
+                      <div>
+                        <label className="text-xs font-medium">New remaining term (months) <span className="text-destructive">*</span></label>
+                        <Input type="number" value={adjustTerm} onChange={(e) => setAdjustTerm(e.target.value)} placeholder="e.g. 2" />
+                      </div>
+                      {newTerm > 0 && (
+                        <p className="text-sm font-semibold">New instalment (EMI): <span className="text-primary">GHS {fmt(newEmi)}</span> / month × {newTerm}</p>
+                      )}
+                      <div className="flex justify-end gap-2 pt-1">
+                        <Button variant="outline" size="sm" onClick={() => { setAdjustLoan(null); setAdjustTerm(''); }}>Cancel</Button>
+                        <Button size="sm" disabled={newTerm <= 0 || reamortize.isPending} onClick={() => reamortize.mutate({ loanId: adjustLoan.id, instalmentAmount: newEmi, termMonths: newTerm })}>
+                          {reamortize.isPending ? 'Saving…' : 'Apply new schedule'}
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </DialogContent>
+            </Dialog>
           </div>
         )}
       </div>

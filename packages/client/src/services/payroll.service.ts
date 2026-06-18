@@ -255,6 +255,9 @@ export interface EmployeeLoan {
   instalmentAmount: string;
   startDate: string;
   glAccountId: string | null;
+  interestRate: string;
+  termMonths: number | null;
+  interestIncomeAccountId: string | null;
   status: LoanStatus;
   createdBy: string;
   createdAt: string;
@@ -391,7 +394,7 @@ export const listLoans = (organisationId: string, employeeId: string) =>
 export const createLoan = (
   organisationId: string,
   employeeId: string,
-  data: { description: string; principalAmount: number; instalmentAmount: number; startDate: string; glAccountId?: string; disbursedFromAccountId?: string },
+  data: { description: string; principalAmount: number; instalmentAmount?: number; startDate: string; glAccountId?: string; disbursedFromAccountId?: string; interestRate?: number; termMonths?: number; interestIncomeAccountId?: string },
 ) =>
   api.post(`/organisations/${organisationId}/payroll/employees/${employeeId}/loans`, data).then((r) => r.data.data as EmployeeLoan);
 
@@ -399,7 +402,7 @@ export const updateLoan = (
   organisationId: string,
   employeeId: string,
   loanId: string,
-  data: { status?: LoanStatus; instalmentAmount?: number; balance?: number; glAccountId?: string },
+  data: { status?: LoanStatus; instalmentAmount?: number; balance?: number; glAccountId?: string; interestRate?: number; termMonths?: number; interestIncomeAccountId?: string },
 ) =>
   api.patch(`/organisations/${organisationId}/payroll/employees/${employeeId}/loans/${loanId}`, data).then((r) => r.data.data as EmployeeLoan);
 
