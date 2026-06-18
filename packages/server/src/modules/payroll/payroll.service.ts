@@ -127,10 +127,13 @@ export interface ListPayrollParams {
 export interface CreateLoanInput {
   description: string;
   principalAmount: number;
-  instalmentAmount: number;
+  instalmentAmount?: number;       // optional — derived from the term when termMonths is set
   startDate: string;
   glAccountId?: string;
   disbursedFromAccountId?: string; // bank/cash account credited when auto-posting disbursement
+  interestRate?: number;           // annual fraction (0 = interest-free)
+  termMonths?: number;             // number of payroll periods
+  interestIncomeAccountId?: string;
 }
 
 export interface UpdateLoanInput {
@@ -138,6 +141,9 @@ export interface UpdateLoanInput {
   instalmentAmount?: number;
   balance?: number;
   glAccountId?: string;
+  interestRate?: number;
+  termMonths?: number;
+  interestIncomeAccountId?: string;
 }
 
 // ─── Ghana 2024 Default PAYE Bands (monthly GHS) ─────────────────────────────
@@ -187,6 +193,16 @@ const DEFAULT_TAX_RULES: TaxRules = {
 
 function round4(n: number): number {
   return Math.round(n * 10000) / 10000;
+}
+
+// Equal periodic payment (EMI) for a reducing-balance loan. annualRate is a fraction
+// (0 = interest-free → simple principal/term). Periods are monthly (per payroll run).
+export function computeLoanEmi(principal: number, annualRate: number, termMonths: number): number {
+  if (termMonths <= 0) return 0;
+  const r = annualRate / 12;
+  if (r <= 0) return round4(principal / termMonths);
+  const f = Math.pow(1 + r, termMonths);
+  return round4((principal * r * f) / (f - 1));
 }
 
 function ageFromDob(dob: Date | null | undefined, asOf: Date): number | null {
@@ -668,8 +684,19 @@ export async function createLoan(
   if (!emp) throw new NotFoundError('Employee not found');
 
   if (input.principalAmount <= 0)  throw new ValidationError('Principal amount must be positive');
-  if (input.instalmentAmount <= 0) throw new ValidationError('Instalment amount must be positive');
-  if (input.instalmentAmount > input.principalAmount) throw new ValidationError('Instalment cannot exceed principal');
+
+  const interestRate = input.interestRate ?? 0;
+  if (interestRate > 0 && !input.interestIncomeAccountId) {
+    throw new ValidationError('Set an Interest Income account for an interest-bearing loan');
+  }
+  // The equal payment (EMI) is derived from principal/rate/term when a term is given;
+  // otherwise fall back to a supplied instalment amount.
+  const instalmentAmount = input.termMonths
+    ? computeLoanEmi(input.principalAmount, interestRate, input.termMonths)
+    : input.instalmentAmount;
+  if (!instalmentAmount || instalmentAmount <= 0) {
+    throw new ValidationError('Provide a term (months) or an instalment amount');
+  }
 
   // Auto-post the disbursement (DR loan receivable / CR bank) when a funding account
   // is given. Validate everything up-front so we don't create a loan we can't post.
@@ -693,9 +720,12 @@ export async function createLoan(
       description:      input.description,
       principalAmount:  input.principalAmount,
       balance:          input.principalAmount,
-      instalmentAmount: input.instalmentAmount,
+      instalmentAmount,
       startDate:        new Date(input.startDate),
       glAccountId:      input.glAccountId,
+      interestRate,
+      termMonths:       input.termMonths ?? null,
+      interestIncomeAccountId: input.interestIncomeAccountId ?? null,
       createdBy:        userId,
       status:           'ACTIVE',
     },
@@ -740,6 +770,9 @@ export async function updateLoan(organisationId: string, id: string, input: Upda
       ...(input.instalmentAmount  !== undefined && { instalmentAmount:  input.instalmentAmount }),
       ...(input.balance           !== undefined && { balance:           input.balance }),
       ...(input.glAccountId       !== undefined && { glAccountId:       input.glAccountId }),
+      ...(input.interestRate      !== undefined && { interestRate:      input.interestRate }),
+      ...(input.termMonths        !== undefined && { termMonths:        input.termMonths }),
+      ...(input.interestIncomeAccountId !== undefined && { interestIncomeAccountId: input.interestIncomeAccountId }),
     },
     include: { glAccount: { select: { id: true, code: true, name: true } } },
   });
@@ -1039,10 +1072,15 @@ export async function createPayrollRun(
       }
     }
 
-    // Active loan repayments (resolved from the pre-fetched map)
+    // Active loan repayments (resolved from the pre-fetched map). For interest-bearing
+    // loans the deduction is the EMI, but the final payment is capped at the balance
+    // plus this period's interest so it clears exactly (reducing-balance method).
     const activeLoans = loansByEmployee.get(emp.id) ?? [];
     for (const loan of activeLoans) {
-      const instalment = round4(Math.min(Number(loan.instalmentAmount), Number(loan.balance)));
+      const monthlyRate = Number(loan.interestRate ?? 0) / 12;
+      const interest    = round4(Number(loan.balance) * monthlyRate);
+      const maxThisRun  = round4(Number(loan.balance) + interest);
+      const instalment  = round4(Math.min(Number(loan.instalmentAmount), maxThisRun));
       if (instalment > 0) {
         otherDeductions = round4(otherDeductions + instalment);
         lines.push({ description: `Loan Repayment: ${loan.description}`, type: SalaryComponentType.EMPLOYEE_DEDUCTION, amount: instalment, isEmployer: false, componentId: undefined, loanId: loan.id });
@@ -1396,16 +1434,34 @@ export async function payPayrollRun(organisationId: string, id: string, userId: 
   for (const line of loanRepaymentLines) {
     if (line.loanId) loanTotals.set(line.loanId, (loanTotals.get(line.loanId) ?? 0) + Number(line.amount));
   }
-  // Group loan repayments by GL account. A loan with no GL account can't be credited,
-  // which would leave the journal unbalanced — surface it instead of silently posting.
-  const loanGlGroups = new Map<string, number>();
+  // Split each repayment into principal and interest (reducing-balance). The principal
+  // portion is credited to the loan receivable; the interest portion to interest income.
+  // The balance is reduced by the principal only (done later). A loan with no receivable
+  // account — or an interest-bearing loan with no interest-income account — can't be
+  // credited, which would unbalance the journal, so surface it instead of posting.
+  const loanGlGroups = new Map<string, number>();      // receivable GL → principal repaid
+  const interestGlGroups = new Map<string, number>();  // interest-income GL → interest earned
+  const loanPrincipalPaid = new Map<string, number>(); // loanId → principal (for balance reduction)
   const loansMissingGl: string[] = [];
+  const loansMissingInterestGl: string[] = [];
   for (const [loanId, repaid] of loanTotals.entries()) {
-    const loan = await prisma.employeeLoan.findUnique({ where: { id: loanId }, select: { glAccountId: true, description: true } });
-    if (loan?.glAccountId) {
-      loanGlGroups.set(loan.glAccountId, round4((loanGlGroups.get(loan.glAccountId) ?? 0) + repaid));
-    } else if (repaid > 0) {
-      loansMissingGl.push(loan?.description ?? loanId);
+    const loan = await prisma.employeeLoan.findUnique({
+      where:  { id: loanId },
+      select: { glAccountId: true, description: true, balance: true, interestRate: true, interestIncomeAccountId: true },
+    });
+    if (!loan) continue;
+    const monthlyRate = Number(loan.interestRate ?? 0) / 12;
+    const interest    = round4(Math.min(repaid, round4(Number(loan.balance) * monthlyRate)));
+    const principal   = round4(repaid - interest);
+    loanPrincipalPaid.set(loanId, principal);
+
+    if (principal > 0) {
+      if (loan.glAccountId) loanGlGroups.set(loan.glAccountId, round4((loanGlGroups.get(loan.glAccountId) ?? 0) + principal));
+      else loansMissingGl.push(loan.description);
+    }
+    if (interest > 0) {
+      if (loan.interestIncomeAccountId) interestGlGroups.set(loan.interestIncomeAccountId, round4((interestGlGroups.get(loan.interestIncomeAccountId) ?? 0) + interest));
+      else loansMissingInterestGl.push(loan.description);
     }
   }
 
@@ -1430,10 +1486,11 @@ export async function payPayrollRun(organisationId: string, id: string, userId: 
 
   // Block posting (with a clear, actionable message) when a withheld amount has nowhere
   // to be credited — this is the cause of "journal not balanced" by the deduction total.
-  if (deductionsMissingGl.size > 0 || loansMissingGl.length > 0) {
+  if (deductionsMissingGl.size > 0 || loansMissingGl.length > 0 || loansMissingInterestGl.length > 0) {
     const parts: string[] = [];
     if (deductionsMissingGl.size > 0) parts.push(`deduction component(s) ${[...deductionsMissingGl].join(', ')} — set a liability GL account in Payroll → Salary Components`);
-    if (loansMissingGl.length > 0) parts.push(`loan(s) ${loansMissingGl.join(', ')} — set a GL account on the loan`);
+    if (loansMissingGl.length > 0) parts.push(`loan(s) ${loansMissingGl.join(', ')} — set a receivable GL account on the loan`);
+    if (loansMissingInterestGl.length > 0) parts.push(`interest-bearing loan(s) ${loansMissingInterestGl.join(', ')} — set an Interest Income account on the loan`);
     throw new ValidationError(`Cannot post: these withheld amounts have no GL account to credit, which unbalances the journal — ${parts.join('; ')}.`);
   }
 
@@ -1482,9 +1539,13 @@ export async function payPayrollRun(organisationId: string, id: string, userId: 
   if (totalPension > 0) {
     lines.push({ accountId: run.pensionPayableAccountId, description: 'Pension payable', debitAmount: 0, creditAmount: totalPension, currency, exchangeRate: 1 });
   }
-  // CR Employee Loans Receivable (one line per GL account)
+  // CR Employee Loans Receivable — principal portion of each repayment (by GL account)
   for (const [glAccountId, amount] of loanGlGroups.entries()) {
-    lines.push({ accountId: glAccountId, description: 'Loan repayment recovery', debitAmount: 0, creditAmount: amount, currency, exchangeRate: 1 });
+    lines.push({ accountId: glAccountId, description: 'Loan principal recovery', debitAmount: 0, creditAmount: amount, currency, exchangeRate: 1 });
+  }
+  // CR Interest Income — interest portion of interest-bearing loan repayments
+  for (const [glAccountId, amount] of interestGlGroups.entries()) {
+    lines.push({ accountId: glAccountId, description: 'Loan interest income', debitAmount: 0, creditAmount: amount, currency, exchangeRate: 1 });
   }
   // CR Other deduction payables (welfare/union/other deductions, by component GL account)
   for (const [glAccountId, amount] of deductionGlGroups.entries()) {
@@ -1526,11 +1587,12 @@ export async function payPayrollRun(organisationId: string, id: string, userId: 
     }),
   ]);
 
-  // Reduce loan balances using the totals already computed above
-  for (const [loanId, repaid] of loanTotals.entries()) {
+  // Reduce loan balances by the PRINCIPAL portion only (interest is income, not a
+  // reduction of the receivable).
+  for (const [loanId, principal] of loanPrincipalPaid.entries()) {
     const loan = await prisma.employeeLoan.findUnique({ where: { id: loanId } });
     if (!loan) continue;
-    const newBalance = round4(Math.max(0, Number(loan.balance) - repaid));
+    const newBalance = round4(Math.max(0, Number(loan.balance) - principal));
     await prisma.employeeLoan.update({
       where: { id: loanId },
       data:  { balance: newBalance, status: newBalance === 0 ? 'COMPLETED' : 'ACTIVE' },

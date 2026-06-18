@@ -519,6 +519,7 @@ model Account {
   salaryComponents     SalaryComponent[]   @relation("ComponentGLAccount")
   employeeExpenses     Employee[]          @relation("EmployeeSalaryExpense")
   employeeLoans        EmployeeLoan[]      @relation("LoanGLAccount")
+  loanInterestAccounts EmployeeLoan[]      @relation("LoanInterestAccount")
 
   @@unique([organisationId, code])
   @@index([organisationId, class])
@@ -2136,15 +2137,21 @@ model EmployeeLoan {
   instalmentAmount Decimal    @db.Decimal(20, 4)
   startDate        DateTime   @db.Date
   glAccountId      String?
+  // Reducing-balance interest: 0 = interest-free. termMonths drives the equal payment
+  // (EMI). Interest portion of each repayment is credited to interestIncomeAccountId.
+  interestRate            Decimal @default(0) @db.Decimal(8, 6)
+  termMonths              Int?
+  interestIncomeAccountId String?
   status           LoanStatus @default(ACTIVE)
   createdBy        String
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
 
-  organisation   Organisation  @relation(fields: [organisationId], references: [id], onDelete: Cascade)
-  employee       Employee      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  glAccount      Account?      @relation("LoanGLAccount", fields: [glAccountId], references: [id])
-  repaymentLines PayslipLine[]
+  organisation         Organisation  @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  employee             Employee      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  glAccount            Account?      @relation("LoanGLAccount", fields: [glAccountId], references: [id])
+  interestIncomeAccount Account?     @relation("LoanInterestAccount", fields: [interestIncomeAccountId], references: [id])
+  repaymentLines       PayslipLine[]
 
   @@index([organisationId])
   @@index([employeeId])

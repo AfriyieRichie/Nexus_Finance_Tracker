@@ -146,10 +146,14 @@ export const assignComponentSchema = z.object({
 export const createLoanSchema = z.object({
   description: z.string().min(1).max(200),
   principalAmount: z.number().positive(),
-  instalmentAmount: z.number().positive(),
+  // Optional when termMonths is given (the EMI is computed from principal/rate/term).
+  instalmentAmount: z.number().positive().optional(),
   startDate: z.string().regex(dateRegex),
   glAccountId: z.string().uuid().optional(),
   disbursedFromAccountId: z.string().uuid().optional(),
+  interestRate: z.number().min(0).max(1).optional(),            // annual, fraction (0.12 = 12%)
+  termMonths: z.number().int().positive().max(600).optional(),
+  interestIncomeAccountId: z.string().uuid().optional(),
 });
 
 export const updateLoanSchema = z.object({
@@ -157,6 +161,9 @@ export const updateLoanSchema = z.object({
   instalmentAmount: z.number().positive().optional(),
   balance: z.number().nonnegative().optional(),
   glAccountId: z.string().uuid().optional(),
+  interestRate: z.number().min(0).max(1).optional(),
+  termMonths: z.number().int().positive().max(600).optional(),
+  interestIncomeAccountId: z.string().uuid().optional(),
 });
 
 // ─── Payroll Runs ─────────────────────────────────────────────────────────────
