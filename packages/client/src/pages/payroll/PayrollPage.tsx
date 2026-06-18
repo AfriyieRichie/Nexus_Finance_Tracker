@@ -128,6 +128,100 @@ const DEFAULT_PAYE_BANDS = [
   { min: '20130', max: '',      rate: '35'   },
 ];
 
+// ─── PAYE Planner engine (reverse / gross-up, resident standard employee) ─────
+// Mirrors the server PAYE engine for a resident, non-NSP, non-flat employee with no
+// allowances/benefits/reliefs/tier3: bands on basic (less SSNIT), concessional 5%
+// overtime (junior staff, ≤50% of basic then 10%) and concessional 5% bonus (≤15% of
+// basic, excess into the bands).
+interface PlannerCfg {
+  ssnitRate: number;            // employee SSNIT, fraction (0.055)
+  bands: { min: number; max: number | null; rate: number }[]; // rate as fraction
+  bonusThreshold: number; bonusRate: number;                  // 0.15 / 0.05
+  overtimeThreshold: number; overtimeRateLow: number; overtimeRateHigh: number; // 0.5 / 0.05 / 0.10
+  juniorStaffOtThreshold: number; // 1500
+}
+function payeOnBands(taxable: number, bands: PlannerCfg['bands']): number {
+  let tax = 0;
+  for (const b of bands) {
+    if (taxable <= b.min) break;
+    const upper = b.max == null ? Infinity : b.max;
+    const amt = Math.min(taxable, upper) - b.min;
+    if (amt > 0) tax += amt * b.rate;
+  }
+  return Math.round(tax * 100) / 100;
+}
+interface PlanResult { basic: number; overtime: number; bonus: number; gross: number; ssnit: number; paye: number; overtimeTax: number; bonusTax: number; totalTax: number; net: number; concessionalOverflow: boolean; }
+function plannerForward(B: number, OT: number, BN: number, c: PlannerCfg): PlanResult {
+  const ssnit = Math.round(c.ssnitRate * B * 100) / 100;
+  const junior = B <= c.juniorStaffOtThreshold;
+  let overtimeTax = 0, overtimeInPaye = 0;
+  if (OT > 0) {
+    if (junior) {
+      const t = c.overtimeThreshold * B;
+      overtimeTax = Math.min(OT, t) * c.overtimeRateLow + Math.max(0, OT - t) * c.overtimeRateHigh;
+    } else overtimeInPaye = OT;
+  }
+  let bonusTax = 0, bonusInPaye = 0;
+  if (BN > 0) {
+    const t = c.bonusThreshold * B;
+    bonusTax = Math.min(BN, t) * c.bonusRate;
+    bonusInPaye = Math.max(0, BN - t);
+  }
+  const assessable = Math.max(0, B + bonusInPaye + overtimeInPaye - ssnit);
+  const paye = payeOnBands(assessable, c.bands);
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const totalTax = r2(paye + overtimeTax + bonusTax);
+  const gross = r2(B + OT + BN);
+  const overflow = (junior && OT > c.overtimeThreshold * B) || bonusInPaye > 0;
+  return { basic: r2(B), overtime: r2(OT), bonus: r2(BN), gross, ssnit, paye, overtimeTax: r2(overtimeTax), bonusTax: r2(bonusTax), totalTax, net: r2(gross - ssnit - totalTax), concessionalOverflow: overflow };
+}
+// For a fixed basic B, fill the remaining net with concessional bonus then overtime
+// (then overflow), and return the structure delivering exactly the target net.
+function planAtBasic(B: number, targetNet: number, c: PlannerCfg): PlanResult | null {
+  const ssnit = c.ssnitRate * B;
+  const netFromBasic = B - ssnit - payeOnBands(B - ssnit, c.bands);
+  let remaining = targetNet - netFromBasic;
+  if (remaining < -0.01) return null;            // basic alone overshoots the net
+  if (remaining < 0) remaining = 0;
+  const junior = B <= c.juniorStaffOtThreshold;
+  // Only the CONCESSIONAL capacity is usable (overtime ≤ 50% of basic at 5%, bonus ≤ 15%
+  // of basic at 5%) — beyond that it isn't a legitimate GRA benefit, so the rest must sit
+  // in basic. If concessional can't cover the gap at this basic, this basic is infeasible
+  // (the search will pick a larger basic).
+  const bonusCap = c.bonusThreshold * B;
+  const otCap    = junior ? c.overtimeThreshold * B : 0;
+  let BN = 0, OT = 0, netLeft = remaining;
+  const takeConcessional = (cap: number, rate: number) => {
+    const netPerCedi = 1 - rate;
+    const take = Math.min(netLeft, cap * netPerCedi);
+    netLeft -= take;
+    return netPerCedi > 0 ? take / netPerCedi : 0;
+  };
+  BN = takeConcessional(bonusCap, c.bonusRate);
+  OT = takeConcessional(otCap, c.overtimeRateLow);
+  if (netLeft > 0.5) return null; // concessional caps can't cover it → need a larger basic
+  return plannerForward(B, OT, BN, c);
+}
+// Search basic to minimise total tax for the target net (the optimal plan).
+function solvePlan(targetNet: number, c: PlannerCfg, minBasic = 0): { best: PlanResult | null } {
+  let best: PlanResult | null = null;
+  // Basic can exceed the net for higher earners (taxes), so search well past the net.
+  const hi = Math.max(targetNet * 2, minBasic + 10);
+  const coarse = Math.max(1, Math.ceil(hi / 5000));
+  const consider = (B: number) => {
+    if (B < minBasic || B <= 0) return;
+    const p = planAtBasic(B, targetNet, c);
+    if (p && Math.abs(p.net - targetNet) < 0.5 && (!best || p.totalTax < best.totalTax)) best = p;
+  };
+  for (let B = Math.max(minBasic, coarse); B <= hi; B += coarse) consider(B);
+  // refine around the best
+  if (best) {
+    const c0 = (best as PlanResult).basic;
+    for (let B = c0 - coarse; B <= c0 + coarse; B += Math.max(0.5, coarse / 20)) consider(B);
+  }
+  return { best };
+}
+
 // ─── Statutory Config Tab ─────────────────────────────────────────────────────
 
 function StatutoryTab({ organisationId }: { organisationId: string }) {
@@ -2664,13 +2758,112 @@ function RunsTab({ organisationId }: { organisationId: string }) {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-type Tab = 'runs' | 'employees' | 'components' | 'statutory' | 'reports';
+function PayePlannerTab({ organisationId }: { organisationId: string }) {
+  const { data: configs = [] } = useQuery({ queryKey: ['statutory-configs', organisationId], queryFn: () => payrollSvc.listStatutoryConfigs(organisationId) });
+  const [netStr, setNetStr] = useState('');
+  const [taxStr, setTaxStr] = useState('');
+  const [minBasicStr, setMinBasicStr] = useState('');
+
+  // Build the planner config from the active statutory config (fall back to defaults).
+  const year = new Date().getFullYear();
+  const c0 = configs.find((x) => x.taxYear === year) ?? configs[0];
+  const dr = DEFAULT_TAX_RULES;
+  const tr = (c0?.taxRules ?? {}) as Record<string, number>;
+  const rawBands = (c0?.payeBands && c0.payeBands.length ? c0.payeBands : DEFAULT_PAYE_BANDS) as { min: string | number; max: string | number | null; rate: string | number }[];
+  const cfg: PlannerCfg = {
+    ssnitRate: c0 ? Number(c0.ssnitEmployeeRate) : 0.055,
+    bands: rawBands.map((b) => ({ min: Number(b.min) || 0, max: (b.max === '' || b.max == null) ? null : Number(b.max), rate: Number(b.rate) / 100 })),
+    bonusThreshold: Number(tr.bonusThreshold ?? dr.bonusThreshold),
+    bonusRate: Number(tr.bonusRate ?? dr.bonusRate),
+    overtimeThreshold: Number(tr.overtimeThreshold ?? dr.overtimeThreshold),
+    overtimeRateLow: Number(tr.overtimeRateLow ?? dr.overtimeRateLow),
+    overtimeRateHigh: Number(tr.overtimeRateHigh ?? dr.overtimeRateHigh),
+    juniorStaffOtThreshold: Number(tr.juniorStaffOtThreshold ?? dr.juniorStaffOtThreshold),
+  };
+
+  const targetNet = Number(netStr) || 0;
+  const targetTax = taxStr.trim() === '' ? null : Number(taxStr);
+  const minBasic = Number(minBasicStr) || 0;
+  const best = targetNet > 0 ? solvePlan(targetNet, cfg, minBasic).best : null;
+  const effRate = best && best.gross > 0 ? (best.totalTax / best.gross) * 100 : 0;
+
+  return (
+    <div className="space-y-4 max-w-3xl">
+      <p className="text-sm text-muted-foreground">
+        Reverse tax planner — enter the take-home (net) you want an employee to receive and, optionally, the minimum <strong>total</strong> tax (PAYE + overtime + bonus tax) you're aiming for. The planner grosses up and splits the package into <strong>basic, overtime and bonus</strong> to reach that net at the lowest legitimate tax, using Ghana's concessional 5% overtime/bonus rates. Indicative — for a resident employee, before allowances, reliefs or Tier-3.
+      </p>
+
+      <Card><CardContent className="p-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div>
+          <label className="text-xs font-medium">Target net pay (GHS / month) <span className="text-destructive">*</span></label>
+          <Input type="number" value={netStr} onChange={(e) => setNetStr(e.target.value)} placeholder="e.g. 5000" />
+        </div>
+        <div>
+          <label className="text-xs font-medium">Minimum total tax (GHS, optional)</label>
+          <Input type="number" value={taxStr} onChange={(e) => setTaxStr(e.target.value)} placeholder="your target" />
+        </div>
+        <div>
+          <label className="text-xs font-medium">Minimum basic (GHS, optional)</label>
+          <Input type="number" value={minBasicStr} onChange={(e) => setMinBasicStr(e.target.value)} placeholder="e.g. minimum wage" />
+        </div>
+      </CardContent></Card>
+
+      {targetNet > 0 && !best && (
+        <p className="text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2">No feasible structure found. If you set a minimum basic, it may be too high for this net — lower or clear it.</p>
+      )}
+
+      {best && (
+        <>
+          {targetTax != null && (
+            targetTax < best.totalTax - 0.5
+              ? <p className="text-sm rounded-md px-3 py-2 bg-red-50 border border-red-200 text-red-700"><strong>Too aggressive.</strong> The lowest total tax that still delivers GHS {fmt(targetNet)} net is <strong>GHS {fmt(best.totalTax)}</strong>. Your target of GHS {fmt(targetTax)} can't be reached without overstating overtime/bonus beyond what GRA's concessional rules allow.</p>
+              : <p className="text-sm rounded-md px-3 py-2 bg-green-50 border border-green-200 text-green-700"><strong>Achievable.</strong> This net can be delivered for as little as <strong>GHS {fmt(best.totalTax)}</strong> total tax — within your target of GHS {fmt(targetTax)}.</p>
+          )}
+
+          <Card><CardContent className="p-4 space-y-3">
+            <p className="text-sm font-semibold">Recommended package (lowest tax for GHS {fmt(targetNet)} net)</p>
+            <div className="grid grid-cols-3 gap-3">
+              {[{ l: 'Basic Salary', v: best.basic }, { l: 'Overtime', v: best.overtime }, { l: 'Bonus', v: best.bonus }].map(({ l, v }) => (
+                <div key={l} className="bg-muted/40 rounded p-3">
+                  <p className="text-xs text-muted-foreground">{l}</p>
+                  <p className="font-semibold">GHS {fmt(v)}</p>
+                </div>
+              ))}
+            </div>
+            <div className="border rounded-md divide-y text-sm">
+              {[
+                { l: 'Gross pay', v: best.gross, strong: true },
+                { l: 'SSNIT (employee 5.5%)', v: -best.ssnit },
+                { l: 'PAYE on basic', v: -best.paye },
+                { l: 'Overtime tax', v: -best.overtimeTax },
+                { l: 'Bonus tax', v: -best.bonusTax },
+                { l: 'Total tax', v: -best.totalTax, strong: true },
+                { l: 'Net pay', v: best.net, strong: true },
+              ].map(({ l, v, strong }) => (
+                <div key={l} className={`flex justify-between px-3 py-1.5 ${strong ? 'font-semibold' : ''}`}>
+                  <span>{l}</span><span className={v < 0 ? 'text-red-600' : ''}>GHS {fmt(Math.abs(v))}</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">Effective tax rate: <strong>{effRate.toFixed(1)}%</strong> of gross.{' '}
+              {best.basic > cfg.juniorStaffOtThreshold && <span className="text-amber-600">Basic exceeds the junior-staff overtime threshold (GHS {fmt(cfg.juniorStaffOtThreshold)}), so overtime is taxed as normal income — the plan relies on bonus for the concessional benefit. </span>}
+              {best.concessionalOverflow && <span className="text-amber-600">Overtime/bonus exceed the concessional caps (50% / 15% of basic), so the surplus is taxed at higher rates.</span>}
+            </p>
+          </CardContent></Card>
+        </>
+      )}
+    </div>
+  );
+}
+
+type Tab = 'runs' | 'employees' | 'components' | 'statutory' | 'reports' | 'planner';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'runs',       label: 'Payroll Runs' },
   { key: 'employees',  label: 'Employees' },
   { key: 'components', label: 'Salary Components' },
   { key: 'statutory',  label: 'Statutory Config' },
+  { key: 'planner',    label: 'PAYE Planner' },
   { key: 'reports',    label: 'Reports' },
 ];
 
@@ -2694,6 +2887,7 @@ export function PayrollPage() {
       {tab === 'employees'  && <EmployeesTab        organisationId={orgId} />}
       {tab === 'components' && <SalaryComponentsTab organisationId={orgId} />}
       {tab === 'statutory'  && <StatutoryTab        organisationId={orgId} />}
+      {tab === 'planner'    && <PayePlannerTab       organisationId={orgId} />}
       {tab === 'reports'    && <PayrollReportsPage />}
     </div>
   );

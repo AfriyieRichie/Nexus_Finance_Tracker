@@ -79,6 +79,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: 'Employees', to: '/payroll/employees', icon: <Users size={16} />, roles: FINANCE_AND_UP },
       { label: 'Salary Components', to: '/payroll/components', icon: <Receipt size={16} />, roles: FINANCE_AND_UP },
       { label: 'Statutory Config', to: '/payroll/statutory', icon: <Settings size={16} />, roles: FINANCE_AND_UP },
+      { label: 'PAYE Planner', to: '/payroll/planner', icon: <Scale size={16} />, roles: FINANCE_AND_UP },
       { label: 'Payroll Reports', to: '/payroll/reports', icon: <BarChart3 size={16} />, roles: FINANCE_AND_UP },
     ],
   },
