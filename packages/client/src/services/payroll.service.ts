@@ -104,6 +104,7 @@ export interface Employee {
   accommodationCode: string | null;
   vehicleCode: string | null;
   isNsp: boolean;
+  ssnitQualified: boolean;
   activatedReliefs: string[];
   department: { id: string; name: string } | null;
   costCentre: { id: string; name: string } | null;

@@ -668,7 +668,7 @@ export function EmployeeDialog({ organisationId, emp, employees, onClose, fullPa
     gender: '', dateOfBirth: '',
     isMarried: false, isDisabled: false,
     numberOfChildren: '0', agedDependants: '0', vehicleBenefit: '',
-    accommodationCode: '', vehicleCode: '', isNsp: false,
+    accommodationCode: '', vehicleCode: '', isNsp: false, ssnitQualified: true,
     bankName: '', bankAccountNumber: '', bankBranch: '',
   };
 
@@ -706,6 +706,7 @@ export function EmployeeDialog({ organisationId, emp, employees, onClose, fullPa
     accommodationCode:      emp.accommodationCode ?? '',
     vehicleCode:            emp.vehicleCode ?? '',
     isNsp:                  emp.isNsp ?? false,
+    ssnitQualified:         emp.ssnitQualified ?? true,
     bankName:               emp.bankName ?? '',
     bankAccountNumber:      emp.bankAccountNumber ?? '',
     bankBranch:             emp.bankBranch ?? '',
@@ -821,6 +822,7 @@ export function EmployeeDialog({ organisationId, emp, employees, onClose, fullPa
         accommodationCode:      form.accommodationCode || null,
         vehicleCode:            form.vehicleCode || null,
         isNsp:                  form.isNsp,
+        ssnitQualified:         form.ssnitQualified,
       };
       return emp
         ? payrollSvc.updateEmployee(organisationId, emp.id, payload as unknown as Parameters<typeof payrollSvc.updateEmployee>[2])
@@ -1020,6 +1022,7 @@ export function EmployeeDialog({ organisationId, emp, employees, onClose, fullPa
                 <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.isMarried} onChange={(e) => set('isMarried', e.target.checked)} /> Married</label>
                 <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.isDisabled} onChange={(e) => set('isDisabled', e.target.checked)} /> Disabled</label>
                 <label className="flex items-center gap-2 text-sm" title="No PAYE and no SSNIT — all pay is non-taxable"><input type="checkbox" checked={form.isNsp} onChange={(e) => set('isNsp', e.target.checked)} /> National Service (NSP)</label>
+                <label className="flex items-center gap-2 text-sm" title="Uncheck for staff whose SSNIT is paid elsewhere (e.g. a locum). No SSNIT/Tier 1/2/3 is computed; PAYE still applies."><input type="checkbox" checked={form.ssnitQualified} onChange={(e) => set('ssnitQualified', e.target.checked)} /> SSNIT qualified</label>
                 <div><label className="text-sm font-medium">Children</label><Input type="number" min={0} value={form.numberOfChildren} onChange={(e) => set('numberOfChildren', e.target.value)} /></div>
                 <div><label className="text-sm font-medium">Aged dependants</label><Input type="number" min={0} value={form.agedDependants} onChange={(e) => set('agedDependants', e.target.value)} /></div>
                 <div />
@@ -1530,6 +1533,7 @@ function reliefSummary(e: Employee): string {
   if (e.agedDependants > 0) parts.push(`${e.agedDependants} aged dep.`);
   if (e.isDisabled) parts.push('Disabled');
   if (e.isNsp) parts.push('NSP');
+  if (!e.ssnitQualified) parts.push('No SSNIT');
   if (e.vehicleCode) parts.push(`Vehicle (${e.vehicleCode})`);
   if (e.accommodationCode) parts.push(`Accom (${e.accommodationCode})`);
   const active = (e.activatedReliefs ?? []).length;
@@ -1595,6 +1599,7 @@ const IMPORT_COLUMNS: ImportCol[] = [
   { header: 'accommodationCode', field: 'accommodationCode', type: 'string', example: '', note: 'AF/AO/FO/SA' },
   { header: 'vehicleCode', field: 'vehicleCode', type: 'string', example: '', note: 'FVD/VF/V/F' },
   { header: 'isNsp', field: 'isNsp', type: 'boolean', example: 'false' },
+  { header: 'ssnitQualified', field: 'ssnitQualified', type: 'boolean', example: 'true', note: 'false for locum/SSNIT-elsewhere' },
   { header: 'tier3EmployeeRate', field: 'tier3EmployeeRate', type: 'number', example: '', note: 'decimal e.g. 0.05' },
   { header: 'tier3EmployerRate', field: 'tier3EmployerRate', type: 'number', example: '', note: 'decimal e.g. 0.05' },
   // Inline standing pay elements (optional convenience).

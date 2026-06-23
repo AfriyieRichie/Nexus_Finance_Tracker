@@ -62,6 +62,7 @@ export const createEmployeeSchema = z.object({
   accommodationCode: z.enum(['AF', 'AO', 'FO', 'SA']).nullable().optional(),
   vehicleCode: z.enum(['FVD', 'VF', 'V', 'F']).nullable().optional(),
   isNsp: z.boolean().optional(),
+  ssnitQualified: z.boolean().optional(),
   activatedReliefs: z.array(z.enum(['MARRIAGE', 'CHILD_EDUCATION', 'OLD_AGE', 'AGED_DEPENDANT', 'DISABILITY'])).optional(),
 });
 

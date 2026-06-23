@@ -1941,6 +1941,9 @@ model Employee {
   vehicleCode            String?
   // National Service Personnel — receives a fixed, non-taxable NSP allowance
   isNsp                  Boolean        @default(false)
+  // SSNIT-qualified — when false (e.g. a locum whose SSNIT is paid by a primary
+  // employer) no SSNIT/Tier 1/2/3 is computed here; PAYE still applies normally.
+  ssnitQualified         Boolean        @default(true)
   createdAt              DateTime       @default(now())
   updatedAt              DateTime       @updatedAt
 

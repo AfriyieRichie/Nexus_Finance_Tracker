@@ -66,6 +66,7 @@ export interface CreateEmployeeInput {
   accommodationCode?: 'AF' | 'AO' | 'FO' | 'SA' | null;
   vehicleCode?: 'FVD' | 'VF' | 'V' | 'F' | null;
   isNsp?: boolean;
+  ssnitQualified?: boolean;
   activatedReliefs?: ('MARRIAGE' | 'CHILD_EDUCATION' | 'OLD_AGE' | 'AGED_DEPENDANT' | 'DISABILITY')[];
 }
 
@@ -383,6 +384,7 @@ export async function createEmployee(organisationId: string, input: CreateEmploy
       accommodationCode:      input.accommodationCode ?? null,
       vehicleCode:            input.vehicleCode ?? null,
       isNsp:                  input.isNsp ?? false,
+      ssnitQualified:         input.ssnitQualified ?? true,
       activatedReliefs:       input.activatedReliefs ?? [],
     },
     include: {
@@ -450,7 +452,7 @@ export async function bulkCreateEmployees(organisationId: string, rawRows: unkno
       isMarried: r.isMarried ?? false, isDisabled: r.isDisabled ?? false,
       numberOfChildren: r.numberOfChildren ?? 0, agedDependants: r.agedDependants ?? 0,
       vehicleBenefit: r.vehicleBenefit, accommodationCode: r.accommodationCode ?? null,
-      vehicleCode: r.vehicleCode ?? null, isNsp: r.isNsp ?? false,
+      vehicleCode: r.vehicleCode ?? null, isNsp: r.isNsp ?? false, ssnitQualified: r.ssnitQualified ?? true,
     });
   }
 
@@ -601,6 +603,7 @@ export async function updateEmployee(organisationId: string, id: string, input: 
       ...(input.accommodationCode     !== undefined && { accommodationCode:     input.accommodationCode }),
       ...(input.vehicleCode           !== undefined && { vehicleCode:           input.vehicleCode }),
       ...(input.isNsp                 !== undefined && { isNsp:                 input.isNsp }),
+      ...(input.ssnitQualified        !== undefined && { ssnitQualified:        input.ssnitQualified }),
       ...(input.activatedReliefs      !== undefined && { activatedReliefs:      input.activatedReliefs }),
     },
     include: {
@@ -933,7 +936,7 @@ export async function createPayrollRun(
       id: true, basicSalary: true, departmentId: true, costCentreId: true,
       salaryExpenseAccountId: true, tier3EmployeeRate: true, tier3EmployerRate: true,
       isResident: true, overtimeType: true, overtimeFixedAmount: true, overtimeMultiplier: true,
-      employmentType: true, accommodationCode: true, vehicleCode: true, isNsp: true,
+      employmentType: true, accommodationCode: true, vehicleCode: true, isNsp: true, ssnitQualified: true,
       isMarried: true, isDisabled: true, numberOfChildren: true, agedDependants: true, dateOfBirth: true,
       activatedReliefs: true,
       components: {
@@ -1094,20 +1097,23 @@ export async function createPayrollRun(
     // National Service Personnel (NSP): everything they are paid is fully
     // non-taxable, and no SSNIT/pension is deducted at all. Their gross = their net.
     const isNsp = emp.isNsp === true;
+    // No SSNIT/pension for NSP, or for an employee who isn't SSNIT-qualified (e.g. a
+    // locum whose SSNIT is paid by a primary employer). PAYE still applies for the latter.
+    const noSsnit = isNsp || emp.ssnitQualified === false;
 
     const grossPay = round4(basic + overtime + bonuses + allowances + otherEarnings);
 
-    // SSNIT & Tier 2 are on basic salary only (GRA: 5.5% / 13% / 5% of basic) — none for NSP
-    const ssnitEmployee = isNsp ? 0 : round4(basic * statutory.ssnitEmployeeRate);
-    const ssnitEmployer = isNsp ? 0 : round4(basic * (statutory.ssnitEmployerRate - statutory.tier2Rate));
-    const tier2Employer = isNsp ? 0 : round4(basic * statutory.tier2Rate);
+    // SSNIT & Tier 2 are on basic salary only (GRA: 5.5% / 13% / 5% of basic)
+    const ssnitEmployee = noSsnit ? 0 : round4(basic * statutory.ssnitEmployeeRate);
+    const ssnitEmployer = noSsnit ? 0 : round4(basic * (statutory.ssnitEmployerRate - statutory.tier2Rate));
+    const tier2Employer = noSsnit ? 0 : round4(basic * statutory.tier2Rate);
 
     // Tier 3 / Provident Fund — on basic salary; PAYE deductible is combined
     // employee + employer contribution capped at the voluntary pension limit (16.5%)
     const t3EmpRate     = emp.tier3EmployeeRate ? Number(emp.tier3EmployeeRate) : 0;
     const t3ErRate      = emp.tier3EmployerRate ? Number(emp.tier3EmployerRate) : 0;
-    const tier3Employee = isNsp ? 0 : round4(basic * t3EmpRate);
-    const tier3Employer = isNsp ? 0 : round4(basic * t3ErRate);
+    const tier3Employee = noSsnit ? 0 : round4(basic * t3EmpRate);
+    const tier3Employer = noSsnit ? 0 : round4(basic * t3ErRate);
     const tier3Deductible = round4(Math.min(tier3Employee + tier3Employer, basic * tr.tier3Cap));
 
     // Non-cash taxable benefits valued on TCE (total cash emoluments = basic + allowances)
