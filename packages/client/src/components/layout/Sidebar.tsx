@@ -183,7 +183,7 @@ export function Sidebar() {
 
   return (
     <aside
-      className="flex flex-col w-60 shrink-0 border-r h-screen sticky top-0 overflow-y-auto"
+      className="flex flex-col w-60 shrink-0 border-r h-screen sticky top-0 overflow-y-auto text-foreground"
       style={{
         // Match the landing page teal backdrop …
         background: 'radial-gradient(120% 120% at 50% 25%, #123f51 0%, #0e3243 100%)',
