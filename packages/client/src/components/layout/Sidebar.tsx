@@ -182,7 +182,25 @@ export function Sidebar() {
   });
 
   return (
-    <aside className="flex flex-col w-60 shrink-0 border-r bg-card h-screen sticky top-0 overflow-y-auto">
+    <aside
+      className="flex flex-col w-60 shrink-0 border-r h-screen sticky top-0 overflow-y-auto"
+      style={{
+        // Match the landing page teal backdrop …
+        background: 'radial-gradient(120% 120% at 50% 25%, #123f51 0%, #0e3243 100%)',
+        // … and re-scope the theme tokens so the whole sidebar recolours to
+        // light-on-teal (white text + gold accents) rather than dark-on-white.
+        '--card': '199 65% 16%',
+        '--card-foreground': '0 0% 98%',
+        '--foreground': '0 0% 98%',
+        '--muted-foreground': '199 22% 72%',
+        '--primary': '42 61% 56%',
+        '--primary-foreground': '199 65% 16%',
+        '--accent': '197 40% 26%',
+        '--accent-foreground': '0 0% 98%',
+        '--border': '199 26% 30%',
+        '--background': '199 65% 16%',
+      } as React.CSSProperties}
+    >
       {/* Logo — click to return to landing page */}
       <div className="flex items-center gap-2.5 h-14 px-4 border-b">
         <NavLink to="/" className="flex items-center gap-2.5 flex-1 min-w-0 group" title="Home">
